@@ -15,8 +15,11 @@ and Tk presentation (editor) into three distinct layers.
 │  AppCoordinator · ButtonCoordinator · UICoordinator     │
 │  ComponentRefreshScheduler · PendingTransition          │
 ├─────────────────────────────────────────────────────────┤
+│  Runtime Layer  (pure Python, no Tk)                     │
+│  EventQueue · RuntimeClock · RuntimeSystem · scene stack │
+├─────────────────────────────────────────────────────────┤
 │  Engine Core  (pure Python, no Tk)                      │
-│  Engine · Project · Scene · Entity · Component          │
+│  Engine · Project · Scene · Entity · Component · Camera2D│
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -35,7 +38,14 @@ and Tk presentation (editor) into three distinct layers.
 | Button / action enable/disable    | ButtonCoordinator              | `coordinators/button_coordinator.py`|
 | UI update batching                | UICoordinator                  | `coordinators/ui_coordinator.py`    |
 | Refresh interval tracking         | ComponentRefreshScheduler      | `coordinators/scheduler.py`         |
-| Play/stop scene isolation         | PendingTransition              | `coordinators/transition.py`        |
+| Play/stop scene isolation         | Engine                         | `core/engine.py`                    |
+| Delayed/latest-wins UI transition | PendingTransition              | `coordinators/transition.py`        |
+| Runtime event dispatch            | EventQueue                     | `runtime/event_queue.py`            |
+| Fixed-step runtime clock          | RuntimeClock                   | `runtime/clock.py`                  |
+| Runtime subsystem lifecycle       | RuntimeSystem                  | `runtime/system.py`                 |
+| Runtime scene stack               | Engine                         | `core/engine.py`                    |
+| Camera coordinate transforms      | Camera2D                       | `core/camera.py`                    |
+| Entity hierarchy, tags, queries   | Scene / Entity                 | `core/scene.py`, `core/entity.py`   |
 | Thread-safe Tk delivery           | TkDeliveryQueue                | `editor/delivery.py`                |
 | Delayed Tk callbacks              | TimerDelivery                  | `ui/timer_delivery.py`              |
 | Atomic filesystem writes          | persistence                    | `editor/persistence.py`             |
@@ -135,18 +145,41 @@ It tracks pending timer IDs and safely cancels them on shutdown.
 
 ---
 
+## Runtime Layer
+
+The runtime layer is headless and is driven by the caller through
+`Engine.tick()` or `Engine.loop_once()`. `EventQueue` provides FIFO signal and
+publish dispatch. `RuntimeClock` converts `Idle` events into fixed-step
+`Update` events, and `RuntimeSystem` is the lifecycle seam for pluggable
+subsystems. The runtime scene stack lives on `Engine`; it is separate from the
+editor scene and dispatches scene lifecycle events on push, pop, and replace.
+
+`StartScene`, `StopScene`, `ReplaceScene`, and `Quit` are actionable queued
+requests. `Engine` handles them through the event queue and applies the
+corresponding scene-stack operation. `SceneStarted`, `SceneStopped`,
+`ScenePaused`, and `SceneContinued` are lifecycle notifications.
+
 ## Play / Stop Runtime Isolation
 
 On **Play**:
-1. `Engine.play()` calls `PendingTransition.begin(edit_scene)`
-2. The edit scene is JSON-serialised and deserialised (deep copy)
-3. The runtime scene is set as the active scene
+1. `Engine.play()` JSON-serialises and deserialises the edit scene (deep copy)
+2. The copied scene is placed on the runtime scene stack
+3. The edit scene remains owned by the editor and is never placed on that stack
 
 On **Stop**:
-1. `Engine.stop()` discards the runtime scene
-2. The original edit scene is restored as active
+1. `Engine.stop()` discards the runtime scene stack
+2. The original edit scene remains active and is restored for editing
 
-This means any runtime mutations (physics, scripts) never touch the edit scene.
+This means any runtime mutations never touch the edit scene. `PendingTransition`
+does not own this isolation; it remains a UI timing primitive that cancels and
+supersedes delayed callbacks.
+
+## Core Scene Data
+
+`Entity` supports parent relationships and tags. `Scene` owns hierarchy
+operations and query methods for tags, components, and entity types. These are
+data-model facilities used by both the editor and headless runtime; they do not
+introduce renderer, input, assets, physics, animation, or audio systems.
 
 ---
 
@@ -196,7 +229,8 @@ expra-engine wheel
 │   ├── ui/                 ← Tk panels and window (Tk dep)
 │   ├── observability.py
 │   ├── _release.py
-│   └── _version.py
+│   ├── _version.py
+│   └── py.typed             ← required package data
 └── expra_engine-0.x.x.x.dist-info/
 ```
 

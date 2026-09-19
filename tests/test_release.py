@@ -16,7 +16,24 @@ def _make_package(root: Path, version: str) -> None:
         "from expra_engine._version import __version__\n"
     )
     (pkg / "_version.py").write_text(f'__version__ = "{version}"\n')
+    (pkg / "main.py").write_text("def main():\n    return 0\n")
     (pkg / "py.typed").write_text("")
+    for subpackage in ("core", "editor", "runtime"):
+        subdir = pkg / subpackage
+        subdir.mkdir()
+        (subdir / "__init__.py").write_text("")
+    for relative in (
+        "editor/app.py",
+        "editor/delivery.py",
+        "editor/instance_lock.py",
+        "editor/persistence.py",
+        "editor/preferences.py",
+        "runtime/clock.py",
+        "runtime/event_queue.py",
+        "runtime/events.py",
+        "runtime/system.py",
+    ):
+        (pkg / relative).write_text("")
 
 
 def _wheel_from_package(root: Path, version: str) -> Path:
@@ -32,6 +49,10 @@ def _wheel_from_package(root: Path, version: str) -> Path:
         archive.writestr(
             f"expra_engine-{version}.dist-info/entry_points.txt",
             "[console_scripts]\nexpra-editor = expra_engine.main:main\n",
+        )
+        archive.writestr(
+            f"expra_engine-{version}.dist-info/METADATA",
+            f"Metadata-Version: 2.1\nName: expra-engine\nVersion: {version}\n",
         )
     return wheel
 
@@ -106,6 +127,11 @@ class ManifestDiffTests(unittest.TestCase):
 
 
 class VersionFileTests(unittest.TestCase):
+    def test_project_metadata_uses_canonical_version_module(self) -> None:
+        pyproject = (Path(__file__).parents[1] / "pyproject.toml").read_text()
+        self.assertIn('dynamic = ["version"]', pyproject)
+        self.assertIn('version = { attr = "expra_engine._version.__version__" }', pyproject)
+
     def test_read_and_write_version_round_trip(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             package = Path(directory)
@@ -145,6 +171,15 @@ class WheelManifestTests(unittest.TestCase):
 
             diff = _release.diff_manifests(wheel_manifest, source_manifest)
             self.assertIn("expra_engine/__init__.py", diff.changed)
+
+    def test_package_data_is_a_build_input(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _make_package(root, "1.0.0.0")
+            (root / "src" / "expra_engine" / "runtime.dat").write_bytes(b"runtime")
+            wheel = _wheel_from_package(root, "1.0.0.0")
+            manifest = _release._read_manifest_from_wheel(wheel)
+            self.assertIn("expra_engine/runtime.dat", manifest)
 
     def test_prepare_build_bumps_once_then_stays_put_with_wheel(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -212,6 +247,36 @@ class WheelVerifyTests(unittest.TestCase):
                         archive.writestr(name, source.read(name))
             with self.assertRaises(ValueError):
                 _release.verify_wheel(rebuild)
+
+    def test_verify_rejects_version_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _make_package(root, "1.0.0.0")
+            wheel = _wheel_from_package(root, "1.0.0.0")
+            mismatched = root / "dist" / "expra_engine-1.0.0.1-py3-none-any.whl"
+            wheel.rename(mismatched)
+            with self.assertRaises(ValueError):
+                _release.verify_wheel(mismatched)
+
+    def test_verify_rejects_wrong_entry_point(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _make_package(root, "1.0.0.0")
+            wheel = _wheel_from_package(root, "1.0.0.0")
+            rewritten = root / "dist" / "wrong-entry.whl"
+            with zipfile.ZipFile(wheel) as source, zipfile.ZipFile(rewritten, "w") as target:
+                for name in source.namelist():
+                    if name.endswith(".dist-info/entry_points.txt"):
+                        target.writestr(
+                            name,
+                            "[console_scripts]\nwrong = expra_engine.main:main\n",
+                        )
+                    else:
+                        target.writestr(name, source.read(name))
+            wheel.unlink()
+            rewritten.rename(wheel)
+            with self.assertRaises(ValueError):
+                _release.verify_wheel(wheel)
 
 
 if __name__ == "__main__":

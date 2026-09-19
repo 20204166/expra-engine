@@ -88,6 +88,7 @@ class Engine:
 
         # Pluggable runtime systems
         self._systems: list[RuntimeSystem] = []
+        self._quit_requested = False
 
     # ------------------------------------------------------------------
     # Properties
@@ -148,6 +149,7 @@ class Engine:
         if self._state == EngineRunState.EDIT:
             self._runtime_scene = self._copy_scene(self._edit_scene)
             self._state = EngineRunState.PLAY
+            self._quit_requested = False
             self._last_update = time.monotonic()
             self._start_runtime()
             return True
@@ -172,6 +174,7 @@ class Engine:
             self._scene_stack.clear()
             self._state = EngineRunState.EDIT
             self._last_update = None
+            self._quit_requested = False
             return True
         return False
 
@@ -231,7 +234,45 @@ class Engine:
             self._eq.signal(Idle(dt))
             self._eq.drain()
 
+            if self._quit_requested:
+                self.stop()
+
         return dt
+
+    # ------------------------------------------------------------------
+    # Runtime request events
+    # ------------------------------------------------------------------
+
+    def on_quit(self, event: object, signal: object) -> None:
+        """Handle a queued ``Quit`` request after the current dispatch pass."""
+        if self._state in (EngineRunState.PLAY, EngineRunState.PAUSED):
+            self._quit_requested = True
+
+    def on_start_scene(self, event: object, signal: object) -> None:
+        """Handle a queued request by pushing its materialized scene."""
+        if self._state not in (EngineRunState.PLAY, EngineRunState.PAUSED):
+            return
+        from expra_engine.runtime.events import StartScene
+
+        if isinstance(event, StartScene):
+            self.push_scene(self._materialize_scene(event.new_scene, event.kwargs))
+
+    def on_stop_scene(self, event: object, signal: object) -> None:
+        """Handle a queued request by popping the active runtime scene."""
+        if self._state in (EngineRunState.PLAY, EngineRunState.PAUSED):
+            from expra_engine.runtime.events import StopScene
+
+            if isinstance(event, StopScene):
+                self.pop_scene()
+
+    def on_replace_scene(self, event: object, signal: object) -> None:
+        """Handle a queued request by replacing the active runtime scene."""
+        if self._state not in (EngineRunState.PLAY, EngineRunState.PAUSED):
+            return
+        from expra_engine.runtime.events import ReplaceScene
+
+        if isinstance(event, ReplaceScene):
+            self.replace_scene(self._materialize_scene(event.new_scene, event.kwargs))
 
     def loop_once(self, dt: float | None = None) -> float:
         """Alias for tick(). PPB-style naming for external loop integration."""
@@ -378,10 +419,18 @@ class Engine:
         Returns a lightweight container; not a Scene.
         """
         return _DispatchRoot(
+            engine=self,
             clock=self._clock,
             systems=list(self._systems),
             scene=self._scene_stack[-1] if self._scene_stack else None,
         )
+
+    @staticmethod
+    def _materialize_scene(candidate: object, kwargs: dict) -> Scene:
+        scene = candidate(**kwargs) if callable(candidate) else candidate
+        if not isinstance(scene, Scene):
+            raise TypeError("scene request must resolve to a Scene instance")
+        return scene
 
     @staticmethod
     def _copy_scene(scene: Scene | None) -> Scene | None:
@@ -406,10 +455,12 @@ class _DispatchRoot:
 
     def __init__(
         self,
+        engine: Engine,
         clock: RuntimeClock | None,
         systems: list[RuntimeSystem],
         scene: Scene | None,
     ) -> None:
+        self._engine = engine
         self._clock = clock
         self._systems = systems
         self._scene = scene
@@ -417,6 +468,7 @@ class _DispatchRoot:
     @property
     def children(self) -> list[object]:
         items: list[object] = []
+        items.append(self._engine)
         if self._clock is not None:
             items.append(self._clock)
         items.extend(self._systems)

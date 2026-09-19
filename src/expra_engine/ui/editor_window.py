@@ -72,8 +72,8 @@ class EditorWindow:
             logger=LOGGER,
         )
 
-        self._build_layout()
         self._register_actions()
+        self._build_layout()
         self._create_default_scene()
 
     # ------------------------------------------------------------------

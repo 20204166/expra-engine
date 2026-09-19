@@ -29,6 +29,31 @@ _WHEEL_NAME_RE = re.compile(r"^expra_engine-(\d+\.\d+\.\d+\.\d+)-py3-none-any\.w
 _VERSION_MODULE = Path("src") / "expra_engine" / "_version.py"
 _PACKAGE_ROOT = "expra_engine"
 _TOP_LEVEL_MODULES: tuple[str, ...] = ()
+_EXPECTED_ENTRY_POINT = "expra-editor = expra_engine.main:main"
+_REQUIRED_PACKAGE_MEMBERS = (
+    "expra_engine/__init__.py",
+    "expra_engine/_version.py",
+    "expra_engine/main.py",
+    "expra_engine/core/__init__.py",
+    "expra_engine/editor/__init__.py",
+    "expra_engine/editor/app.py",
+    "expra_engine/editor/delivery.py",
+    "expra_engine/editor/instance_lock.py",
+    "expra_engine/editor/persistence.py",
+    "expra_engine/editor/preferences.py",
+    "expra_engine/runtime/__init__.py",
+    "expra_engine/runtime/clock.py",
+    "expra_engine/runtime/event_queue.py",
+    "expra_engine/runtime/events.py",
+    "expra_engine/runtime/system.py",
+)
+_REQUIRED_PACKAGE_DATA = ("expra_engine/py.typed",)
+_SYSTEM_ANALYZER_MARKERS = (
+    "system_analyzer",
+    "system-analyzer",
+    "system analyzer",
+    "maintenance/",
+)
 
 
 @dataclass(frozen=True)
@@ -109,11 +134,12 @@ def _skip_source_path(path: Path) -> bool:
 
 
 def _collect_package_inputs(package_dir: Path) -> dict[str, str]:
-    """Hash every importable build input exactly as the wheel stores it.
+    """Hash every package build input exactly as the wheel stores it.
 
     Keys match the wheel member names so ``_read_manifest_from_wheel`` can
-    compare like-for-like. The ``_version.py`` value is version-normalized so
-    an automatic bump never counts as a content change.
+    compare like-for-like. This includes package data, not only Python source.
+    The ``_version.py`` value is version-normalized so an automatic bump never
+    counts as a content change.
     """
 
     manifest: dict[str, str] = {}
@@ -294,26 +320,45 @@ def sync_artifacts(package_dir: Path) -> Path:
 
 
 def verify_wheel(wheel_path: Path) -> None:
-    """Verify a built wheel: no forbidden content and expected members."""
+    """Verify package boundaries, metadata, entry points, and wheel integrity."""
 
     forbidden = (".env", ".venv", "tests/", "node_modules", "__pycache__", ".pyc")
-    required = (
-        "expra_engine/__init__.py",
-        "expra_engine/_version.py",
-    )
     with zipfile.ZipFile(wheel_path) as archive:
         names = archive.namelist()
-        bad = [
-            name for name in names if any(token in name.lower() for token in forbidden)
-        ]
-        missing = [name for name in required if name not in names]
-        entry_points = [name for name in names if name.endswith("entry_points.txt")]
-    if bad:
-        raise ValueError(f"forbidden wheel content: {bad}")
-    if missing:
-        raise ValueError(f"missing wheel members: {missing}")
-    if not entry_points:
-        raise ValueError("wheel has no entry_points.txt")
+        lower_names = {name.lower() for name in names}
+        bad = [name for name in names if any(token in name.lower() for token in forbidden)]
+        bad.extend(
+            name
+            for name in names
+            if any(marker in name.lower() for marker in _SYSTEM_ANALYZER_MARKERS)
+        )
+        missing = [name for name in (*_REQUIRED_PACKAGE_MEMBERS, *_REQUIRED_PACKAGE_DATA)
+                   if name not in names]
+        if bad:
+            raise ValueError(f"forbidden wheel content: {bad}")
+        if missing:
+            raise ValueError(f"missing wheel members: {missing}")
+        metadata_names = [name for name in names if name.endswith(".dist-info/METADATA")]
+        entry_point_names = [name for name in names if name.endswith(".dist-info/entry_points.txt")]
+        if len(metadata_names) != 1:
+            raise ValueError("wheel must contain exactly one dist-info/METADATA")
+        if len(entry_point_names) != 1:
+            raise ValueError("wheel must contain exactly one dist-info/entry_points.txt")
+        metadata = archive.read(metadata_names[0]).decode("utf-8")
+        entry_points = archive.read(entry_point_names[0]).decode("utf-8")
+        version_payload = archive.read("expra_engine/_version.py").decode("utf-8")
+    wheel_version = _wheel_version(wheel_path)
+    metadata_match = re.search(r"^Version:\s*(\S+)\s*$", metadata, re.MULTILINE)
+    source_match = _VERSION_RE.search(version_payload)
+    if metadata_match is None or metadata_match.group(1) != wheel_version:
+        raise ValueError("wheel filename, metadata, and package version do not match")
+    if source_match is None or source_match.group("value") != wheel_version:
+        raise ValueError("wheel package version does not match its filename")
+    if _EXPECTED_ENTRY_POINT not in entry_points.splitlines():
+        raise ValueError(f"missing expected CLI entry point: {_EXPECTED_ENTRY_POINT}")
+    dev_parts = {"tests", "test", "docs", "dev", "examples"}
+    if any(dev_parts.intersection(Path(name).parts) for name in lower_names):
+        raise ValueError("wheel contains accidental tests or development material")
     print(f"sha256: {_sha256_bytes(wheel_path.read_bytes())}")
     print(f"contents OK: {len(names)} members; no forbidden paths")
 

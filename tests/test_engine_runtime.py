@@ -16,13 +16,17 @@ Tests cover:
 import unittest
 from typing import Any
 
-from expra_engine.core.engine import Engine
+from expra_engine.core.engine import Engine, EngineRunState
 from expra_engine.core.scene import Scene
 from expra_engine.runtime.events import (
+    Quit,
+    ReplaceScene,
     SceneContinued,
     ScenePaused,
     SceneStarted,
     SceneStopped,
+    StartScene,
+    StopScene,
     Update,
 )
 
@@ -222,6 +226,42 @@ class TestEngineSceneStack(unittest.TestCase):
         engine.set_scene(Scene("Base"))
         with self.assertRaises(RuntimeError):
             engine.pop_scene()
+
+    def test_start_scene_request_pushes_materialized_scene(self) -> None:
+        engine = Engine()
+        engine.set_scene(Scene("Base"))
+        engine.play()
+        requested = Scene("Requested")
+        engine._eq.signal(StartScene(lambda **kwargs: requested, kwargs={"level": 2}))  # type: ignore[union-attr]
+        engine.tick(0.0)
+        self.assertIs(engine.active_scene, requested)
+
+    def test_stop_scene_request_pops_scene(self) -> None:
+        engine = Engine()
+        engine.set_scene(Scene("Base"))
+        engine.play()
+        base = engine.active_scene
+        engine.push_scene(Scene("Overlay"))
+        engine._eq.signal(StopScene())  # type: ignore[union-attr]
+        engine.tick(0.0)
+        self.assertIs(engine.active_scene, base)
+
+    def test_replace_scene_request_replaces_scene(self) -> None:
+        engine = Engine()
+        engine.set_scene(Scene("Base"))
+        engine.play()
+        requested = Scene("Replacement")
+        engine._eq.signal(ReplaceScene(requested))  # type: ignore[union-attr]
+        engine.tick(0.0)
+        self.assertIs(engine.active_scene, requested)
+
+    def test_quit_request_stops_runtime(self) -> None:
+        engine = Engine()
+        engine.set_scene(Scene("Base"))
+        engine.play()
+        engine._eq.signal(Quit())  # type: ignore[union-attr]
+        engine.tick(0.0)
+        self.assertEqual(engine.run_state, EngineRunState.EDIT)
 
 
 class TestEngineEditSceneIsolation(unittest.TestCase):

@@ -46,8 +46,9 @@ class Idle:
 class Quit:
     """Request the runtime to stop.
 
-    Signal this event to end Engine.run(). Respond via ``on_quit`` to
-    perform teardown work before the loop exits.
+    Signal this event to request teardown on the next ``Engine.tick()``.
+    Respond via ``on_quit`` to perform teardown work before the runtime leaves
+    PLAY state.
     """
 
 
