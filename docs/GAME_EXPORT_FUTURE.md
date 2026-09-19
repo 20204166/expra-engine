@@ -27,7 +27,8 @@ A future game export feature would take a user's project (scenes, assets, script
 Game export requires:
 - A defined project format (file layout, asset pipeline, scene references)
 - A stripped runtime mode (no Tk, no editor, headless or custom renderer)
-- A real renderer seam — `TkCanvasViewportRenderer` is a placeholder; a production renderer (Pygame, ModernGL, etc.) is needed before export makes sense
+- A real renderer seam — `ViewportPanel` is an editor-only Tk preview; a
+  production renderer is needed before export makes sense
 - Build tooling for PyInstaller/Nuitka integration
 
 These are Phase N (post-editor) concerns.  Export cannot be done correctly
@@ -35,8 +36,8 @@ until the editor project format is stabilised and a renderer decision is made.
 
 ## The renderer seam
 
-`TkCanvasViewportRenderer` (in `ui/viewport.py`) renders game objects onto a
-Tk canvas for editor preview only.  The `Engine` itself has no renderer
+`ViewportPanel` (in `ui/viewport.py`) renders game objects onto a Tk canvas for
+editor preview only. The `Engine` itself has no renderer
 dependency — it is renderer-agnostic by design.  A future `GameRenderer`
 protocol will allow swapping in a real renderer for both in-editor preview
 and exported games without changing the engine core.

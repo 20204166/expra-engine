@@ -10,10 +10,12 @@ from typing import Any
 from expra_engine.core.scene import Scene
 from expra_engine.ui.styles import (
     COLORS,
+    EDITOR_ENTITY_MARKERS,
     FONTS,
     SPACING,
     STYLE_NEUTRAL_BUTTON,
     STYLE_TREEVIEW,
+    editor_entity_kind,
 )
 
 
@@ -84,33 +86,51 @@ class HierarchyPanel(tk.Frame):
             delete_btn.configure(command=self._handle_delete)
 
     def render(self, scene: Scene | None) -> None:
-        """Refresh entities while preserving the selected entity when possible."""
+        """Refresh entities while retaining stable Treeview rows and state."""
         selected = self._selected_id
-        self._tree.delete(*self._tree.get_children(""))
-        self._entity_ids = []
+        incoming: list[tuple[str, str, str, tuple[str, ...]]] = []
         if scene is not None:
             for entity in scene.roots():
-                self._insert_entity(scene, entity.entity_id, "")
+                self._collect_entity(scene, entity.entity_id, "", incoming)
+
+        incoming_ids = {entity_id for entity_id, _parent, _text, _tags in incoming}
+        for entity_id in self._entity_ids:
+            if entity_id not in incoming_ids and self._tree.exists(entity_id):
+                self._tree.delete(entity_id)
+
+        for entity_id, parent, text, tags in incoming:
+            if self._tree.exists(entity_id):
+                self._tree.item(entity_id, text=text, tags=tags)
+                self._tree.move(entity_id, parent, "end")
+            else:
+                self._tree.insert(parent, "end", iid=entity_id, text=text, tags=tags)
+            self._entity_ids = [item_id for item_id in self._entity_ids if item_id != entity_id]
+        self._entity_ids.extend(entity_id for entity_id, _parent, _text, _tags in incoming)
         if selected is not None and self._tree.exists(selected):
             self.select(selected)
         else:
             self._selected_id = None
 
-    def _insert_entity(self, scene: Scene, entity_id: str, parent: str) -> None:
+    def _collect_entity(
+        self,
+        scene: Scene,
+        entity_id: str,
+        parent: str,
+        incoming: list[tuple[str, str, str, tuple[str, ...]]],
+    ) -> None:
         entity = scene.find_entity(entity_id)
         if entity is None:
             return
         state = "disabled" if not entity.enabled else ""
-        self._tree.insert(
-            parent,
-            "end",
-            iid=entity.entity_id,
-            text=entity.name,
-            tags=(state,) if state else (),
+        kind = editor_entity_kind(entity.name)
+        label = (
+            f"[{EDITOR_ENTITY_MARKERS[kind]}] {entity.name}"
+            if kind is not None
+            else entity.name
         )
-        self._entity_ids.append(entity.entity_id)
+        incoming.append((entity.entity_id, parent, label, (state,) if state else ()))
         for child in scene.children_of(entity.entity_id):
-            self._insert_entity(scene, child.entity_id, entity.entity_id)
+            self._collect_entity(scene, child.entity_id, entity.entity_id, incoming)
 
     def select(self, entity_id: str | None) -> None:
         self._selected_id = entity_id

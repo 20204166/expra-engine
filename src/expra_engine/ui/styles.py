@@ -46,6 +46,10 @@ COLORS: dict[str, str] = {
     "viewport_bg": "#11161C",
     "grid_minor": "#202A33",
     "grid_major": "#30404B",
+    "camera": "#A8B5FF",
+    "camera_active": "#D7DCFF",
+    "player": "#F2A65A",
+    "player_active": "#FFD09A",
 }
 
 SPACING: dict[str, int] = {
@@ -106,6 +110,27 @@ STYLE_CHECKBUTTON = "Editor.TCheckbutton"
 STYLE_SEPARATOR = "Editor.TSeparator"
 
 DEFAULT_APPEARANCE = "cyan"
+
+EDITOR_ENTITY_MARKERS: dict[str, str] = {
+    "camera": "CAM",
+    "camera_compact": "CAM",
+    "player": "PLY",
+    "player_compact": "PLY",
+}
+
+
+def editor_entity_kind(name: str) -> str | None:
+    """Return an editor-only visual role for well-known scene entities."""
+    normalized = name.strip().casefold()
+    if normalized in {"camera marker", "camera gizmo"}:
+        return "camera_compact"
+    if normalized == "camera" or normalized.startswith("camera "):
+        return "camera"
+    if normalized in {"player marker", "player gizmo"}:
+        return "player_compact"
+    if normalized == "player" or normalized.startswith("player "):
+        return "player"
+    return None
 
 ACCENT_THEMES: dict[str, dict[str, str]] = {
     "cyan": {

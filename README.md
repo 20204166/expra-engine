@@ -1,6 +1,7 @@
 # Expra Engine
 
-A game engine and editor built on the proven coordinator architecture from System Analyzer.
+A game engine and editor with coordinated background work, deterministic runtime
+state, and a renderer-neutral design language.
 
 ## Architecture
 

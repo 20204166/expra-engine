@@ -257,6 +257,7 @@ class EditorWindow:
         scene = Scene("New Scene")
         self._engine.set_scene(scene)
         self._selected_id = None
+        self._actions.set_enabled("delete_entity", False)
         self._console.log(f"[Editor] Created scene: {scene.name}")
         self._present_all()
 
@@ -276,10 +277,12 @@ class EditorWindow:
         self._console.log(f"[Editor] Scene saved: {path}")
 
     def _act_add_entity(self) -> None:
+        if self._engine.run_state != EngineRunState.EDIT:
+            return
         self._on_hierarchy_create()
 
     def _act_delete_entity(self) -> None:
-        if self._selected_id:
+        if self._engine.run_state == EngineRunState.EDIT and self._selected_id:
             self._on_hierarchy_delete(self._selected_id)
 
     # ------------------------------------------------------------------
@@ -294,6 +297,8 @@ class EditorWindow:
         self._present_selection(scene, entity)
 
     def _on_hierarchy_create(self) -> None:
+        if self._engine.run_state != EngineRunState.EDIT:
+            return
         scene = self._engine.edit_scene
         if scene is None:
             scene = Scene("New Scene")
@@ -306,6 +311,8 @@ class EditorWindow:
         self._on_hierarchy_select(entity.entity_id)
 
     def _on_hierarchy_delete(self, entity_id: str) -> None:
+        if self._engine.run_state != EngineRunState.EDIT:
+            return
         scene = self._engine.edit_scene
         if scene is None:
             return
@@ -317,6 +324,7 @@ class EditorWindow:
             self._console.log(f"[Editor] Deleted entity: {entity.name}")
             if self._selected_id == entity_id:
                 self._selected_id = None
+                self._actions.set_enabled("delete_entity", False)
         self._present_all()
 
     # ------------------------------------------------------------------
@@ -324,6 +332,8 @@ class EditorWindow:
     # ------------------------------------------------------------------
 
     def _on_transform_change(self, entity_id: str, field: str, value: float) -> None:
+        if self._engine.run_state != EngineRunState.EDIT:
+            return
         scene = self._engine.edit_scene
         if scene is None:
             return
@@ -337,6 +347,8 @@ class EditorWindow:
         self._request_render("viewport", (scene, self._selected_id), priority=10)
 
     def _on_entity_rename(self, entity_id: str, new_name: str) -> None:
+        if self._engine.run_state != EngineRunState.EDIT:
+            return
         scene = self._engine.edit_scene
         if scene is None:
             return
@@ -351,6 +363,8 @@ class EditorWindow:
         self._hierarchy.select(entity_id)
 
     def _on_entity_toggle(self, entity_id: str, enabled: bool) -> None:
+        if self._engine.run_state != EngineRunState.EDIT:
+            return
         scene = self._engine.edit_scene
         if scene is None:
             return
@@ -387,6 +401,8 @@ class EditorWindow:
         self._actions.set_enabled("play", state != EngineRunState.PLAY)
         self._actions.set_enabled("pause", state == EngineRunState.PLAY)
         self._actions.set_enabled("stop", state != EngineRunState.EDIT)
+        self._actions.set_enabled("add_entity", state == EngineRunState.EDIT)
+        self._actions.set_enabled("delete_entity", state == EngineRunState.EDIT and self._selected_id is not None)
 
     # ------------------------------------------------------------------
     # Default scene

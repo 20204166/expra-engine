@@ -18,7 +18,7 @@ from typing import Any
 from expra_engine.core.component import TransformComponent
 from expra_engine.core.scene import Scene
 from expra_engine.ui.layout import resize_aware
-from expra_engine.ui.styles import COLORS
+from expra_engine.ui.styles import COLORS, editor_entity_kind
 
 
 class ViewportPanel(tk.Frame):
@@ -108,11 +108,64 @@ class ViewportPanel(tk.Frame):
             outline = c["accent_ink"] if is_selected else c["ink_2"]
 
             tag = f"entity:{entity.entity_id}"
-            canvas.create_oval(
-                ex - r, ey - r, ex + r, ey + r,
-                fill=fill, outline=outline, width=2,
-                tags=tag,
-            )
+            kind = editor_entity_kind(entity.name)
+            if kind in {"camera", "camera_compact"}:
+                marker_fill = c["camera_active"] if is_selected else c["camera"]
+                canvas.create_rectangle(
+                    ex - r, ey - r // 2, ex + r, ey + r // 2,
+                    fill=marker_fill, outline=outline, width=2, tags=tag,
+                )
+                canvas.create_oval(
+                    ex - r // 2, ey - r // 2, ex + r // 2, ey + r // 2,
+                    fill=fill, outline=outline, width=1, tags=tag,
+                )
+                if kind == "camera":
+                    canvas.create_rectangle(
+                        ex - r // 2, ey - r // 2 - 3, ex - r // 5, ey - r // 2,
+                        fill=marker_fill, outline=outline, width=1, tags=tag,
+                    )
+                    canvas.create_oval(
+                        ex - r // 4, ey - r // 4, ex + r // 4, ey + r // 4,
+                        fill=marker_fill, outline=outline, width=1, tags=tag,
+                    )
+            elif kind == "player":
+                marker_fill = c["player_active"] if is_selected else c["player"]
+                canvas.create_oval(
+                    ex - 3, ey - r - 5, ex + 3, ey - r + 1,
+                    fill=marker_fill, outline=outline, width=1, tags=tag,
+                )
+                canvas.create_polygon(
+                    ex, ey - r + 1, ex + 6, ey + 3, ex, ey + r,
+                    ex - 6, ey + 3,
+                    fill=marker_fill, outline=outline, width=2, tags=tag,
+                )
+                canvas.create_line(
+                    ex - 6, ey - 1, ex - r, ey + 6,
+                    fill=outline, width=2, tags=tag,
+                )
+                canvas.create_line(
+                    ex + 6, ey - 1, ex + r, ey + 6,
+                    fill=outline, width=2, tags=tag,
+                )
+                canvas.create_line(
+                    ex - 3, ey + 8, ex - 5, ey + r + 4,
+                    fill=outline, width=2, tags=tag,
+                )
+                canvas.create_line(
+                    ex + 3, ey + 8, ex + 5, ey + r + 4,
+                    fill=outline, width=2, tags=tag,
+                )
+            elif kind == "player_compact":
+                marker_fill = c["player_active"] if is_selected else c["player"]
+                canvas.create_polygon(
+                    ex, ey - r, ex + r, ey, ex, ey + r, ex - r, ey,
+                    fill=marker_fill, outline=outline, width=2, tags=tag,
+                )
+            else:
+                canvas.create_rectangle(
+                    ex - r, ey - r, ex + r, ey + r,
+                    fill=fill, outline=outline, width=2, tags=tag,
+                )
             canvas.create_text(
                 ex, ey + r + 8,
                 text=entity.name,

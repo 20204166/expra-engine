@@ -2,9 +2,10 @@
 
 ## Overview
 
-Expra Engine is a game editor and runtime built on the proven System Analyzer coordinator
-architecture.  The design separates game state (core), coordination patterns (coordinators),
-and Tk presentation (editor) into three distinct layers.
+Expra Engine is a game editor and runtime organized around explicit state,
+coordination, and presentation boundaries. The design separates game state
+(`core`), coordination patterns (`coordinators`), runtime services (`runtime`),
+and editor presentation (`ui`) into distinct layers.
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -204,7 +205,7 @@ introduce renderer, input, assets, physics, animation, or audio systems.
 │ Hierarchy│       Viewport           │    Inspector       │
 │ (240px)  │    (fill, expand)        │    (280px)         │
 │          │                          │                    │
-│          │  TkCanvasViewportRenderer│                    │
+│          │  ViewportPanel           │                    │
 │          │  (editor preview only,   │                    │
 │          │   NOT final renderer)    │                    │
 ├──────────┴──────────────────────────┴────────────────────┤
@@ -215,19 +216,25 @@ introduce renderer, input, assets, physics, animation, or audio systems.
 The middle section uses `ttkbootstrap.PanedWindow` (horizontal) so all three
 panes are user-resizable.
 
+The editor viewport uses editor-only visual markers: cameras render as a body
+with viewfinder and lens details, players render as a head-and-body figure with
+limbs, and the hierarchy labels them `[CAM]` and `[PLY]`. These markers are
+presentation-only and are not part of the runtime or exported game model.
+
 ## Wheel Build Automation
 
 `scripts/build-wheel.sh` is the Expra-native release entry point. It calls
 `prepare-build` before building, so source changes automatically select the
-next independent Expra version rather than reusing System Analyzer's version.
+next independent Expra version rather than sharing a version sequence with any
+other project.
 After the wheel is built it refreshes `dist/SHA256SUMS` and runs the wheel
 boundary verifier. If the build fails, the source version file is restored.
 Expra-specific thresholds classify shell/core structure as `minor`, while
 editor panels, styles, design tokens, and runtime feature surfaces classify as
 `feature`; routine internals remain `patch`.
 The script builds but does not install or silently update a user's editor.
-`scripts/install-user.sh` is the explicit installation path modeled after the
-System Analyzer installer: it selects the base system interpreter rather than
+`scripts/install-user.sh` is the explicit installation path: it selects the
+base system interpreter rather than
 the repository `.venv`, verifies the wheel, installs it into the user site (or
 system site with `--system`), and confirms the installed version. There is no
 silent background updater.
