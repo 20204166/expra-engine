@@ -1,0 +1,57 @@
+"""Editor preferences — persisted user settings for the editor shell."""
+
+from __future__ import annotations
+
+import json
+import logging
+from dataclasses import asdict, dataclass
+from pathlib import Path
+
+from expra_engine.editor.persistence import atomic_write_text, read_text_or_none
+
+_LOG = logging.getLogger(__name__)
+_SCHEMA_VERSION = 1
+
+
+@dataclass(frozen=True, slots=True)
+class EditorPreferences:
+    theme: str = "darkly"
+    recent_projects: tuple[str, ...] = ()
+    autosave_interval_ms: int = 30_000
+    schema_version: int = _SCHEMA_VERSION
+
+
+_DEFAULTS = EditorPreferences()
+
+
+class PreferencesStore:
+    """Load and save ``EditorPreferences`` with atomic writes and safe defaults."""
+
+    def load(self, path: Path) -> EditorPreferences:
+        """Return preferences from *path*, falling back to defaults on any error."""
+        text = read_text_or_none(path)
+        if text is None:
+            return EditorPreferences()
+        try:
+            data = json.loads(text)
+            if not isinstance(data, dict):
+                return EditorPreferences()
+            if data.get("schema_version") != _SCHEMA_VERSION:
+                return EditorPreferences()
+            return EditorPreferences(
+                theme=str(data.get("theme", _DEFAULTS.theme)),
+                recent_projects=tuple(data.get("recent_projects", ())),
+                autosave_interval_ms=int(
+                    data.get("autosave_interval_ms", _DEFAULTS.autosave_interval_ms)
+                ),
+                schema_version=_SCHEMA_VERSION,
+            )
+        except (json.JSONDecodeError, TypeError, ValueError) as error:
+            _LOG.warning("Could not parse preferences from %s: %s", path, error)
+            return EditorPreferences()
+
+    def save(self, path: Path, prefs: EditorPreferences) -> None:
+        """Atomically write *prefs* to *path*."""
+        data = asdict(prefs)
+        data["recent_projects"] = list(data["recent_projects"])
+        atomic_write_text(path, json.dumps(data, indent=2))

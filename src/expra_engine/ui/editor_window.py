@@ -5,24 +5,21 @@ Wires together:
     ButtonCoordinator (actions)
     UICoordinator (presentation)
     Engine (game state)
-    Editor panels (hierarchy, viewport, inspector, assets, console)
-
-Flow:
-    user action -> ButtonCoordinator -> engine mutation
-        -> UICoordinator -> panel.render() -> Tk presentation
+    Editor panels (hierarchy, viewport, inspector, console)
 
 Threading invariant: ALL Tk mutations on the main thread.
-Background work delivers results through AppCoordinator -> deliver -> main thread.
+Background work delivers results through TkDeliveryQueue → AppCoordinator
+→ callback on Tk main thread.  Never call widget.after_idle() from a worker.
 """
 
 from __future__ import annotations
 
-import contextlib
+import json
 import logging
-import tkinter as tk
 from pathlib import Path
-from tkinter import filedialog, messagebox, ttk
-from typing import Any
+from tkinter import filedialog, messagebox
+
+import ttkbootstrap as ttk
 
 from expra_engine.coordinators.app_coordinator import AppCoordinator
 from expra_engine.coordinators.button_coordinator import ButtonCoordinator
@@ -30,10 +27,10 @@ from expra_engine.coordinators.ui_coordinator import UICoordinator
 from expra_engine.core.component import TransformComponent
 from expra_engine.core.engine import Engine, EngineRunState
 from expra_engine.core.scene import Scene
+from expra_engine.editor.delivery import TkDeliveryQueue
 from expra_engine.ui.console import ConsolePanel
 from expra_engine.ui.hierarchy import HierarchyPanel
 from expra_engine.ui.inspector import InspectorPanel
-from expra_engine.ui.styles import COLORS, configure_app_styles
 from expra_engine.ui.timer_delivery import TimerDelivery
 from expra_engine.ui.toolbar import build_toolbar
 from expra_engine.ui.viewport import ViewportPanel
@@ -49,27 +46,22 @@ _BOTTOM_HEIGHT = 160
 class EditorWindow:
     """Root editor window."""
 
-    def __init__(self, engine: Engine) -> None:
+    def __init__(self, engine: Engine, *, theme: str = "darkly") -> None:
         self._engine = engine
         self._is_closing = False
         self._pending_timer_ids: set[str] = set()
 
-        # Root window
-        self._root = tk.Tk()
+        # Root window — ttkbootstrap Window replaces bare tk.Tk
+        self._root = ttk.Window(themename=theme)
         self._root.title("Expra Editor")
         self._root.geometry(f"{_WINDOW_WIDTH}x{_WINDOW_HEIGHT}")
         self._root.protocol("WM_DELETE_WINDOW", self._on_close)
 
-        style = ttk.Style()
-        configure_app_styles(style)
-
-        # Delivery: schedule callbacks on Tk main thread
-        def deliver(callback: Any) -> None:
-            with contextlib.suppress(RuntimeError, tk.TclError):
-                self._root.after_idle(callback)
+        # Thread-safe delivery queue — worker threads enqueue, Tk drains
+        self._delivery_queue = TkDeliveryQueue(self._root)
 
         # Coordinators
-        self._coordinator = AppCoordinator(deliver=deliver)
+        self._coordinator = AppCoordinator(deliver=self._delivery_queue)
         self._actions = ButtonCoordinator()
         self._ui = UICoordinator()
 
@@ -80,7 +72,6 @@ class EditorWindow:
             logger=LOGGER,
         )
 
-        # Build layout
         self._build_layout()
         self._register_actions()
         self._create_default_scene()
@@ -90,54 +81,53 @@ class EditorWindow:
     # ------------------------------------------------------------------
 
     def _build_layout(self) -> None:
-        c = COLORS
-        main = tk.Frame(self._root, bg=c["background"])
+        main = ttk.Frame(self._root)
         main.pack(fill="both", expand=True)
 
         # Toolbar at top
-        self._toolbar = build_toolbar(main, actions=self._actions, colors=c)
+        self._toolbar = build_toolbar(main, actions=self._actions)
 
-        # Content area: hierarchy | viewport | inspector
-        content = tk.Frame(main, bg=c["background"])
-        content.pack(fill="both", expand=True)
+        # Middle: resizable three-pane split
+        content_paned = ttk.Panedwindow(main, orient="horizontal")
+        content_paned.pack(fill="both", expand=True, pady=(2, 0))
 
-        # Hierarchy (left)
+        # Left pane: hierarchy
+        hier_frame = ttk.Frame(content_paned, width=_HIERARCHY_WIDTH)
         self._hierarchy = HierarchyPanel(
-            content,
-            colors=c,
+            hier_frame,
             on_select=self._on_hierarchy_select,
             on_create=self._on_hierarchy_create,
             on_delete=self._on_hierarchy_delete,
         )
-        self._hierarchy.pack(side="left", fill="y", padx=(0, 2))
-        self._hierarchy.configure(width=_HIERARCHY_WIDTH)
-        self._hierarchy.pack_propagate(False)
+        self._hierarchy.pack(fill="both", expand=True)
+        content_paned.add(hier_frame, weight=0)
 
-        # Inspector (right)
+        # Center pane: viewport
+        view_frame = ttk.Frame(content_paned)
+        self._viewport = ViewportPanel(
+            view_frame,
+            on_entity_click=self._on_viewport_entity_click,
+        )
+        self._viewport.pack(fill="both", expand=True)
+        content_paned.add(view_frame, weight=1)
+
+        # Right pane: inspector
+        insp_frame = ttk.Frame(content_paned, width=_INSPECTOR_WIDTH)
         self._inspector = InspectorPanel(
-            content,
-            colors=c,
+            insp_frame,
             on_transform_change=self._on_transform_change,
             on_rename=self._on_entity_rename,
             on_toggle_enabled=self._on_entity_toggle,
         )
-        self._inspector.pack(side="right", fill="y", padx=(2, 0))
-        self._inspector.configure(width=_INSPECTOR_WIDTH)
-        self._inspector.pack_propagate(False)
+        self._inspector.pack(fill="both", expand=True)
+        content_paned.add(insp_frame, weight=0)
 
-        # Viewport (center)
-        self._viewport = ViewportPanel(
-            content,
-            colors=c,
-            on_entity_click=self._on_viewport_entity_click,
-        )
-        self._viewport.pack(fill="both", expand=True)
-
-        # Bottom: console
-        self._console = ConsolePanel(self._root, colors=c)
-        self._console.pack(fill="x", side="bottom")
-        self._console.configure(height=_BOTTOM_HEIGHT)
-        self._console.pack_propagate(False)
+        # Bottom: console (fixed height)
+        bottom_frame = ttk.Frame(main, height=_BOTTOM_HEIGHT)
+        bottom_frame.pack(fill="x", side="bottom")
+        bottom_frame.pack_propagate(False)
+        self._console = ConsolePanel(bottom_frame)
+        self._console.pack(fill="both", expand=True)
 
         self._selected_id: str | None = None
 
@@ -154,29 +144,25 @@ class EditorWindow:
         a.register("save_scene", self._act_save_scene)
         a.register("add_entity", self._act_add_entity)
         a.register("delete_entity", self._act_delete_entity, enabled=False)
-
         self._update_play_pause_state()
 
     # ------------------------------------------------------------------
-    # Engine actions (called from ButtonCoordinator)
+    # Engine actions
     # ------------------------------------------------------------------
 
     def _act_play(self) -> None:
-        changed = self._engine.play()
-        if changed:
+        if self._engine.play():
             self._console.log("[Engine] Play", level="info")
         self._update_play_pause_state()
         self._refresh_viewport()
 
     def _act_pause(self) -> None:
-        changed = self._engine.pause()
-        if changed:
+        if self._engine.pause():
             self._console.log("[Engine] Paused", level="info")
         self._update_play_pause_state()
 
     def _act_stop(self) -> None:
-        changed = self._engine.stop()
-        if changed:
+        if self._engine.stop():
             self._console.log("[Engine] Stopped — scene restored", level="info")
         self._update_play_pause_state()
         self._refresh_all()
@@ -200,7 +186,6 @@ class EditorWindow:
         )
         if not path:
             return
-        import json
         Path(path).write_text(json.dumps(scene.to_dict(), indent=2), encoding="utf-8")
         self._console.log(f"[Editor] Scene saved: {path}")
 
@@ -304,8 +289,7 @@ class EditorWindow:
         self._viewport.render(self._engine.active_scene, self._selected_id)
 
     def _refresh_all(self) -> None:
-        scene = self._engine.active_scene
-        self._hierarchy.render(scene)
+        self._hierarchy.render(self._engine.active_scene)
         self._refresh_viewport()
 
     def _update_play_pause_state(self) -> None:
@@ -336,6 +320,7 @@ class EditorWindow:
     def _on_close(self) -> None:
         self._is_closing = True
         self._timer.cancel_all()
+        self._delivery_queue.close()
         self._coordinator.shutdown()
         self._ui.shutdown()
         self._root.destroy()

@@ -4,16 +4,19 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "expra-engine"
-version = "0.1.0"
+version = "0.1.0.0"
 description = "Expra game engine and editor — founded on the proven System Analyzer coordinator architecture"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "ttkbootstrap>=1.10",
+]
 
 [project.optional-dependencies]
 dev = [
     "ruff>=0.6",
     "pyright>=1.1",
     "mypy>=1.11",
+    "build>=1.0",
 ]
 
 [project.scripts]
@@ -39,6 +42,8 @@ pythonPlatform = "Linux"
 typeCheckingMode = "basic"
 include = ["src", "tests"]
 exclude = ["build"]
+venvPath = "."
+venv = ".venv"
 
 [tool.mypy]
 python_version = "3.12"
