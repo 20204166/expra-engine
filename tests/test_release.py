@@ -18,7 +18,7 @@ def _make_package(root: Path, version: str) -> None:
     (pkg / "_version.py").write_text(f'__version__ = "{version}"\n')
     (pkg / "main.py").write_text("def main():\n    return 0\n")
     (pkg / "py.typed").write_text("")
-    for subpackage in ("core", "editor", "runtime"):
+    for subpackage in ("core", "editor", "runtime", "design"):
         subdir = pkg / subpackage
         subdir.mkdir()
         (subdir / "__init__.py").write_text("")
@@ -32,6 +32,7 @@ def _make_package(root: Path, version: str) -> None:
         "runtime/event_queue.py",
         "runtime/events.py",
         "runtime/system.py",
+        "design/tokens.py",
     ):
         (pkg / relative).write_text("")
 
@@ -113,8 +114,14 @@ class ManifestDiffTests(unittest.TestCase):
         feature_add = _release.DiffSummary(("expra_engine/runtime/event_queue.py",), (), ())
         self.assertEqual(_release.classify_bump(feature_add), "feature")
 
-        feature_change = _release.DiffSummary((), (), ("expra_engine/coordinators/coordinator.py",))
+        feature_change = _release.DiffSummary((), (), ("expra_engine/coordinators/app_coordinator.py",))
         self.assertEqual(_release.classify_bump(feature_change), "feature")
+
+        design_change = _release.DiffSummary((), (), ("expra_engine/design/tokens.py",))
+        self.assertEqual(_release.classify_bump(design_change), "feature")
+
+        editor_panel_change = _release.DiffSummary((), (), ("expra_engine/ui/inspector.py",))
+        self.assertEqual(_release.classify_bump(editor_panel_change), "feature")
 
         patch_change = _release.DiffSummary((), (), ("expra_engine/core/utils.py",))
         self.assertEqual(_release.classify_bump(patch_change), "patch")

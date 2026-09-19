@@ -51,6 +51,26 @@ class TestUICoordinatorStaleRejection(unittest.TestCase):
         self.assertIn(2, applied)
         self.assertNotIn(1, applied)
 
+    def test_owner_switch_rejects_stale_inspector_result(self) -> None:
+        applied: list[str] = []
+        coord = UICoordinator()
+        coord.begin_batch()
+        coord.request(
+            RenderIntent(target="inspector", owner_id="entity-a"),
+            lambda _intent: applied.append("entity-a"),
+        )
+        coord.invalidate("inspector", owner_id="entity-b")
+        coord.request(
+            RenderIntent(target="inspector", owner_id="entity-a"),
+            lambda _intent: applied.append("stale"),
+        )
+        coord.request(
+            RenderIntent(target="inspector", generation=1, owner_id="entity-b"),
+            lambda _intent: applied.append("entity-b"),
+        )
+        coord.end_batch()
+        self.assertEqual(applied, ["entity-b"])
+
 
 class TestUICoordinatorCoalescing(unittest.TestCase):
     def test_same_target_coalesces(self) -> None:

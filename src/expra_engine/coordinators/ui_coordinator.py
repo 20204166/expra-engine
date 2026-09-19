@@ -30,7 +30,7 @@ class RenderIntent:
 
     target: str
     generation: int = 0
-    node_id: Any | None = None
+    owner_id: Any | None = None
     components: frozenset[str] = frozenset()
     layout_changed: bool = False
     style_changed: bool = False
@@ -44,7 +44,7 @@ class RenderIntent:
         return RenderIntent(
             target=self.target,
             generation=max(self.generation, other.generation),
-            node_id=other.node_id if other.node_id is not None else self.node_id,
+            owner_id=other.owner_id if other.owner_id is not None else self.owner_id,
             components=self.components | other.components,
             layout_changed=self.layout_changed or other.layout_changed,
             style_changed=self.style_changed or other.style_changed,
@@ -139,14 +139,14 @@ class UICoordinator:
         self,
         target: str,
         generation: int | None = None,
-        node_id: Any | None = None,
+        owner_id: Any | None = None,
     ) -> None:
         current = self._generations.get(target, 0)
-        previous_node = self._target_nodes.get(target)
+        previous_owner = self._target_nodes.get(target)
         owner_changed = (
-            node_id is not None
-            and previous_node is not None
-            and previous_node != node_id
+            owner_id is not None
+            and previous_owner is not None
+            and previous_owner != owner_id
         )
         next_generation = (
             generation
@@ -156,8 +156,8 @@ class UICoordinator:
             else max(current, generation)
         )
         self._generations[target] = next_generation
-        if node_id is not None:
-            self._target_nodes[target] = node_id
+        if owner_id is not None:
+            self._target_nodes[target] = owner_id
             if owner_changed:
                 self._pending.pop(target, None)
         pending = self._pending.get(target)
@@ -165,9 +165,9 @@ class UICoordinator:
             del self._pending[target]
         if (
             pending is not None
-            and node_id is not None
-            and pending.intent.node_id is not None
-            and pending.intent.node_id != node_id
+            and owner_id is not None
+            and pending.intent.owner_id is not None
+            and pending.intent.owner_id != owner_id
         ):
             del self._pending[target]
 
@@ -219,20 +219,20 @@ class UICoordinator:
             self._generations[intent.target] = intent.generation
 
         owner = self._target_nodes.get(intent.target)
-        if owner is not None and intent.node_id is not None and owner != intent.node_id:
+        if owner is not None and intent.owner_id is not None and owner != intent.owner_id:
             self._record_event(intent.target, "stale")
             return False
-        if intent.node_id is not None and owner is None:
-            self._target_nodes[intent.target] = intent.node_id
+        if intent.owner_id is not None and owner is None:
+            self._target_nodes[intent.target] = intent.owner_id
 
         pending = self._pending.get(intent.target)
         if pending is None:
             self._pending[intent.target] = _PendingRender(intent=intent, apply=apply)
         else:
             if (
-                pending.intent.node_id is not None
-                and intent.node_id is not None
-                and pending.intent.node_id != intent.node_id
+                pending.intent.owner_id is not None
+                and intent.owner_id is not None
+                and pending.intent.owner_id != intent.owner_id
             ):
                 self._pending[intent.target] = _PendingRender(
                     intent=intent,
@@ -294,8 +294,8 @@ class UICoordinator:
         owner = self._target_nodes.get(target)
         if (
             owner is not None
-            and pending.intent.node_id is not None
-            and owner != pending.intent.node_id
+            and pending.intent.owner_id is not None
+            and owner != pending.intent.owner_id
         ):
             self._record_event(target, "stale")
             del self._pending[target]

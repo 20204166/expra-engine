@@ -1,11 +1,4 @@
-"""Scene Hierarchy panel.
-
-Displays entities in the active scene; notifies selection changes through
-a callback. Entity creation/deletion go through the ButtonCoordinator.
-
-UI COORDINATOR OWNS PRESENTATION — the panel never mutates the scene
-directly from its event handlers. It raises action events.
-"""
+"""Scene hierarchy panel with retained selection and parent nesting."""
 
 from __future__ import annotations
 
@@ -15,117 +8,133 @@ from tkinter import ttk
 from typing import Any
 
 from expra_engine.core.scene import Scene
-from expra_engine.ui.styles import COLORS, FONTS, SPACING, STYLE_NEUTRAL_BUTTON
+from expra_engine.ui.styles import (
+    COLORS,
+    FONTS,
+    SPACING,
+    STYLE_NEUTRAL_BUTTON,
+    STYLE_TREEVIEW,
+)
 
 
 class HierarchyPanel(tk.Frame):
-    """Scene Hierarchy panel showing entities in a list.
-
-    ``on_select(entity_id)`` is called when the user clicks an entity.
-    ``on_create()`` is called when the Add Entity button is pressed.
-    ``on_delete(entity_id)`` is called when Delete is pressed on the selection.
-    """
+    """Display a scene's entity hierarchy and expose editor actions."""
 
     def __init__(
         self,
         parent: Any,
         *,
         colors: dict[str, str] | None = None,
+        actions: Any | None = None,
         on_select: Callable[[str | None], None] | None = None,
         on_create: Callable[[], None] | None = None,
         on_delete: Callable[[str], None] | None = None,
     ) -> None:
         c = colors or COLORS
         super().__init__(parent, bg=c["panel_bg"])
-
+        self._colors = c
+        self._actions = actions
         self._on_select = on_select
         self._on_create = on_create
         self._on_delete = on_delete
         self._entity_ids: list[str] = []
         self._selected_id: str | None = None
-        self._colors = c
 
-        # Header
         header = tk.Frame(self, bg=c["panel_bg"])
-        header.pack(fill="x", padx=SPACING["card_pad_x"], pady=(SPACING["card_pad_y"], 0))
+        header.pack(fill="x", padx=SPACING["card_pad_x"], pady=(SPACING["card_pad_y"], 6))
         tk.Label(
             header,
-            text="Scene Hierarchy",
+            text="HIERARCHY",
             font=FONTS["panel_header"],
             bg=c["panel_bg"],
             fg=c["ink"],
         ).pack(side="left")
-        add_btn = ttk.Button(header, text="+", width=3, style=STYLE_NEUTRAL_BUTTON)
+        add_btn = ttk.Button(header, text="+  Add", style=STYLE_NEUTRAL_BUTTON)
         add_btn.pack(side="right")
-        add_btn.configure(command=self._handle_create)
+        if actions is not None:
+            actions.bind(add_btn, "add_entity")
+        else:
+            add_btn.configure(command=self._handle_create)
 
-        # Entity list
         list_frame = tk.Frame(self, bg=c["panel_bg"])
-        list_frame.pack(fill="both", expand=True, padx=SPACING["card_pad_x"], pady=4)
-
-        scrollbar = tk.Scrollbar(list_frame, orient="vertical")
-        self._listbox = tk.Listbox(
+        list_frame.pack(fill="both", expand=True, padx=SPACING["card_pad_x"], pady=(0, 8))
+        scrollbar = ttk.Scrollbar(list_frame, orient="vertical")
+        self._tree = ttk.Treeview(
             list_frame,
+            show="tree",
+            selectmode="browse",
+            style=STYLE_TREEVIEW,
             yscrollcommand=scrollbar.set,
-            selectmode="single",
-            bg=c["surface"],
-            fg=c["ink"],
-            selectbackground=c["selection"],
-            selectforeground=c["ink"],
-            relief="flat",
-            borderwidth=0,
-            font=FONTS["body"],
         )
-        scrollbar.configure(command=self._listbox.yview)
-        scrollbar.pack(side="right", fill="y")
-        self._listbox.pack(fill="both", expand=True)
-        self._listbox.bind("<<ListboxSelect>>", self._on_listbox_select)
+        scrollbar.configure(command=self._tree.yview)
+        scrollbar.pack(side="right", fill="y", padx=(SPACING["scrollbar_gutter"], 0))
+        self._tree.pack(side="left", fill="both", expand=True)
+        self._tree.tag_configure("disabled", foreground=c["ink_3"])
+        self._tree.bind("<<TreeviewSelect>>", self._on_tree_select)
+        self._tree.bind("<Return>", self._on_tree_activate)
 
-        # Footer buttons
         footer = tk.Frame(self, bg=c["panel_bg"])
         footer.pack(fill="x", padx=SPACING["card_pad_x"], pady=(0, SPACING["card_pad_y"]))
-        del_btn = ttk.Button(footer, text="Delete", style=STYLE_NEUTRAL_BUTTON)
-        del_btn.pack(side="right")
-        del_btn.configure(command=self._handle_delete)
+        delete_btn = ttk.Button(footer, text="Delete", style=STYLE_NEUTRAL_BUTTON)
+        delete_btn.pack(side="right")
+        self._delete_button = delete_btn
+        if actions is not None:
+            actions.bind(delete_btn, "delete_entity")
+        else:
+            delete_btn.configure(command=self._handle_delete)
 
     def render(self, scene: Scene | None) -> None:
-        """Refresh the entity list from ``scene``. Called on the main thread."""
-        self._listbox.delete(0, "end")
+        """Refresh entities while preserving the selected entity when possible."""
+        selected = self._selected_id
+        self._tree.delete(*self._tree.get_children(""))
         self._entity_ids = []
-        self._selected_id = None
-        if scene is None:
+        if scene is not None:
+            for entity in scene.roots():
+                self._insert_entity(scene, entity.entity_id, "")
+        if selected is not None and self._tree.exists(selected):
+            self.select(selected)
+        else:
+            self._selected_id = None
+
+    def _insert_entity(self, scene: Scene, entity_id: str, parent: str) -> None:
+        entity = scene.find_entity(entity_id)
+        if entity is None:
             return
-        for entity in scene.entities:
-            icon = "○ " if entity.enabled else "● "
-            self._listbox.insert("end", f"{icon}{entity.name}")
-            self._entity_ids.append(entity.entity_id)
+        state = "disabled" if not entity.enabled else ""
+        self._tree.insert(
+            parent,
+            "end",
+            iid=entity.entity_id,
+            text=entity.name,
+            tags=(state,) if state else (),
+        )
+        self._entity_ids.append(entity.entity_id)
+        for child in scene.children_of(entity.entity_id):
+            self._insert_entity(scene, child.entity_id, entity.entity_id)
 
     def select(self, entity_id: str | None) -> None:
-        """Programmatically select an entity (e.g. from Inspector edit)."""
         self._selected_id = entity_id
-        self._listbox.selection_clear(0, "end")
-        if entity_id is not None and entity_id in self._entity_ids:
-            idx = self._entity_ids.index(entity_id)
-            self._listbox.selection_set(idx)
-            self._listbox.see(idx)
+        self._tree.selection_remove(self._tree.selection())
+        if entity_id is not None and self._tree.exists(entity_id):
+            self._tree.selection_set(entity_id)
+            self._tree.focus(entity_id)
+            self._tree.see(entity_id)
 
-    def _on_listbox_select(self, _event: Any) -> None:
-        selection = self._listbox.curselection()
-        if not selection:
-            self._selected_id = None
-            if self._on_select:
-                self._on_select(None)
-            return
-        idx = selection[0]
-        if idx < len(self._entity_ids):
-            self._selected_id = self._entity_ids[idx]
-            if self._on_select:
-                self._on_select(self._selected_id)
+    def _on_tree_select(self, _event: Any = None) -> None:
+        selection = self._tree.selection()
+        self._selected_id = selection[0] if selection else None
+        if self._on_select is not None:
+            self._on_select(self._selected_id)
+
+    def _on_tree_activate(self, _event: Any = None) -> str:
+        if self._selected_id is not None:
+            self._tree.item(self._selected_id, open=True)
+        return "break"
 
     def _handle_create(self) -> None:
-        if self._on_create:
+        if self._on_create is not None:
             self._on_create()
 
     def _handle_delete(self) -> None:
-        if self._selected_id and self._on_delete:
+        if self._selected_id is not None and self._on_delete is not None:
             self._on_delete(self._selected_id)

@@ -7,9 +7,10 @@ the main thread only. Workers deliver through UICoordinator.
 from __future__ import annotations
 
 import tkinter as tk
+from tkinter import ttk
 from typing import Any
 
-from expra_engine.ui.styles import COLORS, FONTS
+from expra_engine.ui.styles import COLORS, FONTS, SPACING, STYLE_NEUTRAL_BUTTON
 
 
 class ConsolePanel(tk.Frame):
@@ -24,27 +25,26 @@ class ConsolePanel(tk.Frame):
         colors: dict[str, str] | None = None,
     ) -> None:
         c = colors or COLORS
-        super().__init__(parent, bg=c["background"])
+        super().__init__(parent, bg=c["panel_bg"])
+        self._colors = c
 
-        header = tk.Frame(self, bg=c["background"])
-        header.pack(fill="x", padx=8, pady=(4, 0))
-        tk.Label(header, text="Console", font=FONTS["panel_header"],
-                 bg=c["background"], fg=c["ink"]).pack(side="left")
-        clear_btn = tk.Button(
-            header, text="Clear", font=FONTS["body"],
-            bg=c["button_bg"], fg=c["ink"], relief="flat", borderwidth=0,
-            command=self._clear,
-        )
+        header = tk.Frame(self, bg=c["panel_bg"])
+        header.pack(fill="x", padx=SPACING["card_pad_x"], pady=(6, 4))
+        tk.Label(header, text="CONSOLE", font=FONTS["panel_header"],
+                 bg=c["panel_bg"], fg=c["ink"]).pack(side="left")
+        clear_btn = ttk.Button(header, text="Clear", style=STYLE_NEUTRAL_BUTTON,
+                               command=self._clear)
         clear_btn.pack(side="right")
 
-        text_frame = tk.Frame(self, bg=c["background"])
-        text_frame.pack(fill="both", expand=True, padx=4, pady=4)
-        scrollbar = tk.Scrollbar(text_frame, orient="vertical")
+        ttk.Separator(self, orient="horizontal").pack(fill="x", padx=SPACING["card_pad_x"])
+        text_frame = tk.Frame(self, bg=c["panel_bg"])
+        text_frame.pack(fill="both", expand=True, padx=SPACING["card_pad_x"], pady=6)
+        scrollbar = ttk.Scrollbar(text_frame, orient="vertical")
         self._text = tk.Text(
             text_frame,
             state="disabled",
             font=FONTS["mono"],
-            bg=c["surface"],
+            bg=c["viewport_bg"],
             fg=c["ink"],
             relief="flat",
             borderwidth=0,
@@ -59,8 +59,8 @@ class ConsolePanel(tk.Frame):
         """Append one message. Called on the main thread."""
         tag_colors = {
             "info": self._text.cget("fg"),
-            "warning": COLORS["warning"],
-            "error": COLORS["danger"],
+            "warning": self._colors["warning"],
+            "error": self._colors["danger"],
         }
         color = tag_colors.get(level, tag_colors["info"])
         self._text.configure(state="normal")

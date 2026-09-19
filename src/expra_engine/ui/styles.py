@@ -9,23 +9,16 @@ Design tokens (colours, fonts, spacing, control) preserved.
 
 from typing import Any
 
+from expra_engine.design.tokens import SEMANTIC_COLORS, SPACING_SCALE
+
 Font = tuple[Any, ...]
 
 COLOR_ROLES: dict[str, str] = {
-    "base": "#F4F7FB",
-    "surface": "#FFFFFF",
-    "line": "#E4E7EC",
-    "ink": "#172033",
-    "ink_2": "#667085",
-    "ink_3": "#98A2B3",
-    "accent": "#4F46E5",
-    "accent_ink": "#FFFFFF",
-    "success": "#16803C",
-    "warning": "#B45309",
-    "danger": "#B42318",
-    "disabled": "#D0D5DD",
-    "focus": "#4F46E5",
-    "selection": "#E0E7FF",
+    **SEMANTIC_COLORS,
+    "ink_2": SEMANTIC_COLORS["ink_muted"],
+    "ink_3": SEMANTIC_COLORS["ink_subtle"],
+    "accent_ink": "#10171C",
+    "focus": SEMANTIC_COLORS["accent"],
 }
 
 COLORS: dict[str, str] = {
@@ -35,37 +28,41 @@ COLORS: dict[str, str] = {
     "text": COLOR_ROLES["ink"],
     "secondary": COLOR_ROLES["ink_2"],
     "accent": COLOR_ROLES["accent"],
-    "accent_active": "#4338CA",
+    "accent_active": "#36AABA",
     "border": COLOR_ROLES["line"],
     "success": COLOR_ROLES["success"],
     "warning": COLOR_ROLES["warning"],
     "danger": COLOR_ROLES["danger"],
-    "danger_active": "#912018",
+    "danger_active": "#B84D59",
     "disabled": COLOR_ROLES["disabled"],
-    "primary_disabled": "#A5B4FC",
-    "primary_disabled_text": "#EEF2FF",
-    "bar_trough": "#E8ECF5",
-    "button_bg": "#E3E4E8",
-    "button_bg_active": "#D4D8E0",
+    "primary_disabled": "#365863",
+    "primary_disabled_text": "#9CA8B5",
+    "bar_trough": "#2A333D",
+    "button_bg": "#29313B",
+    "button_bg_active": "#33404C",
     "muted_text": COLOR_ROLES["ink_3"],
-    "panel_bg": "#EAEDF3",
-    "viewport_bg": "#1A1A2E",
+    "panel_bg": "#1C2229",
+    "elevated": "#29313B",
+    "viewport_bg": "#11161C",
+    "grid_minor": "#202A33",
+    "grid_major": "#30404B",
 }
 
 SPACING: dict[str, int] = {
-    "page_x": 16,
-    "page_y": 12,
-    "section_gap": 12,
-    "row_gap": 8,
+    "page_x": SPACING_SCALE["lg"],
+    "page_y": SPACING_SCALE["md"],
+    "section_gap": SPACING_SCALE["md"],
+    "row_gap": SPACING_SCALE["sm"],
     "control_gap": 10,
-    "card_pad_x": 12,
+    "card_pad_x": SPACING_SCALE["md"],
     "card_pad_y": 10,
     "dialog_pad_x": 20,
     "dialog_pad_y": 18,
     "button_gap": 6,
-    "panel_gap": 4,
-    "toolbar_pad_x": 8,
-    "toolbar_pad_y": 4,
+    "panel_gap": SPACING_SCALE["xs"],
+    "toolbar_pad_x": SPACING_SCALE["md"],
+    "toolbar_pad_y": 6,
+    "scrollbar_gutter": 6,
 }
 
 CONTROL: dict[str, int] = {
@@ -103,10 +100,20 @@ STYLE_STATUS_READY = "Ready.Status.TLabel"
 STYLE_STATUS_BUSY = "Busy.Status.TLabel"
 STYLE_PLAY_BUTTON = "Play.TButton"
 STYLE_STOP_BUTTON = "Stop.TButton"
+STYLE_ENTRY = "Editor.TEntry"
+STYLE_TREEVIEW = "Editor.Treeview"
+STYLE_CHECKBUTTON = "Editor.TCheckbutton"
+STYLE_SEPARATOR = "Editor.TSeparator"
 
-DEFAULT_APPEARANCE = "indigo"
+DEFAULT_APPEARANCE = "cyan"
 
 ACCENT_THEMES: dict[str, dict[str, str]] = {
+    "cyan": {
+        "accent": "#55C7D9",
+        "accent_active": "#36AABA",
+        "primary_disabled": "#365863",
+        "primary_disabled_text": "#9CA8B5",
+    },
     "indigo": {
         "accent": "#4F46E5",
         "accent_active": "#4338CA",
@@ -232,3 +239,50 @@ def configure_app_styles(
         focusthickness=2,
         focuscolor=c["danger"],
     )
+    style.map(
+        STYLE_STOP_BUTTON,
+        background=[("active", c["danger_active"]), ("disabled", c["disabled"])],
+        foreground=[("disabled", c["ink_3"])],
+    )
+    style.configure(
+        STYLE_ENTRY,
+        fieldbackground=c["surface"],
+        foreground=c["ink"],
+        bordercolor=c["line"],
+        lightcolor=c["line"],
+        darkcolor=c["line"],
+        insertcolor=c["accent"],
+        padding=(6, 4),
+    )
+    style.map(
+        STYLE_ENTRY,
+        fieldbackground=[("disabled", c["panel_bg"])],
+        foreground=[("disabled", c["ink_3"])],
+        bordercolor=[("focus", c["accent"])],
+    )
+    style.configure(
+        STYLE_TREEVIEW,
+        background=c["surface"],
+        fieldbackground=c["surface"],
+        foreground=c["ink"],
+        borderwidth=0,
+        rowheight=26,
+        font=f["body"],
+    )
+    style.map(
+        STYLE_TREEVIEW,
+        background=[("selected", c["selection"])],
+        foreground=[("selected", c["ink"])],
+    )
+    style.configure(
+        STYLE_CHECKBUTTON,
+        background=c["panel_bg"],
+        foreground=c["ink"],
+        font=f["body"],
+    )
+    style.map(
+        STYLE_CHECKBUTTON,
+        background=[("active", c["panel_bg"])],
+        foreground=[("disabled", c["ink_3"])],
+    )
+    style.configure(STYLE_SEPARATOR, background=c["line"])

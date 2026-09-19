@@ -36,6 +36,11 @@ A game engine and editor built on the proven coordinator architecture from Syste
 +------------------------------------------------------+
 ```
 
+The editor's semantic design vocabulary is available without GUI dependencies
+through `expra_engine.design`. The Tk-specific adapter remains under
+`expra_engine.ui`; shipped games must not depend on Tk. See
+`docs/GAME_UI_FUTURE.md` for the future renderer-backed game UI boundary.
+
 ## Running
 
 ```bash
@@ -50,10 +55,33 @@ python -m expra_engine
 ```bash
 pip install -e ".[dev]"
 python -m unittest discover -s tests -v
-ruff check .
+ruff check src tests
 pyright
-mypy --ignore-missing-imports src
+mypy src tests
 ```
+
+## Wheel Release
+
+Builds automatically compare package inputs with the newest local wheel, bump
+the Expra version when needed, refresh `dist/SHA256SUMS`, and verify the wheel:
+
+```bash
+./scripts/build-wheel.sh
+```
+
+The build does not install the wheel. Use `EXPRA_VERSION_BUMP=patch|feature|minor|none`
+to override automatic version selection.
+
+Install the latest built wheel outside the repository virtual environment:
+
+```bash
+./scripts/install-user.sh
+```
+
+Use `./scripts/install-user.sh --system` for a machine-wide install, or
+`EXPRA_SYSTEM_PYTHON=/path/to/python` to select a specific system interpreter.
+The install script verifies the wheel before installation and confirms the
+installed `expra-editor` version afterward.
 
 ## Threading invariant
 

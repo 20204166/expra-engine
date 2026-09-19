@@ -29,9 +29,10 @@ from expra_engine.runtime.events import (
     StopScene,
     Update,
 )
+from expra_engine.runtime.system import RuntimeSystem
 
 
-class _EventLog:
+class _EventLog(RuntimeSystem):
     """RuntimeSystem that logs all events it handles."""
 
     def __init__(self) -> None:

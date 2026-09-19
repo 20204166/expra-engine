@@ -5,9 +5,14 @@ records after/after_cancel calls so no display is needed.
 """
 
 import threading
+import tkinter as tk
 import unittest
 from collections.abc import Callable
+from typing import TYPE_CHECKING, cast
 from unittest.mock import Mock
+
+if TYPE_CHECKING:
+    from expra_engine.editor.delivery import TkDeliveryQueue
 
 
 class FakeWidget:
@@ -43,11 +48,11 @@ class FakeWidget:
 
 
 class TkDeliveryQueueTests(unittest.TestCase):
-    def _make_queue(self) -> tuple["object", FakeWidget]:
+    def _make_queue(self) -> tuple["TkDeliveryQueue", FakeWidget]:
         from expra_engine.editor.delivery import TkDeliveryQueue
 
         widget = FakeWidget()
-        q = TkDeliveryQueue(widget)
+        q = TkDeliveryQueue(cast(tk.Misc, widget))
         # pop the initial after(0, _drain) call
         widget.after_calls.clear()
         return q, widget
@@ -130,7 +135,10 @@ class TkDeliveryQueueTests(unittest.TestCase):
         def enqueue() -> None:
             try:
                 for i in range(50):
-                    q(lambda i=i: results.append(i))
+                    def callback(i: int = i) -> None:
+                        results.append(i)
+
+                    q(callback)
             except Exception as e:  # noqa: BLE001
                 errors.append(e)
 

@@ -85,12 +85,33 @@ def make_scrollable_frame(
         canvas.configure(scrollregion=canvas.bbox("all"))
 
     def _on_canvas_configure(event: Any) -> None:
-        canvas.itemconfig(inner_window, width=event.width)
+        if event.width > 1:
+            canvas.itemconfigure(inner_window, width=event.width)
+
+    def _on_mousewheel(event: Any) -> str:
+        delta = -1 if getattr(event, "num", None) == 5 else 1
+        if getattr(event, "delta", 0):
+            delta = -1 if event.delta > 0 else 1
+        canvas.yview_scroll(delta, "units")
+        return "break"
 
     inner.bind("<Configure>", _on_frame_configure)
     canvas.bind("<Configure>", _on_canvas_configure)
+    canvas.bind("<MouseWheel>", _on_mousewheel, add="+")
+    canvas.bind("<Button-4>", _on_mousewheel, add="+")
+    canvas.bind("<Button-5>", _on_mousewheel, add="+")
+    inner.bind("<MouseWheel>", _on_mousewheel, add="+")
+    inner.bind("<Button-4>", _on_mousewheel, add="+")
+    inner.bind("<Button-5>", _on_mousewheel, add="+")
     canvas.configure(yscrollcommand=scrollbar.set)
 
     scrollbar.pack(side="right", fill="y")
     canvas.pack(side="left", fill="both", expand=True)
+    def _fit_initial_width() -> None:
+        width = canvas.winfo_width()
+        if width > 1:
+            canvas.itemconfigure(inner_window, width=width)
+
+    with contextlib.suppress(AttributeError, tk.TclError):
+        canvas.after_idle(_fit_initial_width)
     return canvas, inner

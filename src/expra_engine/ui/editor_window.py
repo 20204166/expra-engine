@@ -14,16 +14,20 @@ Background work delivers results through TkDeliveryQueue → AppCoordinator
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
+import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox
+from tkinter import ttk as tkttk
+from typing import Any
 
 import ttkbootstrap as ttk
 
 from expra_engine.coordinators.app_coordinator import AppCoordinator
 from expra_engine.coordinators.button_coordinator import ButtonCoordinator
-from expra_engine.coordinators.ui_coordinator import UICoordinator
+from expra_engine.coordinators.ui_coordinator import RenderIntent, UICoordinator
 from expra_engine.core.component import TransformComponent
 from expra_engine.core.engine import Engine, EngineRunState
 from expra_engine.core.scene import Scene
@@ -31,6 +35,12 @@ from expra_engine.editor.delivery import TkDeliveryQueue
 from expra_engine.ui.console import ConsolePanel
 from expra_engine.ui.hierarchy import HierarchyPanel
 from expra_engine.ui.inspector import InspectorPanel
+from expra_engine.ui.styles import (
+    STYLE_APP_FRAME,
+    STYLE_PANEL_FRAME,
+    accent_theme_colors,
+    configure_app_styles,
+)
 from expra_engine.ui.timer_delivery import TimerDelivery
 from expra_engine.ui.toolbar import build_toolbar
 from expra_engine.ui.viewport import ViewportPanel
@@ -38,24 +48,38 @@ from expra_engine.ui.viewport import ViewportPanel
 LOGGER = logging.getLogger(__name__)
 _WINDOW_WIDTH = 1280
 _WINDOW_HEIGHT = 800
-_HIERARCHY_WIDTH = 240
-_INSPECTOR_WIDTH = 280
-_BOTTOM_HEIGHT = 160
+_WINDOW_MIN_WIDTH = 980
+_WINDOW_MIN_HEIGHT = 640
+_HIERARCHY_WIDTH = 230
+_HIERARCHY_MIN_WIDTH = 190
+_INSPECTOR_WIDTH = 300
+_INSPECTOR_MIN_WIDTH = 260
+_BOTTOM_HEIGHT = 150
+_BOTTOM_MIN_HEIGHT = 96
 
 
 class EditorWindow:
     """Root editor window."""
 
-    def __init__(self, engine: Engine, *, theme: str = "darkly") -> None:
+    def __init__(self, engine: Engine, *, theme: str = "bootstrap-dark") -> None:
         self._engine = engine
         self._is_closing = False
         self._pending_timer_ids: set[str] = set()
+        self._sash_after_id: str | None = None
 
         # Root window — ttkbootstrap Window replaces bare tk.Tk
-        self._root = ttk.Window(themename=theme)
+        try:
+            self._root = ttk.Window(themename=theme)
+        except tk.TclError:
+            self._root = ttk.Window(themename="darkly")
         self._root.title("Expra Editor")
         self._root.geometry(f"{_WINDOW_WIDTH}x{_WINDOW_HEIGHT}")
+        self._root.minsize(_WINDOW_MIN_WIDTH, _WINDOW_MIN_HEIGHT)
         self._root.protocol("WM_DELETE_WINDOW", self._on_close)
+        self._colors = accent_theme_colors("cyan")
+        self._style = tkttk.Style(self._root)
+        configure_app_styles(self._style, colors=self._colors)
+        self._root.configure(background=self._colors["background"])
 
         # Thread-safe delivery queue — worker threads enqueue, Tk drains
         self._delivery_queue = TkDeliveryQueue(self._root)
@@ -71,6 +95,9 @@ class EditorWindow:
             pending_ids=self._pending_timer_ids,
             logger=LOGGER,
         )
+        self._selected_id: str | None = None
+        self._render_generations: dict[str, int] = {"inspector": 0}
+        self._render_owners: dict[str, str | None] = {"inspector": None}
 
         self._register_actions()
         self._build_layout()
@@ -81,55 +108,113 @@ class EditorWindow:
     # ------------------------------------------------------------------
 
     def _build_layout(self) -> None:
-        main = ttk.Frame(self._root)
+        main = ttk.Frame(self._root, style=STYLE_APP_FRAME)
         main.pack(fill="both", expand=True)
 
         # Toolbar at top
         self._toolbar = build_toolbar(main, actions=self._actions)
 
-        # Middle: resizable three-pane split
-        content_paned = ttk.Panedwindow(main, orient="horizontal")
-        content_paned.pack(fill="both", expand=True, pady=(2, 0))
+        # Center and console are independently resizable; the viewport gets the
+        # flexible weight while side panes retain usable minimum widths.
+        self._main_paned = ttk.Panedwindow(main, orient="vertical")
+        self._main_paned.pack(fill="both", expand=True, pady=(2, 0))
+        center = ttk.Frame(self._main_paned, style=STYLE_APP_FRAME)
+        self._main_paned.add(center, weight=1)
+        self._console_host = ttk.Frame(self._main_paned, style=STYLE_PANEL_FRAME)
+        self._main_paned.add(self._console_host, weight=0)
+        self._main_paned.bind("<Configure>", self._clamp_vertical_sash, add="+")
+
+        self._content_paned = ttk.Panedwindow(center, orient="horizontal")
+        self._content_paned.pack(fill="both", expand=True)
 
         # Left pane: hierarchy
-        hier_frame = ttk.Frame(content_paned, width=_HIERARCHY_WIDTH)
+        hier_frame = ttk.Frame(self._content_paned, width=_HIERARCHY_WIDTH, style=STYLE_PANEL_FRAME)
         self._hierarchy = HierarchyPanel(
             hier_frame,
+            colors=self._colors,
+            actions=self._actions,
             on_select=self._on_hierarchy_select,
             on_create=self._on_hierarchy_create,
             on_delete=self._on_hierarchy_delete,
         )
         self._hierarchy.pack(fill="both", expand=True)
-        content_paned.add(hier_frame, weight=0)
+        self._hierarchy_host = hier_frame
+        self._content_paned.add(hier_frame, weight=0)
 
         # Center pane: viewport
-        view_frame = ttk.Frame(content_paned)
+        view_frame = ttk.Frame(self._content_paned, style=STYLE_APP_FRAME)
         self._viewport = ViewportPanel(
             view_frame,
             on_entity_click=self._on_viewport_entity_click,
         )
         self._viewport.pack(fill="both", expand=True)
-        content_paned.add(view_frame, weight=1)
+        self._viewport_host = view_frame
+        self._content_paned.add(view_frame, weight=1)
 
         # Right pane: inspector
-        insp_frame = ttk.Frame(content_paned, width=_INSPECTOR_WIDTH)
+        insp_frame = ttk.Frame(
+            self._content_paned,
+            width=_INSPECTOR_WIDTH,
+            style=STYLE_PANEL_FRAME,
+        )
         self._inspector = InspectorPanel(
             insp_frame,
+            colors=self._colors,
             on_transform_change=self._on_transform_change,
             on_rename=self._on_entity_rename,
             on_toggle_enabled=self._on_entity_toggle,
         )
         self._inspector.pack(fill="both", expand=True)
-        content_paned.add(insp_frame, weight=0)
+        self._inspector_host = insp_frame
+        self._content_paned.add(insp_frame, weight=0)
+        self._content_paned.bind("<Configure>", self._clamp_horizontal_sashes, add="+")
 
         # Bottom: console (fixed height)
-        bottom_frame = ttk.Frame(main, height=_BOTTOM_HEIGHT)
-        bottom_frame.pack(fill="x", side="bottom")
-        bottom_frame.pack_propagate(False)
-        self._console = ConsolePanel(bottom_frame)
+        self._console = ConsolePanel(self._console_host, colors=self._colors)
         self._console.pack(fill="both", expand=True)
+        self._sash_after_id = self._root.after_idle(self._set_initial_sashes)
 
-        self._selected_id: str | None = None
+    def _set_initial_sashes(self) -> None:
+        """Place side panes after Tk has measured the initial shell."""
+        self._sash_after_id = None
+        try:
+            width = self._content_paned.winfo_width()
+            height = self._main_paned.winfo_height()
+            if width <= 1 or height <= 1:
+                self._sash_after_id = self._root.after(25, self._set_initial_sashes)
+                return
+            self._content_paned.sashpos(0, _HIERARCHY_WIDTH)
+            self._content_paned.sashpos(1, max(_HIERARCHY_WIDTH + 260, width - _INSPECTOR_WIDTH))
+            self._main_paned.sashpos(0, max(300, height - _BOTTOM_HEIGHT))
+            self._clamp_horizontal_sashes()
+            self._clamp_vertical_sash()
+        except tk.TclError:
+            return
+
+    def _clamp_horizontal_sashes(self, _event: Any = None) -> None:
+        try:
+            width = self._content_paned.winfo_width()
+            if width <= 1:
+                return
+            max_first = width - _INSPECTOR_MIN_WIDTH - 260
+            if max_first < _HIERARCHY_MIN_WIDTH:
+                return
+            first = min(max(_HIERARCHY_MIN_WIDTH, self._content_paned.sashpos(0)), max_first)
+            second = min(max(first + 260, self._content_paned.sashpos(1)),
+                         width - _INSPECTOR_MIN_WIDTH)
+            self._content_paned.sashpos(0, first)
+            self._content_paned.sashpos(1, second)
+        except tk.TclError:
+            return
+
+    def _clamp_vertical_sash(self, _event: Any = None) -> None:
+        try:
+            height = self._main_paned.winfo_height()
+            if height > 1:
+                position = min(max(300, self._main_paned.sashpos(0)), height - _BOTTOM_MIN_HEIGHT)
+                self._main_paned.sashpos(0, position)
+        except tk.TclError:
+            return
 
     # ------------------------------------------------------------------
     # Action registration
@@ -154,25 +239,26 @@ class EditorWindow:
         if self._engine.play():
             self._console.log("[Engine] Play", level="info")
         self._update_play_pause_state()
-        self._refresh_viewport()
+        self._present_all()
 
     def _act_pause(self) -> None:
         if self._engine.pause():
             self._console.log("[Engine] Paused", level="info")
         self._update_play_pause_state()
+        self._present_all()
 
     def _act_stop(self) -> None:
         if self._engine.stop():
             self._console.log("[Engine] Stopped — scene restored", level="info")
         self._update_play_pause_state()
-        self._refresh_all()
+        self._present_all()
 
     def _act_new_scene(self) -> None:
         scene = Scene("New Scene")
         self._engine.set_scene(scene)
         self._selected_id = None
         self._console.log(f"[Editor] Created scene: {scene.name}")
-        self._refresh_all()
+        self._present_all()
 
     def _act_save_scene(self) -> None:
         scene = self._engine.edit_scene
@@ -205,8 +291,7 @@ class EditorWindow:
         self._actions.set_enabled("delete_entity", entity_id is not None)
         scene = self._engine.active_scene
         entity = scene.find_entity(entity_id) if scene and entity_id else None
-        self._inspector.render(entity)
-        self._refresh_viewport()
+        self._present_selection(scene, entity)
 
     def _on_hierarchy_create(self) -> None:
         scene = self._engine.edit_scene
@@ -216,7 +301,7 @@ class EditorWindow:
         entity = scene.create_entity("Entity")
         entity.add_component(TransformComponent())
         self._console.log(f"[Editor] Created entity: {entity.name}")
-        self._refresh_all()
+        self._present_all()
         self._hierarchy.select(entity.entity_id)
         self._on_hierarchy_select(entity.entity_id)
 
@@ -232,8 +317,7 @@ class EditorWindow:
             self._console.log(f"[Editor] Deleted entity: {entity.name}")
             if self._selected_id == entity_id:
                 self._selected_id = None
-                self._inspector.render(None)
-        self._refresh_all()
+        self._present_all()
 
     # ------------------------------------------------------------------
     # Inspector callbacks
@@ -250,7 +334,7 @@ class EditorWindow:
         if transform is None:
             return
         setattr(transform, field, value)
-        self._refresh_viewport()
+        self._request_render("viewport", (scene, self._selected_id), priority=10)
 
     def _on_entity_rename(self, entity_id: str, new_name: str) -> None:
         scene = self._engine.edit_scene
@@ -260,7 +344,10 @@ class EditorWindow:
         if entity is None:
             return
         entity.name = new_name
-        self._hierarchy.render(scene)
+        self._ui.begin_batch()
+        self._request_render("hierarchy", scene, priority=20)
+        self._request_render("viewport", (scene, self._selected_id), priority=10)
+        self._ui.end_batch()
         self._hierarchy.select(entity_id)
 
     def _on_entity_toggle(self, entity_id: str, enabled: bool) -> None:
@@ -271,7 +358,7 @@ class EditorWindow:
         if entity is None:
             return
         entity.enabled = enabled
-        self._refresh_all()
+        self._present_all()
 
     # ------------------------------------------------------------------
     # Viewport callbacks
@@ -286,11 +373,14 @@ class EditorWindow:
     # ------------------------------------------------------------------
 
     def _refresh_viewport(self) -> None:
-        self._viewport.render(self._engine.active_scene, self._selected_id)
+        self._request_render(
+            "viewport",
+            (self._engine.active_scene, self._selected_id),
+            priority=10,
+        )
 
     def _refresh_all(self) -> None:
-        self._hierarchy.render(self._engine.active_scene)
-        self._refresh_viewport()
+        self._present_all()
 
     def _update_play_pause_state(self) -> None:
         state = self._engine.run_state
@@ -311,7 +401,77 @@ class EditorWindow:
         self._engine.set_scene(scene)
         self._console.log("[Editor] Expra Engine started")
         self._console.log(f"[Editor] Loaded scene: {scene.name}")
-        self._refresh_all()
+        self._present_all()
+
+    # ------------------------------------------------------------------
+    # Coordinated presentation
+    # ------------------------------------------------------------------
+
+    def _request_render(
+        self,
+        target: str,
+        payload: object,
+        *,
+        owner_id: str | None = None,
+        priority: int = 0,
+    ) -> None:
+        if target == "inspector":
+            previous = self._render_owners["inspector"]
+            if owner_id is None and previous is not None:
+                self._render_generations["inspector"] += 1
+                self._ui.clear("inspector")
+                self._render_owners["inspector"] = None
+            elif owner_id != previous:
+                self._render_generations["inspector"] += 1
+                self._render_owners["inspector"] = owner_id
+                self._ui.invalidate(
+                    "inspector",
+                    generation=self._render_generations["inspector"],
+                    owner_id=owner_id,
+                )
+            generation = self._render_generations["inspector"]
+        else:
+            generation = 0
+        intent = RenderIntent(
+            target=target,
+            generation=generation,
+            owner_id=owner_id,
+            payload=payload,
+            payload_set=True,
+            priority=priority,
+        )
+        self._ui.request(intent, self._apply_render)
+
+    def _apply_render(self, intent: RenderIntent) -> None:
+        if intent.target == "hierarchy":
+            self._hierarchy.render(intent.payload)
+        elif intent.target == "inspector":
+            self._inspector.render(intent.payload)
+        elif intent.target == "viewport":
+            payload = intent.payload
+            if not isinstance(payload, tuple) or len(payload) != 2:
+                return
+            scene, selected_id = payload
+            self._viewport.render(scene, selected_id)
+        elif intent.target == "toolbar":
+            self._update_play_pause_state()
+
+    def _present_selection(self, scene: Scene | None, entity: Any) -> None:
+        self._ui.begin_batch()
+        self._request_render("hierarchy", scene, priority=20)
+        self._request_render("inspector", entity, owner_id=self._selected_id, priority=30)
+        self._request_render("viewport", (scene, self._selected_id), priority=10)
+        self._ui.end_batch()
+
+    def _present_all(self) -> None:
+        scene = self._engine.active_scene
+        entity = scene.find_entity(self._selected_id) if scene and self._selected_id else None
+        self._ui.begin_batch()
+        self._request_render("hierarchy", scene, priority=20)
+        self._request_render("inspector", entity, owner_id=self._selected_id, priority=30)
+        self._request_render("viewport", (scene, self._selected_id), priority=10)
+        self._request_render("toolbar", self._engine.run_state, priority=40)
+        self._ui.end_batch()
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -319,6 +479,10 @@ class EditorWindow:
 
     def _on_close(self) -> None:
         self._is_closing = True
+        if self._sash_after_id is not None:
+            with contextlib.suppress(tk.TclError):
+                self._root.after_cancel(self._sash_after_id)
+            self._sash_after_id = None
         self._timer.cancel_all()
         self._delivery_queue.close()
         self._coordinator.shutdown()

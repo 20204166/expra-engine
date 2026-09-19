@@ -13,3 +13,4 @@ venv/
 *.tmp
 .claude/
 .opencode/
+.ui/

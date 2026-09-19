@@ -46,6 +46,8 @@ _REQUIRED_PACKAGE_MEMBERS = (
     "expra_engine/runtime/event_queue.py",
     "expra_engine/runtime/events.py",
     "expra_engine/runtime/system.py",
+    "expra_engine/design/__init__.py",
+    "expra_engine/design/tokens.py",
 )
 _REQUIRED_PACKAGE_DATA = ("expra_engine/py.typed",)
 _SYSTEM_ANALYZER_MARKERS = (
@@ -216,11 +218,19 @@ _MINOR_SURFACES = frozenset(
 
 _FEATURE_SURFACES = frozenset(
     {
-        "expra_engine/coordinators/coordinator.py",
+        "expra_engine/coordinators/app_coordinator.py",
         "expra_engine/editor/app.py",
         "expra_engine/editor/preferences.py",
         "expra_engine/runtime/event_queue.py",
         "expra_engine/core/scene.py",
+        "expra_engine/design/__init__.py",
+        "expra_engine/design/tokens.py",
+        "expra_engine/ui/console.py",
+        "expra_engine/ui/hierarchy.py",
+        "expra_engine/ui/inspector.py",
+        "expra_engine/ui/layout.py",
+        "expra_engine/ui/styles.py",
+        "expra_engine/ui/viewport.py",
     }
 )
 

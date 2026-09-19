@@ -1,8 +1,4 @@
-"""Inspector panel — shows and edits components for the selected entity.
-
-Changes go through action callbacks; the panel never mutates entity state
-directly. BUTTON COORDINATOR / ACTION BOUNDARY OWNS MUTATION.
-"""
+"""Scrollable, sectioned inspector for the selected entity."""
 
 from __future__ import annotations
 
@@ -11,19 +7,20 @@ from collections.abc import Callable
 from tkinter import ttk
 from typing import Any
 
-from expra_engine.core.component import TransformComponent
+from expra_engine.core.component import Component, TransformComponent
 from expra_engine.core.entity import Entity
-from expra_engine.ui.styles import COLORS, FONTS, SPACING
+from expra_engine.ui.layout import make_scrollable_frame
+from expra_engine.ui.styles import (
+    COLORS,
+    FONTS,
+    SPACING,
+    STYLE_CHECKBUTTON,
+    STYLE_ENTRY,
+)
 
 
 class InspectorPanel(tk.Frame):
-    """Inspector panel for the selected entity.
-
-    ``on_transform_change(entity_id, field, value)`` is called when a
-    transform field is edited.
-    ``on_rename(entity_id, new_name)`` is called when the name is changed.
-    ``on_toggle_enabled(entity_id, enabled)`` is called for the enabled checkbox.
-    """
+    """Edit the selected entity through presentation callbacks."""
 
     def __init__(
         self,
@@ -36,134 +33,199 @@ class InspectorPanel(tk.Frame):
     ) -> None:
         c = colors or COLORS
         super().__init__(parent, bg=c["panel_bg"])
-
+        self._colors = c
         self._on_transform_change = on_transform_change
         self._on_rename = on_rename
         self._on_toggle_enabled = on_toggle_enabled
         self._current_entity_id: str | None = None
-        self._colors = c
+        self._name_value = ""
+        self._transform_vars: dict[str, tk.StringVar] = {}
+        self._transform_values: dict[str, float] = {}
+        self._invalid_value: tk.Label | None = None
 
-        # Header
         header = tk.Frame(self, bg=c["panel_bg"])
-        header.pack(fill="x", padx=SPACING["card_pad_x"], pady=(SPACING["card_pad_y"], 0))
+        header.pack(fill="x", padx=SPACING["card_pad_x"], pady=(SPACING["card_pad_y"], 6))
         tk.Label(
             header,
-            text="Inspector",
+            text="INSPECTOR",
             font=FONTS["panel_header"],
             bg=c["panel_bg"],
             fg=c["ink"],
         ).pack(side="left")
 
-        # Scrollable content
-        self._content = tk.Frame(self, bg=c["panel_bg"])
-        self._content.pack(fill="both", expand=True, padx=SPACING["card_pad_x"], pady=4)
+        body = tk.Frame(self, bg=c["panel_bg"])
+        body.pack(fill="both", expand=True, padx=SPACING["card_pad_x"], pady=(0, 4))
+        self._scroll_canvas, self._content = make_scrollable_frame(
+            body,
+            frame_cls=tk.Frame,
+            canvas_cls=tk.Canvas,
+            scrollbar_cls=ttk.Scrollbar,
+        )
+        self._scroll_canvas.configure(bg=c["panel_bg"], highlightthickness=0)
+        self._content.configure(bg=c["panel_bg"])
+        self._bind_mousewheel(self._scroll_canvas)
+        self._bind_mousewheel(self._content)
 
-        self._empty_label = tk.Label(
+    def _bind_mousewheel(self, widget: Any) -> None:
+        widget.bind("<MouseWheel>", self._on_mousewheel, add="+")
+        widget.bind("<Button-4>", self._on_mousewheel, add="+")
+        widget.bind("<Button-5>", self._on_mousewheel, add="+")
+
+    def _on_mousewheel(self, event: Any) -> str:
+        delta = -1 if getattr(event, "num", None) == 5 else 1
+        if getattr(event, "delta", 0):
+            delta = -1 if event.delta > 0 else 1
+        self._scroll_canvas.yview_scroll(delta, "units")
+        return "break"
+
+    def render(self, entity: Entity | None) -> None:
+        """Render one entity or a useful no-selection state."""
+        for child in tuple(self._content.winfo_children()):
+            child.destroy()
+        self._transform_vars = {}
+        self._transform_values = {}
+        self._invalid_value = None
+        self._current_entity_id = entity.entity_id if entity is not None else None
+        if entity is None:
+            self._empty_state()
+            return
+
+        self._entity_section(entity)
+        for component in entity.components:
+            if isinstance(component, TransformComponent):
+                self._transform_section(component)
+            else:
+                self._component_section(component)
+
+    def _empty_state(self) -> None:
+        c = self._colors
+        tk.Label(
             self._content,
             text="No entity selected",
+            font=FONTS["section"],
+            bg=c["panel_bg"],
+            fg=c["ink"],
+        ).pack(anchor="w", padx=4, pady=(18, 4))
+        tk.Label(
+            self._content,
+            text="Select an entity in the hierarchy to inspect its components.",
             font=FONTS["body"],
             bg=c["panel_bg"],
             fg=c["ink_2"],
-        )
-        self._empty_label.pack(pady=20)
+            justify="left",
+            wraplength=220,
+        ).pack(anchor="w", padx=4)
 
-        # Name + enabled row (hidden until entity selected)
-        self._name_frame = tk.Frame(self._content, bg=c["panel_bg"])
-        self._name_var = tk.StringVar()
-        self._enabled_var = tk.BooleanVar(value=True)
-
-        # Transform section
-        self._transform_frame = tk.Frame(self._content, bg=c["panel_bg"])
-        self._transform_vars: dict[str, tk.StringVar] = {}
-
-    def render(self, entity: Entity | None) -> None:
-        """Refresh inspector content for ``entity``."""
-        # Clear dynamic content
-        for child in tuple(self._content.winfo_children()):
-            child.destroy()
-        self._name_frame = tk.Frame(self._content, bg=self._colors["panel_bg"])
-        self._transform_frame = tk.Frame(self._content, bg=self._colors["panel_bg"])
-        self._transform_vars = {}
-
-        if entity is None:
-            self._current_entity_id = None
-            self._empty_label = tk.Label(
-                self._content,
-                text="No entity selected",
-                font=FONTS["body"],
-                bg=self._colors["panel_bg"],
-                fg=self._colors["ink_2"],
-            )
-            self._empty_label.pack(pady=20)
-            return
-
-        self._current_entity_id = entity.entity_id
+    def _section_header(self, title: str) -> tk.Frame:
         c = self._colors
+        frame = tk.Frame(self._content, bg=c["panel_bg"])
+        frame.pack(fill="x", pady=(12, 6))
+        ttk.Separator(frame, orient="horizontal").pack(side="bottom", fill="x")
+        tk.Label(
+            frame,
+            text=title.upper(),
+            font=FONTS["section"],
+            bg=c["panel_bg"],
+            fg=c["ink"],
+        ).pack(anchor="w", pady=(0, 5))
+        return frame
 
-        # Name row
-        name_row = tk.Frame(self._content, bg=c["panel_bg"])
-        name_row.pack(fill="x", pady=(4, 0))
-        tk.Label(name_row, text="Name", width=10, anchor="w", bg=c["panel_bg"],
-                 fg=c["ink_2"], font=FONTS["detail_row"]).pack(side="left")
-        self._name_var = tk.StringVar(value=entity.name)
-        name_entry = tk.Entry(name_row, textvariable=self._name_var, font=FONTS["body"],
-                              bg=c["surface"], fg=c["ink"], relief="flat", borderwidth=1)
-        name_entry.pack(side="left", fill="x", expand=True)
+    def _form(self) -> tk.Frame:
+        form = tk.Frame(self._content, bg=self._colors["panel_bg"])
+        form.pack(fill="x")
+        form.grid_columnconfigure(1, weight=1)
+        return form
+
+    def _label(self, parent: Any, text: str, row: int) -> None:
+        tk.Label(
+            parent,
+            text=text,
+            anchor="w",
+            font=FONTS["detail_row"],
+            bg=self._colors["panel_bg"],
+            fg=self._colors["ink_2"],
+        ).grid(row=row, column=0, sticky="w", padx=(0, 8), pady=4)
+
+    def _entity_section(self, entity: Entity) -> None:
+        self._section_header("Entity")
+        form = self._form()
+        self._label(form, "Name", 0)
+        name_var = tk.StringVar(value=entity.name)
+        name_entry = ttk.Entry(form, textvariable=name_var, style=STYLE_ENTRY)
+        name_entry.grid(row=0, column=1, sticky="ew", pady=3)
         name_entry.bind("<Return>", self._handle_rename)
         name_entry.bind("<FocusOut>", self._handle_rename)
+        self._name_var = name_var
+        self._name_value = entity.name
 
-        # Enabled row
-        enabled_row = tk.Frame(self._content, bg=c["panel_bg"])
-        enabled_row.pack(fill="x", pady=2)
-        tk.Label(enabled_row, text="Enabled", width=10, anchor="w", bg=c["panel_bg"],
-                 fg=c["ink_2"], font=FONTS["detail_row"]).pack(side="left")
-        self._enabled_var = tk.BooleanVar(value=entity.enabled)
-        cb = tk.Checkbutton(
-            enabled_row, variable=self._enabled_var, bg=c["panel_bg"],
+        self._label(form, "Enabled", 1)
+        enabled_var = tk.BooleanVar(value=entity.enabled)
+        ttk.Checkbutton(
+            form,
+            variable=enabled_var,
             command=self._handle_toggle_enabled,
-        )
-        cb.pack(side="left")
+            style=STYLE_CHECKBUTTON,
+        ).grid(row=1, column=1, sticky="w", pady=3)
+        self._enabled_var = enabled_var
 
-        # Transform component
-        transform = entity.get_component(TransformComponent)
-        if transform is not None:
-            sep = ttk.Separator(self._content, orient="horizontal")
-            sep.pack(fill="x", pady=6)
-            tk.Label(self._content, text="Transform", font=FONTS["section"],
-                     bg=c["panel_bg"], fg=c["ink"]).pack(anchor="w")
-            for field_name, label in [
-                ("x", "X"), ("y", "Y"),
-                ("rotation", "Rotation"),
-                ("scale_x", "Scale X"), ("scale_y", "Scale Y"),
-            ]:
-                row = tk.Frame(self._content, bg=c["panel_bg"])
-                row.pack(fill="x", pady=1)
-                tk.Label(row, text=label, width=10, anchor="w", bg=c["panel_bg"],
-                         fg=c["ink_2"], font=FONTS["detail_row"]).pack(side="left")
-                var = tk.StringVar(value=str(getattr(transform, field_name)))
-                entry = tk.Entry(row, textvariable=var, font=FONTS["body"], width=10,
-                                 bg=c["surface"], fg=c["ink"], relief="flat", borderwidth=1)
-                entry.pack(side="left")
-                self._transform_vars[field_name] = var
-                entry.bind("<Return>", lambda _e, fn=field_name: self._handle_transform(fn))  # type: ignore[misc]
-                entry.bind("<FocusOut>", lambda _e, fn=field_name: self._handle_transform(fn))  # type: ignore[misc]
+    def _transform_section(self, transform: TransformComponent) -> None:
+        self._section_header("Transform")
+        form = self._form()
+        fields = (("x", "Position X"), ("y", "Position Y"), ("rotation", "Rotation"),
+                  ("scale_x", "Scale X"), ("scale_y", "Scale Y"))
+        for row, (field_name, label) in enumerate(fields):
+            self._label(form, label, row)
+            variable = tk.StringVar(value=f"{getattr(transform, field_name):g}")
+            entry = ttk.Entry(form, textvariable=variable, style=STYLE_ENTRY)
+            entry.grid(row=row, column=1, sticky="ew", pady=3)
+            handler = self._transform_handler(field_name)
+            entry.bind("<Return>", handler)
+            entry.bind("<FocusOut>", handler)
+            self._transform_vars[field_name] = variable
+            self._transform_values[field_name] = float(getattr(transform, field_name))
+
+    def _transform_handler(self, field_name: str) -> Callable[[Any], None]:
+        def handle(_event: Any = None) -> None:
+            self._handle_transform(field_name)
+
+        return handle
+
+    def _component_section(self, component: Component) -> None:
+        self._section_header(type(component).__name__.replace("Component", ""))
+        tk.Label(
+            self._content,
+            text="Component data is not editable in this inspector yet.",
+            font=FONTS["body"],
+            bg=self._colors["panel_bg"],
+            fg=self._colors["ink_2"],
+            wraplength=220,
+            justify="left",
+        ).pack(anchor="w", padx=4)
 
     def _handle_rename(self, _event: Any = None) -> None:
-        if self._current_entity_id and self._on_rename:
-            self._on_rename(self._current_entity_id, self._name_var.get())
+        if self._current_entity_id is None or self._on_rename is None:
+            return
+        value = self._name_var.get().strip()
+        if not value or value == self._name_value:
+            return
+        self._name_value = value
+        self._on_rename(self._current_entity_id, value)
 
     def _handle_toggle_enabled(self) -> None:
-        if self._current_entity_id and self._on_toggle_enabled:
+        if self._current_entity_id is not None and self._on_toggle_enabled is not None:
             self._on_toggle_enabled(self._current_entity_id, self._enabled_var.get())
 
     def _handle_transform(self, field_name: str) -> None:
         if self._current_entity_id is None or self._on_transform_change is None:
             return
-        var = self._transform_vars.get(field_name)
-        if var is None:
+        variable = self._transform_vars.get(field_name)
+        if variable is None:
             return
         try:
-            value = float(var.get())
+            value = float(variable.get())
         except ValueError:
             return
+        if value == self._transform_values.get(field_name):
+            return
+        self._transform_values[field_name] = value
         self._on_transform_change(self._current_entity_id, field_name, value)

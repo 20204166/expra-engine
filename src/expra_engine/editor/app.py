@@ -13,7 +13,7 @@ _LOG = logging.getLogger(__name__)
 class EditorApplication:
     """Owns the Tk root and drives the editor main loop."""
 
-    def __init__(self, engine: Engine, *, theme: str = "darkly") -> None:
+    def __init__(self, engine: Engine, *, theme: str = "bootstrap-dark") -> None:
         self._engine = engine
         self._theme = theme
         self._window: EditorWindow | None = None

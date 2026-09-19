@@ -37,7 +37,7 @@ class ViewportPanel(tk.Frame):
         on_entity_click: Any = None,
     ) -> None:
         c = colors or COLORS
-        super().__init__(parent, bg=c["viewport_bg"])
+        super().__init__(parent, bg=c["viewport_bg"], highlightbackground=c["line"], highlightthickness=1)
 
         self._on_entity_click = on_entity_click
         self._colors = c
@@ -69,22 +69,28 @@ class ViewportPanel(tk.Frame):
         cx, cy = w // 2, h // 2
 
         # Grid lines
-        grid_color = "#2A2A4A"
+        grid_color = c["grid_minor"]
+        major_grid_color = c["grid_major"]
         step = 40
         for gx in range(0, w, step):
             canvas.create_line(gx, 0, gx, h, fill=grid_color, width=1)
         for gy in range(0, h, step):
             canvas.create_line(0, gy, w, gy, fill=grid_color, width=1)
 
+        for gx in range(0, w, step * 5):
+            canvas.create_line(gx, 0, gx, h, fill=major_grid_color, width=1)
+        for gy in range(0, h, step * 5):
+            canvas.create_line(0, gy, w, gy, fill=major_grid_color, width=1)
+
         # Axis lines
-        canvas.create_line(cx, 0, cx, h, fill="#3A3A6A", width=2)
-        canvas.create_line(0, cy, w, cy, fill="#3A3A6A", width=2)
+        canvas.create_line(cx, 0, cx, h, fill=c["accent"], width=1)
+        canvas.create_line(0, cy, w, cy, fill=c["accent"], width=1)
 
         if self._scene is None:
             canvas.create_text(
                 cx, cy,
                 text="No scene loaded",
-                fill="#555588",
+                fill=c["ink_3"],
                 font=("Helvetica", 14),
             )
             return

@@ -37,7 +37,7 @@ and Tk presentation (editor) into three distinct layers.
 | Background work scheduling        | AppCoordinator                 | `coordinators/app_coordinator.py`   |
 | Button / action enable/disable    | ButtonCoordinator              | `coordinators/button_coordinator.py`|
 | UI update batching                | UICoordinator                  | `coordinators/ui_coordinator.py`    |
-| Refresh interval tracking         | ComponentRefreshScheduler      | `coordinators/scheduler.py`         |
+| Refresh interval tracking         | ComponentRefreshScheduler      | `coordinators/refresh_scheduler.py`|
 | Play/stop scene isolation         | Engine                         | `core/engine.py`                    |
 | Delayed/latest-wins UI transition | PendingTransition              | `coordinators/transition.py`        |
 | Runtime event dispatch            | EventQueue                     | `runtime/event_queue.py`            |
@@ -125,7 +125,7 @@ It tracks pending timer IDs and safely cancels them on shutdown.
 
 - Maps action names to callables with enabled/disabled state
 - `register(name, callback, *, enabled=True)`
-- `fire(name)` — calls registered callable if enabled
+- `dispatch(action_id)` — calls the registered callable if enabled
 - `set_enabled(name, enabled)` — controls toolbar button state
 
 ### UICoordinator
@@ -158,6 +158,18 @@ editor scene and dispatches scene lifecycle events on push, pop, and replace.
 requests. `Engine` handles them through the event queue and applies the
 corresponding scene-stack operation. `SceneStarted`, `SceneStopped`,
 `ScenePaused`, and `SceneContinued` are lifecycle notifications.
+
+### Future game UI boundary
+
+The editor's Tk UI is not the runtime UI. Shared renderer-neutral design
+concepts live in `expra_engine.design`; the Tk adapter in `ui/styles.py` is
+editor-only. A future game UI package may provide `GameCanvas`, `UIElement`,
+`Panel`, `Label`, `Button`, `Image`, `ProgressBar`, `ScrollView`, and
+`AnchorLayout`/`Row`/`Column`/`Stack`, but it must render through an explicit
+backend rather than importing Tk. The boundary is intended to support HUDs,
+menus, inventories, dialogue, touch controls, safe areas, DPI scaling, and
+multiple aspect ratios without coupling shipped games to editor widgets. See
+`docs/GAME_UI_FUTURE.md`; this pass does not implement that runtime system.
 
 ## Play / Stop Runtime Isolation
 
@@ -202,6 +214,23 @@ introduce renderer, input, assets, physics, animation, or audio systems.
 
 The middle section uses `ttkbootstrap.PanedWindow` (horizontal) so all three
 panes are user-resizable.
+
+## Wheel Build Automation
+
+`scripts/build-wheel.sh` is the Expra-native release entry point. It calls
+`prepare-build` before building, so source changes automatically select the
+next independent Expra version rather than reusing System Analyzer's version.
+After the wheel is built it refreshes `dist/SHA256SUMS` and runs the wheel
+boundary verifier. If the build fails, the source version file is restored.
+Expra-specific thresholds classify shell/core structure as `minor`, while
+editor panels, styles, design tokens, and runtime feature surfaces classify as
+`feature`; routine internals remain `patch`.
+The script builds but does not install or silently update a user's editor.
+`scripts/install-user.sh` is the explicit installation path modeled after the
+System Analyzer installer: it selects the base system interpreter rather than
+the repository `.venv`, verifies the wheel, installs it into the user site (or
+system site with `--system`), and confirms the installed version. There is no
+silent background updater.
 
 ---
 
