@@ -66,6 +66,17 @@ class EditorPanelTests(unittest.TestCase):
 
 @unittest.skipUnless(DISPLAY_AVAILABLE, "no display for real Tk editor tests")
 class EditorWindowLayoutTests(unittest.TestCase):
+    @unittest.skipUnless(DISPLAY_AVAILABLE, "no display for real Tk editor tests")
+    def test_add_entity_does_not_recurse_through_tree_selection(self) -> None:
+        window = EditorWindow(Engine())
+        try:
+            before = len(window._engine.edit_scene.entities)  # type: ignore[union-attr]
+            window._act_add_entity()
+            window._root.update()
+            self.assertEqual(len(window._engine.edit_scene.entities), before + 1)  # type: ignore[union-attr]
+        finally:
+            window._on_close()
+
     def test_shell_registers_styles_and_resizable_panes(self) -> None:
         window = EditorWindow(Engine())
         try:

@@ -114,15 +114,24 @@ class HierarchyPanel(tk.Frame):
 
     def select(self, entity_id: str | None) -> None:
         self._selected_id = entity_id
-        self._tree.selection_remove(self._tree.selection())
-        if entity_id is not None and self._tree.exists(entity_id):
-            self._tree.selection_set(entity_id)
+        current = self._tree.selection()
+        if entity_id is None:
+            if current:
+                self._tree.selection_remove(current)
+            return
+        if self._tree.exists(entity_id):
+            if current != (entity_id,):
+                self._tree.selection_remove(current)
+                self._tree.selection_set(entity_id)
             self._tree.focus(entity_id)
             self._tree.see(entity_id)
 
     def _on_tree_select(self, _event: Any = None) -> None:
         selection = self._tree.selection()
-        self._selected_id = selection[0] if selection else None
+        selected_id = selection[0] if selection else None
+        if selected_id == self._selected_id:
+            return
+        self._selected_id = selected_id
         if self._on_select is not None:
             self._on_select(self._selected_id)
 
