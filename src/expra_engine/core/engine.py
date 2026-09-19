@@ -6,19 +6,37 @@ The Engine holds:
 - EngineRunState (EDIT / PLAY / PAUSED)
 - the active Project
 - the active Scene
+- runtime scene stack (for push/pop/replace during PLAY)
+- runtime event queue
+- runtime systems registry
 
 The editor presents and edits that state through the coordinator boundary.
 The engine never owns widgets or Tk resources.
+
+Runtime event system adapted from ppb/engine.py GameEngine
+(PursuedPyBear, Artistic License 2.0). Key preserved semantics:
+  - EventQueue owns signal/publish
+  - scene transitions flush the queue first to prevent stale delivery
+  - loop_once / tick API enables Tk-embedding and standalone runner
+  - RuntimeSystems start/stop with PLAY transitions
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
 import time
 from enum import Enum
+from typing import TYPE_CHECKING
 
 from expra_engine.core.project import Project
 from expra_engine.core.scene import Scene
+from expra_engine.core.utils import get_time
+
+if TYPE_CHECKING:
+    from expra_engine.runtime.clock import RuntimeClock
+    from expra_engine.runtime.event_queue import EventQueue
+    from expra_engine.runtime.system import RuntimeSystem
 
 
 class EngineRunState(Enum):
@@ -36,7 +54,20 @@ class Engine:
     copy is made on Play so Stop can restore the original edit scene.
 
     The engine does NOT block any thread. Time advancement is driven by
-    the caller via ``update(dt)``.
+    the caller via ``tick(dt)`` (or the legacy ``update(dt)`` shim).
+
+    Runtime event dispatch
+    ----------------------
+    While in PLAY state the engine owns an EventQueue rooted at the
+    active scene. Call ``tick()`` once per frame; it:
+      1. Signals an Idle event with wall-clock dt
+      2. Drains all pending events (Idle → RuntimeClock → Update → ...)
+
+    Scene stack
+    -----------
+    During PLAY the engine maintains a stack of runtime scenes. The
+    editor's edit scene is never on the stack; it is preserved across
+    all runtime transitions and restored on stop().
     """
 
     def __init__(self) -> None:
@@ -45,6 +76,22 @@ class Engine:
         self._edit_scene: Scene | None = None
         self._runtime_scene: Scene | None = None
         self._last_update: float | None = None
+
+        # Runtime scene stack (runtime-only; edit scene never appears here)
+        self._scene_stack: list[Scene] = []
+
+        # Runtime event queue (created on play(), destroyed on stop())
+        self._eq: EventQueue | None = None  # type: ignore[name-defined]
+
+        # Fixed-step clock
+        self._clock: RuntimeClock | None = None  # type: ignore[name-defined]
+
+        # Pluggable runtime systems
+        self._systems: list[RuntimeSystem] = []
+
+    # ------------------------------------------------------------------
+    # Properties
+    # ------------------------------------------------------------------
 
     @property
     def run_state(self) -> EngineRunState:
@@ -56,14 +103,21 @@ class Engine:
 
     @property
     def active_scene(self) -> Scene | None:
-        """The scene currently visible in the editor or running at runtime."""
+        """The scene currently visible in the editor or running at runtime.
+
+        During PLAY/PAUSED this is the topmost scene on the runtime stack.
+        """
         if self._state in (EngineRunState.PLAY, EngineRunState.PAUSED):
-            return self._runtime_scene
+            return self._scene_stack[-1] if self._scene_stack else self._runtime_scene
         return self._edit_scene
 
     @property
     def edit_scene(self) -> Scene | None:
         return self._edit_scene
+
+    # ------------------------------------------------------------------
+    # Configuration
+    # ------------------------------------------------------------------
 
     def set_project(self, project: Project | None) -> None:
         self._project = project
@@ -76,12 +130,26 @@ class Engine:
         if self._project is not None and scene is not None:
             self._project.set_active_scene(scene)
 
+    def add_system(self, system: RuntimeSystem) -> None:
+        """Register a RuntimeSystem that will receive events during PLAY."""
+        self._systems.append(system)
+
+    def remove_system(self, system: RuntimeSystem) -> None:
+        """Deregister a RuntimeSystem."""
+        with contextlib.suppress(ValueError):
+            self._systems.remove(system)
+
+    # ------------------------------------------------------------------
+    # State transitions
+    # ------------------------------------------------------------------
+
     def play(self) -> bool:
         """Enter PLAY state. Returns True if state changed."""
         if self._state == EngineRunState.EDIT:
             self._runtime_scene = self._copy_scene(self._edit_scene)
             self._state = EngineRunState.PLAY
             self._last_update = time.monotonic()
+            self._start_runtime()
             return True
         if self._state == EngineRunState.PAUSED:
             self._state = EngineRunState.PLAY
@@ -99,16 +167,24 @@ class Engine:
     def stop(self) -> bool:
         """Return to EDIT state, restoring the original edit scene. Returns True if changed."""
         if self._state in (EngineRunState.PLAY, EngineRunState.PAUSED):
+            self._stop_runtime()
             self._runtime_scene = None
+            self._scene_stack.clear()
             self._state = EngineRunState.EDIT
             self._last_update = None
             return True
         return False
 
+    # ------------------------------------------------------------------
+    # Update / tick
+    # ------------------------------------------------------------------
+
     def update(self, dt: float | None = None) -> float:
         """Advance the runtime by ``dt`` seconds (defaults to wall-clock elapsed).
 
-        Only meaningful in PLAY state; safe to call at any time.
+        Legacy shim: only updates timing, does not dispatch events.
+        Prefer ``tick()`` for full event-driven updates.
+
         Returns the elapsed dt used.
         """
         now = time.monotonic()
@@ -120,6 +196,192 @@ class Engine:
             dt = 0.0 if self._last_update is None else now - self._last_update
         self._last_update = now
         return dt
+
+    def tick(self, dt: float | None = None) -> float:
+        """Step the runtime by ``dt`` seconds; dispatch all pending events.
+
+        This is the primary game-loop driver. It:
+          1. Computes wall-clock dt if not provided.
+          2. Signals an Idle event.
+          3. Drains all pending events (Idle → clock → Update → ...).
+          4. Returns the dt used.
+
+        Safe to call in PAUSED or EDIT state (returns 0.0 immediately).
+
+        Designed for external-loop embedding::
+
+            # In Tk .after() callback:
+            dt = engine.tick()
+            root.after(16, game_loop)
+
+        Inspired by ppb/engine.py loop_once() (PursuedPyBear, Artistic
+        License 2.0).
+        """
+        if self._state != EngineRunState.PLAY:
+            return 0.0
+
+        now = get_time()
+        if dt is None:
+            dt = 0.0 if self._last_update is None else now - self._last_update
+        self._last_update = now
+
+        if self._eq is not None:
+            from expra_engine.runtime.events import Idle
+
+            self._eq.signal(Idle(dt))
+            self._eq.drain()
+
+        return dt
+
+    def loop_once(self, dt: float | None = None) -> float:
+        """Alias for tick(). PPB-style naming for external loop integration."""
+        return self.tick(dt)
+
+    # ------------------------------------------------------------------
+    # Runtime scene stack (during PLAY only)
+    # ------------------------------------------------------------------
+
+    def push_scene(self, scene: Scene) -> None:
+        """Push a new scene onto the runtime stack; pause the current scene.
+
+        Only valid during PLAY/PAUSED state. Flushes the event queue
+        before the transition (same invariant as PPB) to prevent stale
+        events reaching the new scene.
+
+        Signals ScenePaused (to current), then SceneStarted (to new).
+        """
+        if self._state not in (EngineRunState.PLAY, EngineRunState.PAUSED):
+            raise RuntimeError("push_scene requires PLAY or PAUSED state")
+
+        if self._eq:
+            from expra_engine.runtime.events import ScenePaused, SceneStarted
+
+            self._eq.flush()
+            self._eq.signal(ScenePaused())
+            self._eq.drain()
+
+        self._scene_stack.append(scene)
+        if self._eq:
+            self._eq.set_root(self._build_dispatch_root())
+            self._eq.signal(SceneStarted())
+            self._eq.drain()
+
+    def pop_scene(self) -> Scene | None:
+        """Pop the topmost runtime scene; resume the one beneath.
+
+        Returns the stopped scene, or None if the stack becomes empty
+        (in which case a Quit event is signalled and the engine will
+        stop on the next tick).
+        """
+        if self._state not in (EngineRunState.PLAY, EngineRunState.PAUSED):
+            raise RuntimeError("pop_scene requires PLAY or PAUSED state")
+        if not self._scene_stack:
+            return None
+
+        if self._eq:
+            from expra_engine.runtime.events import (
+                Quit,
+                SceneContinued,
+                SceneStopped,
+            )
+
+            self._eq.flush()
+            self._eq.signal(SceneStopped())
+            self._eq.drain()
+
+        stopped = self._scene_stack.pop()
+
+        if not self._scene_stack:
+            # No more scenes; auto-quit
+            if self._eq:
+                self._eq.signal(Quit())
+        else:
+            if self._eq:
+                self._eq.set_root(self._build_dispatch_root())
+                self._eq.signal(SceneContinued())
+                self._eq.drain()
+
+        return stopped
+
+    def replace_scene(self, scene: Scene) -> None:
+        """Replace the topmost scene with a new one.
+
+        Flushes, signals SceneStopped (to old), then SceneStarted (to new).
+        """
+        if self._state not in (EngineRunState.PLAY, EngineRunState.PAUSED):
+            raise RuntimeError("replace_scene requires PLAY or PAUSED state")
+
+        if self._eq:
+            from expra_engine.runtime.events import SceneStarted, SceneStopped
+
+            self._eq.flush()
+            self._eq.signal(SceneStopped())
+            self._eq.drain()
+
+        if self._scene_stack:
+            self._scene_stack.pop()
+        self._scene_stack.append(scene)
+
+        if self._eq:
+            self._eq.set_root(self._build_dispatch_root())
+            self._eq.signal(SceneStarted())
+            self._eq.drain()
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _start_runtime(self) -> None:
+        """Initialise event queue, clock, scene stack, and systems."""
+        from expra_engine.runtime.clock import RuntimeClock
+        from expra_engine.runtime.event_queue import EventQueue
+        from expra_engine.runtime.events import SceneStarted
+
+        if self._runtime_scene:
+            self._scene_stack = [self._runtime_scene]
+        else:
+            self._scene_stack = []
+
+        self._clock = RuntimeClock()
+        self._eq = EventQueue(self._build_dispatch_root())
+
+        for system in self._systems:
+            system.start(self)
+
+        if self._scene_stack:
+            self._eq.signal(SceneStarted())
+            self._eq.drain()
+
+    def _stop_runtime(self) -> None:
+        """Flush events, signal SceneStopped, stop systems, teardown."""
+        from expra_engine.runtime.events import SceneStopped
+
+        if self._eq and self._scene_stack:
+            self._eq.flush()
+            self._eq.signal(SceneStopped())
+            self._eq.drain()
+
+        for system in reversed(self._systems):
+            system.stop()
+
+        if self._clock:
+            self._clock.reset()
+        self._eq = None
+        self._clock = None
+
+    def _build_dispatch_root(self) -> object:
+        """Build the object whose ``children`` tree receives broadcast events.
+
+        The dispatch root aggregates: the clock, all registered systems,
+        and the active scene's entity list.
+
+        Returns a lightweight container; not a Scene.
+        """
+        return _DispatchRoot(
+            clock=self._clock,
+            systems=list(self._systems),
+            scene=self._scene_stack[-1] if self._scene_stack else None,
+        )
 
     @staticmethod
     def _copy_scene(scene: Scene | None) -> Scene | None:
@@ -133,3 +395,31 @@ class Engine:
             f"Engine(state={self._state.value!r}, "
             f"scene={repr(self._edit_scene.name) if self._edit_scene else None})"
         )
+
+
+class _DispatchRoot:
+    """Lightweight container that acts as the broadcast traversal root.
+
+    ``walk()`` from event_queue.py iterates the children attribute, which
+    yields the clock, systems, and scene entities.
+    """
+
+    def __init__(
+        self,
+        clock: RuntimeClock | None,
+        systems: list[RuntimeSystem],
+        scene: Scene | None,
+    ) -> None:
+        self._clock = clock
+        self._systems = systems
+        self._scene = scene
+
+    @property
+    def children(self) -> list[object]:
+        items: list[object] = []
+        if self._clock is not None:
+            items.append(self._clock)
+        items.extend(self._systems)
+        if self._scene is not None:
+            items.extend(self._scene.entities)
+        return items

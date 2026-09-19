@@ -87,3 +87,110 @@ class Scene:
 
     def __repr__(self) -> str:
         return f"Scene({self.name!r}, id={self.scene_id!r}, entities={len(self._entities)})"
+
+    # ------------------------------------------------------------------
+    # Hierarchy operations
+    # ------------------------------------------------------------------
+
+    def children_of(self, parent_id: str) -> list[Entity]:
+        """Return direct children of the entity with ``parent_id``."""
+        return [e for e in self._entities if e.parent_id == parent_id]
+
+    def roots(self) -> list[Entity]:
+        """Return top-level entities (those with no parent)."""
+        return [e for e in self._entities if e.parent_id is None]
+
+    def set_entity_parent(self, entity_id: str, parent_id: str | None) -> None:
+        """Set the parent of entity ``entity_id`` to ``parent_id``.
+
+        Raises ValueError if:
+          - either entity is not in the scene
+          - the entity would become its own parent
+          - setting the parent would create a cycle
+        """
+        if parent_id is not None and entity_id == parent_id:
+            raise ValueError(f"Entity {entity_id!r} cannot be its own parent")
+        child = self.find_entity(entity_id)
+        if child is None:
+            raise ValueError(f"Entity not found: {entity_id!r}")
+        if parent_id is not None:
+            if self.find_entity(parent_id) is None:
+                raise ValueError(f"Parent entity not found: {parent_id!r}")
+            if self._would_create_cycle(entity_id, parent_id):
+                raise ValueError(
+                    f"Setting parent {parent_id!r} on {entity_id!r} would create a cycle"
+                )
+        child.parent_id = parent_id
+
+    def _would_create_cycle(self, entity_id: str, proposed_parent_id: str) -> bool:
+        """Return True if making proposed_parent_id a parent of entity_id creates a cycle."""
+        visited: set[str] = set()
+        current: str | None = proposed_parent_id
+        while current is not None:
+            if current == entity_id:
+                return True
+            if current in visited:
+                break
+            visited.add(current)
+            ancestor = self.find_entity(current)
+            current = ancestor.parent_id if ancestor else None
+        return False
+
+    def walk_hierarchy(self, root_id: str | None = None) -> list[Entity]:
+        """Depth-first traversal of the entity hierarchy.
+
+        If ``root_id`` is given, traverses the subtree rooted there.
+        If ``root_id`` is None, traverses all root-level entities and their
+        subtrees in order.
+
+        Adapted from ppb/gomlib.py walk() (PursuedPyBear, Artistic License 2.0).
+        """
+        from collections import deque
+
+        result: list[Entity] = []
+        if root_id is not None:
+            root = self.find_entity(root_id)
+            if root is None:
+                return []
+            starts = [root]
+        else:
+            starts = self.roots()
+
+        queue: deque[Entity] = deque(starts)
+        while queue:
+            entity = queue.popleft()
+            result.append(entity)
+            for child in self.children_of(entity.entity_id):
+                queue.append(child)
+        return result
+
+    # ------------------------------------------------------------------
+    # Tag and component queries (analogous to PPB Children.get())
+    # ------------------------------------------------------------------
+
+    def get_entities_by_tag(self, tag: str) -> tuple[Entity, ...]:
+        """Return all entities that have ``tag``."""
+        return tuple(e for e in self._entities if e.has_tag(tag))
+
+    def get_entities_by_component(self, cls: type) -> tuple[Entity, ...]:
+        """Return all entities that have at least one component of type ``cls``."""
+        return tuple(e for e in self._entities if e.get_component(cls) is not None)
+
+    def get_entities(self, *, tag: str | None = None, component: type | None = None) -> tuple[Entity, ...]:
+        """Flexible query combining tag and/or component filter.
+
+        Analogous to PPB Children.get(kind=..., tag=...) but using Expra's
+        component model instead of inheritance-based kinds.
+
+        Passing neither ``tag`` nor ``component`` raises TypeError.
+        """
+        if tag is None and component is None:
+            raise TypeError("get_entities() requires at least 'tag' or 'component' keyword argument")
+        candidates: set[Entity] | None = None
+        if tag is not None:
+            candidates = {e for e in self._entities if e.has_tag(tag)}
+        if component is not None:
+            by_comp = {e for e in self._entities if e.get_component(component) is not None}
+            candidates = by_comp if candidates is None else candidates & by_comp
+        assert candidates is not None
+        return tuple(e for e in self._entities if e in candidates)

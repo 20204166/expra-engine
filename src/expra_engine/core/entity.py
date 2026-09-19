@@ -35,6 +35,7 @@ class Entity:
         self.enabled = enabled
         self.parent_id = parent_id
         self._components: list[Component] = []
+        self._tags: set[str] = set()
 
     @property
     def components(self) -> tuple[Component, ...]:
@@ -59,6 +60,24 @@ class Entity:
     def get_components(self, cls: type[C]) -> list[C]:
         return [c for c in self._components if isinstance(c, cls)]
 
+
+    @property
+    def tags(self) -> frozenset[str]:
+        """The set of tags on this entity (immutable view)."""
+        return frozenset(self._tags)
+
+    def add_tag(self, tag: str) -> None:
+        """Add a tag to this entity."""
+        self._tags.add(tag)
+
+    def remove_tag(self, tag: str) -> None:
+        """Remove a tag; no-op if absent."""
+        self._tags.discard(tag)
+
+    def has_tag(self, tag: str) -> bool:
+        """Return True if this entity has the given tag."""
+        return tag in self._tags
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "entity_id": self.entity_id,
@@ -66,6 +85,7 @@ class Entity:
             "enabled": self.enabled,
             "parent_id": self.parent_id,
             "components": [c.to_dict() for c in self._components],
+            "tags": sorted(self._tags),
         }
 
     @classmethod
@@ -76,6 +96,8 @@ class Entity:
             enabled=bool(data.get("enabled", True)),
             parent_id=data.get("parent_id"),
         )
+        for tag in data.get("tags", []):
+            entity.add_tag(str(tag))
         for component_data in data.get("components", []):
             with contextlib.suppress(ValueError, KeyError):
                 entity.add_component(component_from_dict(component_data))
