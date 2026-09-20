@@ -50,6 +50,21 @@ reported to the runtime and always trigger cleanup. A recording renderer and
 dummy-SDL adapter provide deterministic tests for lifecycle ordering, repeated
 frames, resize, headless operation, and failure cleanup.
 
+### 3D Principles Applied To 2D
+
+The contract is founded on graphics principles that improve the 2D path now:
+
+- an orthographic camera with explicit view, projection, and viewport mapping;
+- a depth value derived from render layer, with stable ordering for ties;
+- parent-to-world transform composition before projection;
+- viewport clipping/culling before backend draw calls;
+- render phases and primitive descriptors that leave room for batching;
+- a shared color/material description rather than backend-specific colors.
+
+The first implementation remains primitive-only and orthographic. It does not
+add meshes, lighting, perspective, or a 3D asset format. Those can consume the
+same camera, transform, phase, and capability contracts later.
+
 ## Neon Arena Scope
 
 The sample game will contain:

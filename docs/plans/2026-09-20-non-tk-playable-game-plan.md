@@ -14,6 +14,7 @@
 
 - Create `src/expra_engine/runtime/pygame_runtime.py`: Pygame event polling, window lifecycle, frame loop, and injected backend seam.
 - Create `src/expra_engine/runtime/pygame_renderer.py`: primitive entity/HUD renderer driven by runtime events.
+- Create `src/expra_engine/runtime/rendering.py`: backend-neutral renderer protocol, orthographic camera, viewport, render items, phases, and capabilities.
 - Modify `src/expra_engine/runtime/__init__.py`: export public runtime adapters.
 - Modify `src/expra_engine/pyproject.toml` or root `pyproject.toml`: declare the runtime dependency separately from editor dependencies.
 - Modify `src/expra_engine/export/plan.py`: carry a runtime profile/package selection.
@@ -56,6 +57,14 @@ Use a `RenderFrame` data object containing the active scene, score, and status;
 the renderer consumes it in `on_render`. Draw only rectangles/circles/lines and
 font text. Keep screen coordinates and arena bounds in renderer configuration,
 not in `Engine` or entity serialization.
+
+Before the Pygame adapter, define the 3D-ready contracts in
+`runtime/rendering.py`: orthographic camera projection, viewport containment,
+stable depth/layer ordering, parent transform composition, render phases, and
+backend-neutral primitive/color descriptors. Add tests for projection,
+off-viewport culling, parent composition, and stable ordering. The first game
+uses only the orthographic path; perspective and mesh data are explicitly out
+of scope.
 
 ### Task 4: Neon Arena game
 
