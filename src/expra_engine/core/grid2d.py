@@ -52,6 +52,9 @@ class Grid2D[T]:
 
         self._width = width
         self._height = height
+        self._factory: Callable[[], T] = (
+            default_factory if default_factory is not None else lambda: None  # type: ignore[return-value]
+        )
 
         if data is not None:
             if len(data) != width:
@@ -63,8 +66,7 @@ class Grid2D[T]:
                     )
             self._cells: list[list[T]] = [list(col) for col in data]
         else:
-            factory = default_factory if default_factory is not None else (lambda: None)  # type: ignore[assignment, return-value]
-            self._cells = [[factory() for _ in range(height)] for _ in range(width)]  # type: ignore[misc]
+            self._cells = [[self._factory() for _ in range(height)] for _ in range(width)]
 
     @property
     def width(self) -> int:
@@ -137,6 +139,74 @@ class Grid2D[T]:
         """Return a shallow copy with independent cell lists."""
         data = [list(col) for col in self._cells]
         return Grid2D(self._width, self._height, data=data)
+
+    def add_margin(
+        self,
+        *,
+        top: int = 0,
+        right: int = 0,
+        bottom: int = 0,
+        left: int = 0,
+    ) -> Grid2D[T]:
+        """Return a new grid with empty cells added around this grid."""
+        margins = (top, right, bottom, left)
+        if any(margin < 0 for margin in margins):
+            raise ValueError("margin values must be non-negative")
+        result = Grid2D(
+            self._width + left + right,
+            self._height + top + bottom,
+            default_factory=self._factory,
+        )
+        for (x, y), value in self:
+            result.set(x + left, y + bottom, value)
+        return result
+
+    def to_string(
+        self,
+        cell_to_str: Callable[[T], str] = str,
+        separator: str = ",",
+        row_separator: str = "\n",
+    ) -> str:
+        """Serialize rows from bottom to top using caller-provided separators."""
+        rows = [
+            separator.join(cell_to_str(self._cells[x][y]) for x in range(self._width))
+            for y in range(self._height)
+        ]
+        return row_separator.join(rows)
+
+    @classmethod
+    def from_string(
+        cls,
+        text: str,
+        str_to_cell: Callable[[str], T] = str,  # type: ignore[assignment]
+        separator: str = ",",
+        row_separator: str = "\n",
+    ) -> Grid2D[T]:
+        """Deserialize a row-major string into a bottom-left-origin grid."""
+        rows = text.split(row_separator) if text else []
+        if not rows or any(row == "" for row in rows):
+            raise ValueError("serialized grid must contain non-empty rows")
+        values = [[str_to_cell(cell) for cell in row.split(separator)] for row in rows]
+        width = len(values[0])
+        if width == 0 or any(len(row) != width for row in values):
+            raise ValueError("serialized grid must be rectangular")
+        data = [[values[y][x] for y in range(len(values))] for x in range(width)]
+        return cls(width, len(values), data=data)
+
+    def sample_bilinear(self, x: float, y: float) -> float:
+        """Sample numeric cells at fractional coordinates by bilinear blending."""
+        if not (0.0 <= x <= self._width - 1 and 0.0 <= y <= self._height - 1):
+            raise ValueError("sample coordinates must lie inside the grid")
+        x0, y0 = int(x), int(y)
+        x1, y1 = min(x0 + 1, self._width - 1), min(y0 + 1, self._height - 1)
+        tx, ty = x - x0, y - y0
+        v00 = self._cells[x0][y0]
+        v10 = self._cells[x1][y0]
+        v01 = self._cells[x0][y1]
+        v11 = self._cells[x1][y1]
+        return float(
+            (v00 * (1.0 - tx) + v10 * tx) * (1.0 - ty) + (v01 * (1.0 - tx) + v11 * tx) * ty
+        )
 
     def __repr__(self) -> str:
         return f"Grid2D({self._width}x{self._height})"

@@ -154,6 +154,52 @@ class PasteTests(unittest.TestCase):
         dst.set(0, 0, 99)
         self.assertEqual(src.get(0, 0), 42)
 
+    def test_paste_with_clip_negative_offset_skips_out_of_bounds(self) -> None:
+        dst = Grid2D(3, 3, default_factory=int)
+        src = Grid2D(2, 2, default_factory=lambda: 9)
+
+        dst.paste(src, -1, -1, clip=True)
+
+        self.assertEqual(dst.get(0, 0), 9)
+        self.assertEqual(dst.get(1, 0), 0)
+        self.assertEqual(dst.get(0, 1), 0)
+
+
+class Grid2DExtensionTests(unittest.TestCase):
+    def test_add_margin_increases_size_and_offsets_content(self) -> None:
+        grid = Grid2D(1, 1, default_factory=int)
+        grid.set(0, 0, 7)
+
+        expanded = grid.add_margin(top=0, right=0, bottom=1, left=1)
+
+        self.assertEqual((expanded.width, expanded.height), (2, 2))
+        self.assertEqual(expanded.get(1, 1), 7)
+
+    def test_add_margin_rejects_negative_values(self) -> None:
+        with self.assertRaises(ValueError):
+            Grid2D(1, 1).add_margin(left=-1)
+
+    def test_to_from_string_round_trip(self) -> None:
+        grid = Grid2D(3, 2, default_factory=int)
+        grid.set(0, 0, 1)
+        grid.set(1, 1, 5)
+
+        encoded = grid.to_string(str, separator=",", row_separator="|")
+        restored = Grid2D.from_string(encoded, int, separator=",", row_separator="|")
+
+        self.assertEqual((restored.width, restored.height), (3, 2))
+        self.assertEqual(restored.get(1, 1), 5)
+
+    def test_sample_bilinear_interpolates_numeric_cells(self) -> None:
+        grid = Grid2D(2, 2, data=[[0.0, 0.0], [1.0, 1.0]])
+
+        self.assertAlmostEqual(grid.sample_bilinear(0.5, 0.0), 0.5)
+        self.assertAlmostEqual(grid.sample_bilinear(0.5, 0.5), 0.5)
+
+    def test_sample_bilinear_rejects_out_of_bounds(self) -> None:
+        with self.assertRaises(ValueError):
+            Grid2D(2, 2, default_factory=float).sample_bilinear(-0.1, 0.0)
+
 
 class CopyTests(unittest.TestCase):
     def test_copy_is_independent(self) -> None:
