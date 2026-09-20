@@ -24,9 +24,22 @@ try {
     $actual = (Get-FileHash $wheelPath -Algorithm SHA256).Hash.ToLowerInvariant()
     if ($actual -ne $expected.ToLowerInvariant()) { throw "Wheel checksum mismatch" }
 
+    function Invoke-Python {
+        param(
+            [object[]]$Candidate,
+            [string[]]$Arguments
+        )
+        $invokeArgs = @()
+        if ($Candidate.Count -gt 1) {
+            $invokeArgs += $Candidate[1..($Candidate.Count - 1)]
+        }
+        $invokeArgs += $Arguments
+        & $Candidate[0] @invokeArgs
+    }
+
     function Test-VenvPython {
         param([object]$Py)
-        & $Py -c "import sys; raise SystemExit(0 if sys.prefix != sys.base_prefix else 1)" 2>$null
+        Invoke-Python $Py @("-c", "import sys; raise SystemExit(0 if sys.prefix != sys.base_prefix else 1)") 2>$null
         return ($LASTEXITCODE -eq 0)
     }
 
@@ -48,7 +61,7 @@ try {
 
     $py = $null
     foreach ($candidate in $candidates) {
-        & $candidate -c "import sys; assert sys.version_info >= (3,12)" 2>$null
+        Invoke-Python $candidate @("-c", "import sys; assert sys.version_info >= (3,12)") 2>$null
         if ($LASTEXITCODE -eq 0 -and -not (Test-VenvPython $candidate)) { $py = $candidate; break }
     }
     if (-not $py) { throw "No usable Python 3.12+ interpreter was found." }
@@ -56,10 +69,10 @@ try {
     $pipArgs = @("-m", "pip", "install", "--upgrade", "--force-reinstall")
     if (-not $System) { $pipArgs += "--user" }
     $pipArgs += @("--break-system-packages", $wheelPath)
-    & $py @pipArgs
+    Invoke-Python $py $pipArgs
     if ($LASTEXITCODE -ne 0) { throw "pip install failed (exit $LASTEXITCODE)" }
 
-    $installed = & $py -c "import importlib.metadata as m; print(m.version('expra-engine'))"
+    $installed = Invoke-Python $py @("-c", "import importlib.metadata as m; print(m.version('expra-engine'))")
     if ($installed.Trim() -ne $expectedVersion) { throw "Installed version mismatch" }
     Write-Host "Installed Expra $installed. Run: expra-editor"
 } finally {
