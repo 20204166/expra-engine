@@ -308,6 +308,13 @@ def _select_packager(target: ExportTarget) -> TargetPackager:
 
 def _engine_version() -> str:
     try:
+        from expra_engine._version import __version__
+
+        return __version__
+    except (ImportError, AttributeError):
+        pass
+
+    try:
         import importlib.metadata
 
         return importlib.metadata.version("expra_engine")

@@ -7,9 +7,11 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
+from expra_engine._version import __version__
 from expra_engine.export.events import ExportPhase, ExportProgressEvent
-from expra_engine.export.exporter import ExportError, GameExporter
+from expra_engine.export.exporter import ExportError, GameExporter, _engine_version
 from expra_engine.export.packager import TargetPackager
 from expra_engine.export.plan import ExportPlan, ExportTarget, PythonArch
 from expra_engine.export.verify import verify_export
@@ -222,6 +224,10 @@ class TestGameExporter(unittest.TestCase):
         data = json.loads((out / "build_manifest.json").read_text())
         self.assertIn("engine_version", data)
         self.assertIsInstance(data["engine_version"], str)
+
+    def test_engine_version_prefers_source_when_metadata_is_stale(self) -> None:
+        with patch("importlib.metadata.version", return_value="0.1.2.1"):
+            self.assertEqual(_engine_version(), __version__)
 
     def test_build_manifest_has_timestamp(self) -> None:
         plan = self._plan()
