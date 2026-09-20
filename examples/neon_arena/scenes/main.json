@@ -1,0 +1,48 @@
+{
+  "scene_id": "neon-arena-main",
+  "name": "Neon Arena",
+  "entities": [
+    {
+      "entity_id": "neon-arena-player",
+      "name": "Player",
+      "enabled": true,
+      "layer": 1,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 10.0,
+          "y": 50.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        }
+      ],
+      "tags": [
+        "player"
+      ]
+    },
+    {
+      "entity_id": "neon-arena-target",
+      "name": "Target",
+      "enabled": true,
+      "layer": 1,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 70.0,
+          "y": 50.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        }
+      ],
+      "tags": [
+        "target"
+      ]
+    }
+  ]
+}

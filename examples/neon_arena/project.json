@@ -1,0 +1,6 @@
+{
+  "name": "Neon Arena",
+  "scenes": [
+    "scenes/main.json"
+  ]
+}

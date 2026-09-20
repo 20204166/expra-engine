@@ -56,6 +56,9 @@ class PygameRuntime:
     def run(self) -> None:
         """Run frames until a quit event or an explicit stop request."""
         try:
+            init = getattr(self.pygame, "init", None)
+            if init is not None:
+                init()
             self.surface = self._surface_factory(self.size)
             self._running = True
             dt = self.clock.tick(self.frame_rate) / 1000.0
@@ -76,6 +79,7 @@ class PygameRuntime:
             event_type = getattr(event, "type", None)
             if event_type == self.pygame.QUIT:
                 self.stop()
+                break
             elif event_type == self.pygame.KEYDOWN:
                 self._keys.add(event.key)
             elif event_type == self.pygame.KEYUP:

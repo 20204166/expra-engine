@@ -58,8 +58,13 @@ class PygameRenderer:
         self.surface = surface
         self.screen_size = screen_size
         self.world_bounds = world_bounds
-        self.arena_bounds = arena_bounds or (0, 0, *screen_size)
-        self.font = pygame_module.font.Font(None, font_size)
+        self.arena_bounds = arena_bounds if arena_bounds is not None else (0, 0, *screen_size)
+        self._validate_bounds(self.world_bounds, "world_bounds")
+        self._validate_bounds(self.arena_bounds, "arena_bounds")
+        try:
+            self.font = pygame_module.font.Font(None, font_size)
+        except Exception:  # noqa: BLE001 - backend/font failures must not abort a frame
+            self.font = None
         self._engine: Any = None
 
     def start(self, engine: Any) -> None:
@@ -72,7 +77,10 @@ class PygameRenderer:
     def on_render(self, frame: RenderFrame) -> None:
         """Render one frame of scene primitives and HUD text."""
         draw = self.pygame.draw
-        draw.rect(self.surface, (10, 14, 30), self._rect(self.arena_bounds))
+        try:
+            draw.rect(self.surface, (10, 14, 30), self._rect(self.arena_bounds))
+        except Exception:  # noqa: BLE001 - backend draw failures are frame-local
+            pass
         scene = frame.active_scene
         if scene is not None:
             for entity in scene.entities_by_layer():
@@ -81,26 +89,57 @@ class PygameRenderer:
                 transform = entity.get_component(TransformComponent)
                 if transform is None or not transform.enabled:
                     continue
-                position = self._to_screen(transform.x, transform.y)
+                try:
+                    position = self._to_screen(transform.x, transform.y)
+                except (OverflowError, ValueError, TypeError):
+                    continue
+                if not all(math.isfinite(value) for value in (*position, transform.scale_x, transform.scale_y)):
+                    continue
+                if transform.scale_x == 0 or transform.scale_y == 0:
+                    continue
                 if entity.has_tag("player") or entity.name.lower() == "player":
                     width = round(20 * abs(transform.scale_x))
                     height = round(20 * abs(transform.scale_y))
                     rectangle = self._rect_from_center(position, width, height)
-                    draw.rect(self.surface, (48, 224, 255), rectangle)
-                    angle = math.radians(transform.rotation)
-                    direction = (position[0] + round(math.cos(angle) * 16), position[1] + round(math.sin(angle) * 16))
-                    draw.line(self.surface, (255, 255, 255), position, direction)
+                    try:
+                        draw.rect(self.surface, (48, 224, 255), rectangle)
+                        angle = math.radians(transform.rotation)
+                        direction = (
+                            position[0] + round(math.cos(angle) * 16),
+                            position[1] + round(math.sin(angle) * 16),
+                        )
+                        draw.line(self.surface, (255, 255, 255), position, direction)
+                    except Exception:  # noqa: BLE001 - backend draw failures are frame-local
+                        pass
                 elif entity.has_tag("target") or entity.name.lower() == "target":
                     radius = round(8 * (abs(transform.scale_x) + abs(transform.scale_y)) / 2)
-                    draw.circle(self.surface, (255, 72, 178), position, radius)
+                    try:
+                        draw.circle(self.surface, (255, 72, 178), position, radius)
+                    except Exception:  # noqa: BLE001 - backend draw failures are frame-local
+                        pass
 
         self._draw_text(f"Score: {frame.score}", (16, 12))
         if frame.status:
             self._draw_text(frame.status, (16, 44))
 
     def _draw_text(self, text: str, position: tuple[int, int]) -> None:
-        rendered = self.font.render(text, True, (245, 248, 255))
-        self.surface.blit(rendered, position)
+        if self.font is None:
+            return
+        try:
+            rendered = self.font.render(text, True, (245, 248, 255))
+            self.surface.blit(rendered, position)
+        except Exception:  # noqa: BLE001 - backend/font failures are frame-local
+            pass
+
+    @staticmethod
+    def _validate_bounds(bounds: tuple[float, float, float, float], name: str) -> None:
+        try:
+            values = tuple(float(value) for value in bounds)
+            _, _, width, height = values
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{name} must contain four finite values") from exc
+        if not all(math.isfinite(value) for value in values) or width <= 0 or height <= 0:
+            raise ValueError(f"{name} must have finite positive dimensions")
 
     def _to_screen(self, x: float, y: float) -> tuple[int, int]:
         world_x, world_y, world_width, world_height = self.world_bounds

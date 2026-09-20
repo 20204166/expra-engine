@@ -94,6 +94,87 @@ class TestPygameRenderer(unittest.TestCase):
         self.assertEqual(font.texts, ["Score: 3", "WON"])
         self.assertEqual(len(surface.blits), 2)
 
+    def test_rejects_non_positive_world_or_arena_dimensions(self) -> None:
+        pygame = _FakePygame(_FakeFont())
+
+        with self.assertRaises(ValueError):
+            PygameRenderer(pygame, _FakeSurface(), world_bounds=(0, 0, 0, 100))
+        with self.assertRaises(ValueError):
+            PygameRenderer(pygame, _FakeSurface(), arena_bounds=(0, 0, -1, 100))
+
+    def test_skips_zero_scale_and_uses_positive_size_for_negative_scale(self) -> None:
+        scene = Scene("Arena")
+        zero = scene.create_entity("Zero")
+        zero.add_tag("player")
+        zero.add_component(TransformComponent(scale_x=0, scale_y=0))
+        negative = scene.create_entity("Negative")
+        negative.add_tag("player")
+        negative.add_component(TransformComponent(scale_x=-2, scale_y=-0.5))
+        pygame = _FakePygame(_FakeFont())
+
+        PygameRenderer(pygame, _FakeSurface()).on_render(RenderFrame(scene))
+
+        self.assertEqual(len(pygame.draw.rects), 2)  # arena and negative-scale player
+        self.assertEqual(pygame.draw.rects[1][2].size, (40, 10))
+
+    def test_ignores_missing_and_disabled_entities_and_allows_off_screen_positions(self) -> None:
+        scene = Scene("Arena")
+        scene.create_entity("MissingTransform").add_tag("player")
+        disabled = scene.create_entity("Disabled")
+        disabled.add_tag("target")
+        disabled.enabled = False
+        disabled.add_component(TransformComponent())
+        off_screen = scene.create_entity("Target")
+        off_screen.add_component(TransformComponent(x=-50, y=150))
+        pygame = _FakePygame(_FakeFont())
+
+        PygameRenderer(pygame, _FakeSurface()).on_render(RenderFrame(scene))
+
+        self.assertEqual(len(pygame.draw.circles), 1)
+        self.assertEqual(pygame.draw.circles[0][2], (-400, 900))
+
+    def test_continues_when_font_or_draw_operation_fails(self) -> None:
+        class FailingDraw(_FakeDraw):
+            def rect(self, surface: object, color: object, rectangle: object) -> None:
+                raise RuntimeError("draw failed")
+
+        class FailingFont(_FakeFont):
+            def render(self, text: str, antialias: bool, color: object) -> object:
+                raise RuntimeError("font failed")
+
+        pygame = _FakePygame(FailingFont())
+        pygame.draw = FailingDraw()
+
+        PygameRenderer(pygame, _FakeSurface()).on_render(RenderFrame(None, status="SAFE"))
+
+    def test_font_initialization_failure_keeps_renderer_usable(self) -> None:
+        class BrokenFontModule:
+            def Font(self, name: object, size: int) -> object:
+                raise RuntimeError("font unavailable")
+
+        pygame = _FakePygame(_FakeFont())
+        pygame.font = BrokenFontModule()
+
+        renderer = PygameRenderer(pygame, _FakeSurface())
+        renderer.on_render(RenderFrame(None))
+
+    def test_repeated_frames_only_draw_the_current_scene(self) -> None:
+        first = Scene("First")
+        first_target = first.create_entity("Target")
+        first_target.add_component(TransformComponent(x=10, y=10))
+        second = Scene("Second")
+        second_target = second.create_entity("Target")
+        second_target.add_component(TransformComponent(x=20, y=20))
+        pygame = _FakePygame(_FakeFont())
+        renderer = PygameRenderer(pygame, _FakeSurface())
+
+        renderer.on_render(RenderFrame(first))
+        renderer.on_render(RenderFrame(second))
+
+        self.assertEqual(len(pygame.draw.circles), 2)
+        self.assertEqual(pygame.draw.circles[0][2], (80, 60))
+        self.assertEqual(pygame.draw.circles[1][2], (160, 120))
+
 
 if __name__ == "__main__":
     unittest.main()
