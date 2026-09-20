@@ -3,10 +3,14 @@
 import tkinter as tk
 import unittest
 from contextlib import suppress
+from pathlib import Path
 
 from expra_engine.core.component import TransformComponent
 from expra_engine.core.engine import Engine
 from expra_engine.core.scene import Scene
+from expra_engine.editor.assets import AssetEntry
+from expra_engine.filesystem import ResourceId
+from expra_engine.ui.asset_browser import AssetBrowserPanel
 from expra_engine.ui.editor_window import EditorWindow
 from expra_engine.ui.hierarchy import HierarchyPanel
 from expra_engine.ui.inspector import InspectorPanel
@@ -37,6 +41,7 @@ class EditorPanelTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.root = tk.Tk()
+        self.root_path = Path.cwd() / "assets"
         self.root.geometry("1100x700")
         self.root.update_idletasks()
 
@@ -56,6 +61,30 @@ class EditorPanelTests(unittest.TestCase):
 
         self.assertEqual(panel._tree.get_children(""), (parent.entity_id,))
         self.assertEqual(panel._tree.get_children(parent.entity_id), (child.entity_id,))
+
+    def test_asset_browser_renders_logical_ids_and_display_names(self) -> None:
+        panel = AssetBrowserPanel(self.root, root_directory=self.root_path)
+        panel.pack(fill="both", expand=True)
+        folder = AssetEntry(
+            self.root_path / "textures",
+            "textures",
+            True,
+            ResourceId.parse("assets://textures"),
+        )
+        entry = AssetEntry(
+            self.root_path / "textures" / "hero.png",
+            "hero.png",
+            False,
+            ResourceId.parse("assets://textures/hero.png"),
+        )
+
+        panel.render_entries((folder, entry))
+
+        row = panel._tree.get_children("")[0]
+        child = panel._tree.get_children(row)[0]
+        self.assertEqual(panel._tree.item(row, "text"), "textures")
+        self.assertEqual(panel._tree.item(child, "text"), "hero.png")
+        self.assertEqual(panel._tree.set(child, "logical_id"), "assets://textures/hero.png")
 
     def test_hierarchy_render_retains_existing_items_and_selection(self) -> None:
         panel = HierarchyPanel(self.root)
@@ -198,6 +227,7 @@ class EditorWindowLayoutTests(unittest.TestCase):
     def test_add_entity_does_not_recurse_through_tree_selection(self) -> None:
         window = EditorWindow(Engine())
         try:
+            self.assertIsInstance(window._assets, AssetBrowserPanel)
             before = len(window._engine.edit_scene.entities)  # type: ignore[union-attr]
             window._act_add_entity()
             window._root.update()

@@ -46,6 +46,7 @@ from expra_engine.editor.delivery import TkDeliveryQueue
 from expra_engine.editor.export_dialog import ExportDialog
 from expra_engine.editor.preferences import PreferencesStore
 from expra_engine.editor.window_placement import WindowGeometry
+from expra_engine.ui.asset_browser import AssetBrowserPanel
 from expra_engine.ui.console import ConsolePanel
 from expra_engine.ui.hierarchy import HierarchyPanel
 from expra_engine.ui.inspector import InspectorPanel
@@ -171,10 +172,16 @@ class EditorWindow:
         self._content_paned = ttk.Panedwindow(center, orient="horizontal")
         self._content_paned.pack(fill="both", expand=True)
 
-        # Left pane: hierarchy
+        # Left pane: hierarchy and project assets
         hier_frame = ttk.Frame(self._content_paned, width=_HIERARCHY_WIDTH, style=STYLE_PANEL_FRAME)
+        left_paned = ttk.Panedwindow(hier_frame, orient="vertical")
+        left_paned.pack(fill="both", expand=True)
+        hierarchy_host = ttk.Frame(left_paned, style=STYLE_PANEL_FRAME)
+        assets_host = ttk.Frame(left_paned, style=STYLE_PANEL_FRAME)
+        left_paned.add(hierarchy_host, weight=3)
+        left_paned.add(assets_host, weight=2)
         self._hierarchy = HierarchyPanel(
-            hier_frame,
+            hierarchy_host,
             colors=self._colors,
             actions=self._actions,
             on_select=self._on_hierarchy_select,
@@ -182,7 +189,23 @@ class EditorWindow:
             on_delete=self._on_hierarchy_delete,
         )
         self._hierarchy.pack(fill="both", expand=True)
-        self._hierarchy_host = hier_frame
+        project_assets = (
+            self._engine.project.assets_dir
+            if self._engine.project is not None
+            else Path.cwd() / "assets"
+        )
+        self._assets = AssetBrowserPanel(
+            assets_host,
+            root_directory=project_assets,
+            resource_root=project_assets,
+            coordinator=self._coordinator,
+            colors=self._colors,
+            on_open=self._on_asset_open,
+        )
+        self._assets.pack(fill="both", expand=True)
+        self._hierarchy_host = hierarchy_host
+        self._assets_host = assets_host
+        self._left_paned = left_paned
         self._content_paned.add(hier_frame, weight=0)
 
         # Center pane: viewport
@@ -218,6 +241,11 @@ class EditorWindow:
         self._console.pack(fill="both", expand=True)
         self._register_render_targets()
         self._sash_after_id = self._root.after_idle(self._set_initial_sashes)
+        self._assets.refresh()
+
+    def _on_asset_open(self, entry: Any) -> None:
+        if entry.logical_id is not None:
+            self._console.log(f"[Assets] Open: {entry.logical_id}", level="info")
 
     def _set_initial_sashes(self) -> None:
         """Place side panes after Tk has measured the initial shell."""
