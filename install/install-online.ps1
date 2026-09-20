@@ -24,17 +24,21 @@ try {
     $actual = (Get-FileHash $wheelPath -Algorithm SHA256).Hash.ToLowerInvariant()
     if ($actual -ne $expected.ToLowerInvariant()) { throw "Wheel checksum mismatch" }
 
+    function New-PythonCandidate {
+        param(
+            [string]$Command,
+            [string[]]$Arguments = @()
+        )
+        [pscustomobject]@{ Command = $Command; Arguments = $Arguments }
+    }
+
     function Invoke-Python {
         param(
-            [object[]]$Candidate,
+            [object]$Candidate,
             [string[]]$Arguments
         )
-        $invokeArgs = @()
-        if ($Candidate.Count -gt 1) {
-            $invokeArgs += $Candidate[1..($Candidate.Count - 1)]
-        }
-        $invokeArgs += $Arguments
-        & $Candidate[0] @invokeArgs
+        $invokeArgs = @($Candidate.Arguments) + @($Arguments)
+        & $Candidate.Command @invokeArgs
     }
 
     function Test-VenvPython {
@@ -54,9 +58,13 @@ try {
     }
 
     $candidates = [System.Collections.Generic.List[object]]::new()
-    if (Get-Command "py" -ErrorAction SilentlyContinue) { $candidates.Add(@("py", "-3")) }
+    if (Get-Command "py" -ErrorAction SilentlyContinue) {
+        $candidates.Add((New-PythonCandidate "py" @("-3")))
+    }
     foreach ($name in @("python3.14", "python3.13", "python3.12", "python3", "python")) {
-        if (Get-Command $name -ErrorAction SilentlyContinue) { $candidates.Add(@($name)) }
+        if (Get-Command $name -ErrorAction SilentlyContinue) {
+            $candidates.Add((New-PythonCandidate $name))
+        }
     }
 
     $py = $null
