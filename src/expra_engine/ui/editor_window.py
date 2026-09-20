@@ -32,6 +32,8 @@ from expra_engine.core.component import TransformComponent
 from expra_engine.core.engine import Engine, EngineRunState
 from expra_engine.core.scene import Scene
 from expra_engine.editor.delivery import TkDeliveryQueue
+from expra_engine.editor.commands import CommandStack, DeleteEntityCommand, RenameEntityCommand
+from expra_engine.editor.export_dialog import ExportDialog
 from expra_engine.ui.console import ConsolePanel
 from expra_engine.ui.hierarchy import HierarchyPanel
 from expra_engine.ui.inspector import InspectorPanel
@@ -98,6 +100,7 @@ class EditorWindow:
         self._selected_id: str | None = None
         self._render_generations: dict[str, int] = {"inspector": 0}
         self._render_owners: dict[str, str | None] = {"inspector": None}
+        self._command_stack: CommandStack = CommandStack()
 
         self._register_actions()
         self._build_layout()
@@ -108,6 +111,7 @@ class EditorWindow:
     # ------------------------------------------------------------------
 
     def _build_layout(self) -> None:
+        self._build_menubar()
         main = ttk.Frame(self._root, style=STYLE_APP_FRAME)
         main.pack(fill="both", expand=True)
 
@@ -217,9 +221,55 @@ class EditorWindow:
         except tk.TclError:
             return
 
+    def _build_menubar(self) -> None:
+        menubar = tk.Menu(self._root)
+        self._root.configure(menu=menubar)
+
+        file_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="File", menu=file_menu)
+        file_menu.add_command(label="New Scene", command=lambda: self._actions.dispatch("new_scene"), accelerator="")
+        file_menu.add_command(label="Save Scene...", command=lambda: self._actions.dispatch("save_scene"), accelerator="")
+        file_menu.add_separator()
+        file_menu.add_command(label="Export Game...", command=lambda: self._actions.dispatch("editor.export_game"))
+        file_menu.add_separator()
+        file_menu.add_command(label="Quit", command=self._on_close)
+
+        edit_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Edit", menu=edit_menu)
+        edit_menu.add_command(label="Undo", command=lambda: self._actions.dispatch("undo"), accelerator="Ctrl+Z")
+        edit_menu.add_command(label="Redo", command=lambda: self._actions.dispatch("redo"), accelerator="Ctrl+Y")
+        self._edit_menu = edit_menu
+
+    def _act_export_game(self) -> None:
+        ExportDialog(
+            self._root,
+            Path(".").resolve(),
+            self._coordinator,
+            self._actions,
+        )
+
+    def _act_undo(self) -> None:
+        cmd = self._command_stack.undo()
+        if cmd is not None:
+            self._console.log(f"[Edit] Undo: {cmd.description}")
+            self._present_all()
+        self._update_undo_redo_state()
+
+    def _act_redo(self) -> None:
+        cmd = self._command_stack.redo()
+        if cmd is not None:
+            self._console.log(f"[Edit] Redo: {cmd.description}")
+            self._present_all()
+        self._update_undo_redo_state()
+
+    def _update_undo_redo_state(self) -> None:
+        self._actions.set_enabled("undo", self._command_stack.can_undo)
+        self._actions.set_enabled("redo", self._command_stack.can_redo)
+
     # ------------------------------------------------------------------
     # Action registration
     # ------------------------------------------------------------------
+
 
     def _register_actions(self) -> None:
         a = self._actions
@@ -230,6 +280,11 @@ class EditorWindow:
         a.register("save_scene", self._act_save_scene)
         a.register("add_entity", self._act_add_entity)
         a.register("delete_entity", self._act_delete_entity, enabled=False)
+        a.register("editor.export_game", self._act_export_game)
+        a.register("undo", self._act_undo, enabled=False)
+        a.register("redo", self._act_redo, enabled=False)
+        self._root.bind_all("<Control-z>", lambda _e: self._actions.dispatch("undo"))
+        self._root.bind_all("<Control-y>", lambda _e: self._actions.dispatch("redo"))
         self._update_play_pause_state()
 
     # ------------------------------------------------------------------
@@ -320,12 +375,13 @@ class EditorWindow:
         entity = scene.find_entity(entity_id)
         if entity is None:
             return
-        removed = scene.remove_entity(entity_id)
-        if removed:
-            self._console.log(f"[Editor] Deleted entity: {entity.name}")
-            if self._selected_id == entity_id:
-                self._selected_id = None
-                self._actions.set_enabled("delete_entity", False)
+        cmd = DeleteEntityCommand(scene, entity)
+        self._command_stack.push(cmd)
+        self._console.log(f"[Editor] Deleted entity: {entity.name}")
+        if self._selected_id == entity_id:
+            self._selected_id = None
+            self._actions.set_enabled("delete_entity", False)
+        self._update_undo_redo_state()
         self._present_all()
 
     # ------------------------------------------------------------------
@@ -356,7 +412,9 @@ class EditorWindow:
         entity = scene.find_entity(entity_id)
         if entity is None:
             return
-        entity.name = new_name
+        cmd = RenameEntityCommand(entity, entity.name, new_name)
+        self._command_stack.push(cmd)
+        self._update_undo_redo_state()
         self._ui.begin_batch()
         self._request_render("hierarchy", scene, priority=20)
         self._request_render("viewport", (scene, self._selected_id), priority=10)
