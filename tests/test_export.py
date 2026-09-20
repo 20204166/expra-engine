@@ -12,6 +12,7 @@ import unittest
 from pathlib import Path
 
 from expra_engine.export.events import ExportPhase, ExportProgressEvent
+from expra_engine.export.exporter import ExportError, GameExporter
 from expra_engine.export.manifest import (
     AssetManifest,
     BuildManifest,
@@ -378,8 +379,6 @@ class GameExporterTests(unittest.TestCase):
         self._tmp.cleanup()
 
     def _run(self, **plan_overrides: object) -> tuple[Path, list[ExportProgressEvent]]:
-        from expra_engine.export.exporter import GameExporter
-
         plan = _valid_plan(self.project, self.output, **plan_overrides)
         events: list[ExportProgressEvent] = []
         exporter = GameExporter(packager=_StubPackager())  # type: ignore[arg-type]
@@ -401,7 +400,10 @@ class GameExporterTests(unittest.TestCase):
 
     def test_export_creates_asset_manifest(self) -> None:
         final_dir, _ = self._run()
-        self.assertTrue((final_dir / "asset_manifest.json").exists())
+        manifest_path = final_dir / "asset_manifest.json"
+        self.assertTrue(manifest_path.exists())
+        manifest = json.loads(manifest_path.read_text())
+        self.assertIsInstance(manifest["entries"], list)
 
     def test_export_emits_progress_events(self) -> None:
         _, events = self._run()
@@ -416,8 +418,6 @@ class GameExporterTests(unittest.TestCase):
         self.assertEqual(done_events[-1].percent, 100)
 
     def test_cancel_before_start_raises(self) -> None:
-        from expra_engine.export.exporter import ExportError, GameExporter
-
         plan = _valid_plan(self.project, self.output)
         exporter = GameExporter(packager=_StubPackager())  # type: ignore[arg-type]
         cancel = threading.Event()
@@ -431,8 +431,6 @@ class GameExporterTests(unittest.TestCase):
         self.assertIn("Super_Shooter", final_dir.name)
 
     def test_no_progress_callback_ok(self) -> None:
-        from expra_engine.export.exporter import GameExporter
-
         plan = _valid_plan(self.project, self.output)
         exporter = GameExporter(packager=_StubPackager())  # type: ignore[arg-type]
         cancel = threading.Event()

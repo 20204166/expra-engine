@@ -6,6 +6,7 @@ import json
 import tempfile
 import threading
 import unittest
+from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import patch
 
@@ -13,7 +14,7 @@ from expra_engine._version import __version__
 from expra_engine.export.events import ExportPhase, ExportProgressEvent
 from expra_engine.export.exporter import ExportError, GameExporter, _engine_version
 from expra_engine.export.packager import TargetPackager
-from expra_engine.export.plan import ExportPlan, ExportTarget, PythonArch
+from expra_engine.export.plan import ExportPlan, ExportTarget, PythonArch, RuntimeProfile
 from expra_engine.export.verify import verify_export
 from expra_engine.filesystem import DirectoryMount, MountSpec, ResourceResolver, ResourceService
 
@@ -74,10 +75,18 @@ class TestGameExporter(unittest.TestCase):
         defaults.update(overrides)
         return ExportPlan(**defaults)  # type: ignore[arg-type]
 
-    def _export(self, plan: ExportPlan) -> Path:
+    def _export(
+        self,
+        plan: ExportPlan,
+        *,
+        progress: Callable[[ExportProgressEvent], None] | None = None,
+        packager: TargetPackager | None = None,
+    ) -> Path:
         cancel = threading.Event()
-        packager = _NoopPackager(plan.target)
-        return GameExporter(packager=packager).export(plan, cancel=cancel)
+        exporter = GameExporter(
+            packager=packager if packager is not None else _NoopPackager(plan.target)
+        )
+        return exporter.export(plan, cancel=cancel, progress=progress)
 
     def test_export_creates_output_dir(self) -> None:
         plan = self._plan()
@@ -100,11 +109,9 @@ class TestGameExporter(unittest.TestCase):
         self.assertEqual(data["target"], "windows")
 
     def test_runtime_profile_stages_runtime_only_engine(self) -> None:
-        from expra_engine.export.plan import RuntimeProfile
-
         plan = self._plan(runtime_profile=RuntimeProfile.PYGAME)
         packager = _NoopPackager(plan.target)
-        out = GameExporter(packager=packager).export(plan, cancel=threading.Event())
+        out = self._export(plan, packager=packager)
 
         runtime_package = out / "runtime" / "python" / "Lib" / "site-packages" / "expra_engine"
         self.assertTrue((runtime_package / "core" / "engine.py").exists())
@@ -116,14 +123,12 @@ class TestGameExporter(unittest.TestCase):
         self.assertEqual(manifest["runtime_profile"], "pygame")
 
     def test_linux_runtime_profile_uses_python_specific_site_packages(self) -> None:
-        from expra_engine.export.plan import RuntimeProfile
-
         plan = self._plan(
             target=ExportTarget.LINUX,
             runtime_profile=RuntimeProfile.PYGAME,
         )
         packager = _NoopPackager(plan.target)
-        out = GameExporter(packager=packager).export(plan, cancel=threading.Event())
+        out = self._export(plan, packager=packager)
 
         runtime_package = out / "runtime" / "lib" / "python3.12" / "site-packages" / "expra_engine"
         self.assertTrue((runtime_package / "runtime" / "pygame_runtime.py").exists())
@@ -195,21 +200,19 @@ class TestGameExporter(unittest.TestCase):
 
     def test_progress_events_emitted(self) -> None:
         plan = self._plan()
-        cancel = threading.Event()
-        packager = _NoopPackager(plan.target)
         events: list[ExportProgressEvent] = []
-        GameExporter(packager=packager).export(plan, cancel=cancel, progress=events.append)
+        self._export(plan, progress=events.append)
         phases = {e.phase for e in events}
         self.assertIn(ExportPhase.PLANNING, phases)
         self.assertIn(ExportPhase.DONE, phases)
 
     def test_progress_percent_monotone(self) -> None:
         plan = self._plan()
-        cancel = threading.Event()
-        packager = _NoopPackager(plan.target)
         events: list[ExportProgressEvent] = []
-        GameExporter(packager=packager).export(plan, cancel=cancel, progress=events.append)
+        self._export(plan, progress=events.append)
         percents = [e.percent for e in events]
+        self.assertEqual(percents[0], 0)
+        self.assertEqual(percents[-1], 100)
         self.assertEqual(percents, sorted(percents))
 
     def test_linux_target(self) -> None:
@@ -224,10 +227,8 @@ class TestGameExporter(unittest.TestCase):
 
     def test_no_progress_callback(self) -> None:
         plan = self._plan()
-        cancel = threading.Event()
-        packager = _NoopPackager(plan.target)
         # Must not raise even without progress callback
-        GameExporter(packager=packager).export(plan, cancel=cancel, progress=None)
+        self._export(plan)
 
     def test_build_manifest_has_engine_version(self) -> None:
         plan = self._plan()

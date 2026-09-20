@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import tempfile
 import unittest
@@ -225,6 +226,4 @@ class TestBuildManifest(unittest.TestCase):
 
 
 def _sha(data: bytes) -> str:
-    import hashlib
-
     return hashlib.sha256(data).hexdigest()

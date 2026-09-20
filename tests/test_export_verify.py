@@ -48,18 +48,8 @@ class TestVerifyExport(unittest.TestCase):
             verify_export(self._build)
 
     def test_missing_asset_manifest_fails(self) -> None:
-        build_manifest = {
-            "game_name": "T",
-            "game_version": "1.0.0",
-            "engine_version": "0",
-            "target": "windows",
-            "python_version": "3.12.4",
-            "arch": "amd64",
-            "compile_bytecode": True,
-            "entry_point": "__main__.py",
-            "build_timestamp": "2026-01-01T00:00:00+00:00",
-        }
-        (self._build / "build_manifest.json").write_text(json.dumps(build_manifest))
+        _write_valid_manifests(self._build)
+        (self._build / "asset_manifest.json").unlink()
         with self.assertRaises(ExportVerificationError):
             verify_export(self._build)
 
