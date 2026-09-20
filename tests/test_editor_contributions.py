@@ -28,6 +28,20 @@ class Feature:
         self.menus = ()
         self.toolbars = ()
         self.shortcuts = shortcuts
+        self.started = 0
+        self.stopped = 0
+        self.fail_start = False
+        self.fail_stop = False
+
+    def start(self, _context: EditorContext) -> None:
+        self.started += 1
+        if self.fail_start:
+            raise RuntimeError("start failed")
+
+    def stop(self, _context: EditorContext) -> None:
+        self.stopped += 1
+        if self.fail_stop:
+            raise RuntimeError("stop failed")
 
 
 class EditorContributionMetadataTests(unittest.TestCase):
@@ -114,6 +128,43 @@ class ContributionRegistryTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             registry.register(feature)
         self.assertEqual(actions.registered_ids(), ())
+
+    def test_lifecycle_is_idempotent_and_start_failure_rolls_back(self) -> None:
+        actions = ButtonCoordinator()
+        context = EditorContext(engine=None, actions=actions, ui=None)
+        registry = ContributionRegistry(actions, context=context)
+        feature = Feature("example", (EditorActionSpec("example", lambda: None),))
+        registry.register(feature)
+
+        registry.start("example")
+        registry.start("example")
+        self.assertEqual(feature.started, 1)
+        registry.unregister("example")
+        self.assertEqual(feature.stopped, 1)
+
+        failed = Feature("failed", (EditorActionSpec("failed", lambda: None),))
+        failed.fail_start = True
+        registry.register(failed)
+        with self.assertRaises(RuntimeError):
+            registry.start("failed")
+        self.assertFalse(actions.dispatch("failed"))
+
+    def test_stop_failure_does_not_block_other_features(self) -> None:
+        actions = ButtonCoordinator()
+        context = EditorContext(engine=None, actions=actions, ui=None)
+        registry = ContributionRegistry(actions, context=context)
+        first = Feature("first", (EditorActionSpec("first", lambda: None),))
+        second = Feature("second", (EditorActionSpec("second", lambda: None),))
+        first.fail_stop = True
+        registry.register(first)
+        registry.register(second)
+        registry.start("first")
+        registry.start("second")
+
+        registry.stop_all()
+
+        self.assertEqual(first.stopped, 1)
+        self.assertEqual(second.stopped, 1)
 
     def test_shortcuts_normalize_and_reject_duplicates(self) -> None:
         shortcuts = ShortcutRegistry()

@@ -7,9 +7,12 @@ presentation safety.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,13 +78,28 @@ class EditorFeature(Protocol):
     shortcuts: tuple[ShortcutContribution, ...]
 
 
+@dataclass(slots=True)
+class _FeatureRecord:
+    feature: EditorFeature
+    action_ids: tuple[str, ...]
+    shortcut_sequences: tuple[str, ...]
+    started: bool = False
+
+
 class ContributionRegistry:
     """Own opt-in feature registrations while delegating execution to actions."""
 
-    def __init__(self, actions: Any, *, shortcuts: ShortcutRegistry | None = None) -> None:
+    def __init__(
+        self,
+        actions: Any,
+        *,
+        context: EditorContext | None = None,
+        shortcuts: ShortcutRegistry | None = None,
+    ) -> None:
+        self._context = context
         self._actions = actions
         self._shortcuts = shortcuts or ShortcutRegistry()
-        self._features: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {}
+        self._features: dict[str, _FeatureRecord] = {}
 
     def register(self, feature: EditorFeature) -> None:
         feature_id = feature.feature_id
@@ -113,16 +131,55 @@ class ContributionRegistry:
             self._actions.register(spec.action_id, spec.callback, enabled=spec.enabled)
         for shortcut in feature.shortcuts:
             self._shortcuts.register(shortcut)
-        self._features[feature_id] = (
-            action_ids,
-            tuple(self._shortcuts.normalize(item.sequence) for item in feature.shortcuts),
+        self._features[feature_id] = _FeatureRecord(
+            feature=feature,
+            action_ids=action_ids,
+            shortcut_sequences=tuple(
+                self._shortcuts.normalize(item.sequence) for item in feature.shortcuts
+            ),
         )
 
     def unregister(self, feature_id: str) -> None:
-        action_ids, shortcut_sequences = self._features.pop(feature_id, ((), ()))
-        for action_id in action_ids:
+        record = self._features.get(feature_id)
+        if record is None:
+            return
+        self._stop_record(record)
+        self._remove_record(feature_id, record)
+
+    def start(self, feature_id: str) -> None:
+        record = self._features[feature_id]
+        if record.started:
+            return
+        start = getattr(record.feature, "start", None)
+        try:
+            if start is not None:
+                start(self._context)
+        except Exception:
+            self._remove_record(feature_id, record)
+            raise
+        record.started = True
+
+    def stop_all(self) -> None:
+        for feature_id, record in tuple(self._features.items()):
+            self._stop_record(record)
+            self._remove_record(feature_id, record)
+
+    def _stop_record(self, record: _FeatureRecord) -> None:
+        if not record.started:
+            return
+        stop = getattr(record.feature, "stop", None)
+        record.started = False
+        if stop is not None:
+            try:
+                stop(self._context)
+            except Exception:
+                LOGGER.exception("Editor feature shutdown failed")
+
+    def _remove_record(self, feature_id: str, record: _FeatureRecord) -> None:
+        self._features.pop(feature_id, None)
+        for action_id in record.action_ids:
             self._actions.unregister(action_id)
-        for sequence in shortcut_sequences:
+        for sequence in record.shortcut_sequences:
             self._shortcuts.unregister(sequence)
 
 
@@ -194,7 +251,9 @@ class RenderTargetRegistry:
     def __init__(self) -> None:
         self._targets: dict[str, _RenderTargetRecord] = {}
 
-    def register(self, target: str, callback: Callable[[Any], None], *, replace: bool = False) -> None:
+    def register(
+        self, target: str, callback: Callable[[Any], None], *, replace: bool = False
+    ) -> None:
         if not target:
             raise ValueError("Render target cannot be empty")
         existing = self._targets.get(target)
