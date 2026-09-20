@@ -14,18 +14,6 @@ done
 
 command -v curl >/dev/null 2>&1 || { echo "ERROR: curl is required" >&2; exit 1; }
 command -v sha256sum >/dev/null 2>&1 || { echo "ERROR: sha256sum is required" >&2; exit 1; }
-if [[ -n "${EXPRA_SYSTEM_PYTHON:-}" ]]; then
-    py="$EXPRA_SYSTEM_PYTHON"
-elif command -v python3 >/dev/null 2>&1; then
-    py="$(command -v python3)"
-else
-    echo "ERROR: no system Python 3 found; set EXPRA_SYSTEM_PYTHON." >&2
-    exit 1
-fi
-if "$py" -c 'import sys; raise SystemExit(0 if sys.prefix != sys.base_prefix else 1)'; then
-    echo "ERROR: selected interpreter is inside a virtual environment: $py" >&2
-    exit 1
-fi
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
@@ -44,6 +32,41 @@ actual="$(sha256sum "$wheel" | cut -d' ' -f1)"
     echo "ERROR: wheel checksum verification failed" >&2; exit 1;
 }
 
+python_usable() {
+    local candidate="$1"
+    "$candidate" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 12) and sys.prefix == sys.base_prefix else 1)' \
+        >/dev/null 2>&1
+}
+
+py=""
+if [[ -n "${EXPRA_SYSTEM_PYTHON:-}" ]]; then
+    py="$EXPRA_SYSTEM_PYTHON"
+    python_usable "$py" || { echo "ERROR: EXPRA_SYSTEM_PYTHON must be Python 3.12+ outside a virtual environment" >&2; exit 1; }
+elif command -v python3 >/dev/null 2>&1 && python_usable "$(command -v python3)"; then
+    py="$(command -v python3)"
+fi
+
+if [[ -z "$py" ]]; then
+    [[ "$mode" == "user" ]] || { echo "ERROR: --system requires an existing Python 3.12+ interpreter" >&2; exit 1; }
+    uv="$(command -v uv || true)"
+    if [[ -z "$uv" ]]; then
+        command -v curl >/dev/null 2>&1 || { echo "ERROR: curl is required to bootstrap uv" >&2; exit 1; }
+        uv_dir="$tmp/uv-bin"
+        mkdir -p "$uv_dir"
+        curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+            https://astral.sh/uv/install.sh -o "$tmp/uv-install.sh"
+        UV_INSTALL_DIR="$uv_dir" sh "$tmp/uv-install.sh" >/dev/null
+        uv="$uv_dir/uv"
+    fi
+    venv_dir="${EXPRA_ENGINE_VENV:-$HOME/.local/share/expra-engine}"
+    "$uv" venv --python 3.12 "$venv_dir" >/dev/null
+    "$uv" pip install --python "$venv_dir/bin/python" --upgrade "$wheel" >/dev/null
+    py="$venv_dir/bin/python"
+    bin_dir="$venv_dir/bin"
+else
+    bin_dir="$($py -c 'import sysconfig; print(sysconfig.get_path("scripts", scheme="posix_user"))')"
+fi
+
 if [[ "$mode" == "system" ]]; then
     command -v sudo >/dev/null 2>&1 || { echo "sudo is required for --system" >&2; exit 1; }
     sudo -H "$py" -m pip install --upgrade --upgrade-strategy eager "$wheel"
@@ -58,4 +81,4 @@ installed_version="$($py -c 'import importlib.metadata as m; print(m.version("ex
     echo "ERROR: installed $installed_version, expected $expected_version" >&2
     exit 1
 }
-echo "Installed verified Expra $installed_version. Run: expra-editor"
+echo "Installed verified Expra $installed_version. Run: $bin_dir/expra-editor"

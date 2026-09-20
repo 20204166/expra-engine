@@ -107,6 +107,12 @@ bootstraps Python 3.12 through `winget` when needed, installs for the current
 user, and verifies the installed version. Use `-System` with a downloaded copy
 for a machine-wide install.
 
+On Linux, the online installer uses an existing Python 3.12+ interpreter when
+available. If none is available, it bootstraps `uv`, creates a managed Python
+3.12 environment under `~/.local/share/expra-engine`, installs the verified
+wheel there, and prints the launcher path. `--system` intentionally requires an
+existing system Python.
+
 ## Threading invariant
 
 **Tk owns widgets. Background work never touches widgets.**
