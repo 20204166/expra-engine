@@ -18,6 +18,7 @@ import contextlib
 import json
 import logging
 import tkinter as tk
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from tkinter import filedialog, messagebox
@@ -32,18 +33,14 @@ from expra_engine.coordinators.ui_coordinator import RenderIntent, UICoordinator
 from expra_engine.core.component import TransformComponent
 from expra_engine.core.engine import Engine, EngineRunState
 from expra_engine.core.scene import Scene
+from expra_engine.editor.builtin_features import build_builtin_features
 from expra_engine.editor.commands import CommandStack, DeleteEntityCommand, RenameEntityCommand
 from expra_engine.editor.contributions import (
     ContributionRegistry,
-    EditorActionSpec,
     EditorContext,
-    EditorFeatureSpec,
-    MenuContribution,
     MenuFactory,
     RenderTargetRegistry,
-    ShortcutContribution,
     ShortcutRegistry,
-    ToolbarContribution,
 )
 from expra_engine.editor.delivery import TkDeliveryQueue
 from expra_engine.editor.export_dialog import ExportDialog
@@ -286,14 +283,19 @@ class EditorWindow:
         )
 
     def _register_render_targets(self) -> None:
-        self._render_targets.register(
-            "hierarchy", lambda intent: self._hierarchy.render(intent.payload)
-        )
-        self._render_targets.register(
-            "inspector", lambda intent: self._inspector.render(intent.payload)
-        )
+        self._render_targets.register("hierarchy", self._render_hierarchy)
+        self._render_targets.register("inspector", self._render_inspector)
         self._render_targets.register("viewport", self._render_viewport)
-        self._render_targets.register("toolbar", lambda _intent: self._update_play_pause_state())
+        self._render_targets.register("toolbar", self._render_toolbar)
+
+    def _render_hierarchy(self, intent: RenderIntent) -> None:
+        self._hierarchy.render(intent.payload)
+
+    def _render_inspector(self, intent: RenderIntent) -> None:
+        self._inspector.render(intent.payload)
+
+    def _render_toolbar(self, _intent: RenderIntent) -> None:
+        self._update_play_pause_state()
 
     def _act_export_game(self) -> None:
         ExportDialog(
@@ -326,81 +328,7 @@ class EditorWindow:
     # ------------------------------------------------------------------
 
     def _register_actions(self) -> None:
-        features = (
-            EditorFeatureSpec(
-                "runtime",
-                actions=(
-                    EditorActionSpec("play", self._act_play),
-                    EditorActionSpec("pause", self._act_pause),
-                    EditorActionSpec("stop", self._act_stop),
-                ),
-                toolbars=(
-                    ToolbarContribution(
-                        "play", "▶  Play", group="runtime", order=0, style_role="play"
-                    ),
-                    ToolbarContribution("pause", "⏸  Pause", group="runtime", order=1),
-                    ToolbarContribution(
-                        "stop", "⏹  Stop", group="runtime", order=2, style_role="stop"
-                    ),
-                ),
-            ),
-            EditorFeatureSpec(
-                "scene",
-                actions=(
-                    EditorActionSpec("new_scene", self._act_new_scene),
-                    EditorActionSpec("save_scene", self._act_save_scene),
-                ),
-                menus=(
-                    MenuContribution("File", "New Scene", "new_scene", group="scene", order=0),
-                    MenuContribution("File", "Save Scene...", "save_scene", group="scene", order=1),
-                ),
-                toolbars=(
-                    ToolbarContribution("new_scene", "New Scene", group="scene", order=0),
-                    ToolbarContribution("save_scene", "Save", group="scene", order=1),
-                ),
-            ),
-            EditorFeatureSpec(
-                "entity",
-                actions=(
-                    EditorActionSpec("add_entity", self._act_add_entity),
-                    EditorActionSpec("delete_entity", self._act_delete_entity, enabled=False),
-                ),
-            ),
-            EditorFeatureSpec(
-                "history",
-                actions=(
-                    EditorActionSpec("undo", self._act_undo, enabled=False),
-                    EditorActionSpec("redo", self._act_redo, enabled=False),
-                ),
-                menus=(
-                    MenuContribution(
-                        "Edit", "Undo", "undo", group="history", order=0, accelerator="Ctrl+Z"
-                    ),
-                    MenuContribution(
-                        "Edit", "Redo", "redo", group="history", order=1, accelerator="Ctrl+Y"
-                    ),
-                ),
-                shortcuts=(
-                    ShortcutContribution("<Control-z>", "undo"),
-                    ShortcutContribution("<Control-y>", "redo"),
-                ),
-            ),
-            EditorFeatureSpec(
-                "export",
-                actions=(EditorActionSpec("editor.export_game", self._act_export_game),),
-                menus=(
-                    MenuContribution(
-                        "File",
-                        "Export Game...",
-                        "editor.export_game",
-                        group="build",
-                        order=0,
-                        separator_before=True,
-                    ),
-                ),
-            ),
-        )
-        for feature in features:
+        for feature in build_builtin_features(self):
             self._contributions.register(feature)
         self._shortcuts.bind(self._root, self._actions)
         self._update_play_pause_state()
@@ -484,8 +412,11 @@ class EditorWindow:
         for project in recent_projects:
             self._recent_menu.add_command(
                 label=project,
-                command=lambda path=project: self._act_open_recent(path),
+                command=self._recent_project_command(project),
             )
+
+    def _recent_project_command(self, project: str) -> Callable[[], None]:
+        return lambda: self._act_open_recent(project)
 
     def _act_open_recent(self, project: str) -> None:
         self._console.log(f"[Editor] Recent project selected: {project}")

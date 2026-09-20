@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import unittest
+from collections.abc import Callable
+from typing import cast
 
 from expra_engine.coordinators.button_coordinator import ButtonCoordinator
 from expra_engine.editor.contributions import (
@@ -28,10 +30,10 @@ class Feature:
         shortcuts: tuple[ShortcutContribution, ...] = (),
     ) -> None:
         self.feature_id = feature_id
-        self.actions = actions
-        self.menus = ()
-        self.toolbars = ()
-        self.shortcuts = shortcuts
+        self.actions: tuple[EditorActionSpec, ...] = actions
+        self.menus: tuple[MenuContribution, ...] = ()
+        self.toolbars: tuple[ToolbarContribution, ...] = ()
+        self.shortcuts: tuple[ShortcutContribution, ...] = shortcuts
         self.started = 0
         self.stopped = 0
         self.fail_start = False
@@ -215,7 +217,9 @@ class MenuFactoryTests(unittest.TestCase):
             actions,
         )
 
-        menu.commands[0]["command"]()
+        command = cast(Callable[[], bool], menu.commands[0]["command"])
+        self.assertTrue(callable(command))
+        command()
         self.assertEqual(calls, ["called"])
         self.assertEqual(menu.commands[0]["accelerator"], "Ctrl+E")
 
@@ -229,7 +233,7 @@ class ToolbarStyleTests(unittest.TestCase):
 
     def test_shortcuts_normalize_and_reject_duplicates(self) -> None:
         shortcuts = ShortcutRegistry()
-        shortcuts.register(ShortcutContribution(" <Control-z> ", "undo"))
+        shortcuts.register(ShortcutContribution(" <Control-KeyPress-z> ", "undo"))
 
         self.assertEqual(shortcuts.registered_sequences(), ("<Control-z>",))
         with self.assertRaises(ValueError):

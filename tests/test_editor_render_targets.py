@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import unittest
+from typing import Any
 
 from expra_engine.coordinators.ui_coordinator import RenderIntent, UICoordinator
 from expra_engine.editor.contributions import RenderTargetRegistry
@@ -10,7 +11,7 @@ from expra_engine.editor.contributions import RenderTargetRegistry
 
 class RenderTargetRegistryTests(unittest.TestCase):
     def test_registered_target_receives_intent(self) -> None:
-        applied: list[object] = []
+        applied: list[Any] = []
         targets = RenderTargetRegistry()
         targets.register("panel", applied.append)
 
@@ -23,8 +24,8 @@ class RenderTargetRegistryTests(unittest.TestCase):
             RenderTargetRegistry().callback_for("missing")
 
     def test_replacement_invalidates_pending_old_callback(self) -> None:
-        old: list[object] = []
-        new: list[object] = []
+        old: list[Any] = []
+        new: list[Any] = []
         targets = RenderTargetRegistry()
         targets.register("panel", old.append)
         old_callback = targets.callback_for("panel")

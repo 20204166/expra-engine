@@ -71,11 +71,20 @@ class ShortcutContribution:
 class EditorFeature(Protocol):
     """Minimal explicit provider contract for a registered editor feature."""
 
-    feature_id: str
-    actions: tuple[EditorActionSpec, ...]
-    menus: tuple[MenuContribution, ...]
-    toolbars: tuple[ToolbarContribution, ...]
-    shortcuts: tuple[ShortcutContribution, ...]
+    @property
+    def feature_id(self) -> str: ...
+
+    @property
+    def actions(self) -> tuple[EditorActionSpec, ...]: ...
+
+    @property
+    def menus(self) -> tuple[MenuContribution, ...]: ...
+
+    @property
+    def toolbars(self) -> tuple[ToolbarContribution, ...]: ...
+
+    @property
+    def shortcuts(self) -> tuple[ShortcutContribution, ...]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -252,10 +261,7 @@ class ShortcutRegistry:
             raise ValueError("Shortcut sequence cannot be empty")
         if value.startswith("<") and value.endswith(">"):
             parts = value[1:-1].split("-")
-            if parts and parts[-1] == "KeyPress":
-                parts.pop()
-            if parts and parts[-1] == "keypress":
-                parts.pop()
+            parts = [part for part in parts if part.casefold() != "keypress"]
             aliases = {"ctrl": "Control", "control": "Control", "alt": "Alt"}
             parts = [aliases.get(part.lower(), part) for part in parts]
             value = "<" + "-".join(parts) + ">"
