@@ -1,67 +1,103 @@
-# Game Export — Future Work
+# Game Export — Design and Status
 
-## What the engine wheel contains
+## What has been implemented (Phase 14)
 
-The `expra-engine` wheel ships:
+`expra_engine.export` is now a real subsystem, separate from `_release.py` and
+the editor. It takes a user's game project and packages it for standalone
+distribution.
 
-- **Core runtime**: Engine, Project, Scene, Entity, Component, TransformComponent
-- **Coordinators**: AppCoordinator, ButtonCoordinator, UICoordinator, ComponentRefreshScheduler
-- **Editor shell**: EditorWindow, all panels (hierarchy, viewport, inspector, console, toolbar)
-- **Editor utilities**: TkDeliveryQueue, persistence, instance_lock, EditorPreferences
-- **Observability**: ObservabilityWatcher
-- **CLI entry point**: `expra-editor` (launches the editor)
+### Implemented components
 
-The wheel is an **editor tool**, not a standalone game runtime.
+| Module | Responsibility |
+|---|---|
+| `export/plan.py` | `ExportPlan` — immutable, validated export configuration |
+| `export/events.py` | `ExportProgressEvent`, `ExportPhase` — progress notifications |
+| `export/manifest.py` | `AssetManifest`, `BuildManifest` — asset inventory and build record |
+| `export/bytecode.py` | `BytecodeCompiler` — `.py` → `.pyc` with cancellation |
+| `export/packager.py` | `WindowsPackager`, `LinuxPackager` — target-aware runtime install |
+| `export/exporter.py` | `GameExporter` — pure orchestrator; no tkinter/ttkbootstrap |
+| `export/verify.py` | `verify_export()` — fails closed; checks manifests |
+| `export/cli.py` | CLI: `expra export <project> --target windows\|linux` |
+| `editor/export_dialog.py` | Tkinter dialog wired via ButtonCoordinator → AppCoordinator |
 
-## What "game export" would mean
+### Runtime boundary enforced
 
-A future game export feature would take a user's project (scenes, assets, scripts) and produce a **standalone executable** that runs without the editor:
+Exported games do NOT include:
+- `expra_engine.editor`
+- `expra_engine.ui`
+- `tkinter`
+- `ttkbootstrap`
 
-1. **Stripped runtime** — editor panels, coordinators, delivery queue stripped; only Engine + core + user scenes remain
-2. **Bundled assets** — user art, audio, and scene JSON bundled alongside the runtime
-3. **Standalone packaging** — using PyInstaller or Nuitka to produce a single executable
-4. **Platform targets** — Linux AppImage, Windows `.exe`, macOS `.app`
+### Atomic build contract
 
-## Why it is not implemented yet
+Export builds in a temp directory, calls `verify_export()`, then promotes to
+the output directory. A failed build leaves the previous export intact.
 
-Game export requires:
-- A defined project format (file layout, asset pipeline, scene references)
-- A stripped runtime mode (no Tk, no editor, headless or custom renderer)
-- A real renderer seam — `ViewportPanel` is an editor-only Tk preview; a
-  production renderer is needed before export makes sense
-- Build tooling for PyInstaller/Nuitka integration
+### Cancellation
 
-These are Phase N (post-editor) concerns.  Export cannot be done correctly
-until the editor project format is stabilised and a renderer decision is made.
+All pipeline stages check a `threading.Event`; progress is injected as
+`Callable[[ExportProgressEvent], None]` — no polling, no global state.
 
-## The renderer seam
+### Target support
+
+- **Windows**: downloads embeddable Python from python.org (cached), extracts
+  to `runtime/python/`, patches `._pth` for site-packages, downloads
+  target-architecture wheels via `pip download --platform win_amd64`.
+- **Linux**: creates a venv under `runtime/`, installs packages into it.
+
+Both targets produce normal and debug launchers (`.bat` / `.sh`).
+
+### Tests (93 new + 40 from fork agent)
+
+All tests use injected fakes or mock packagers. No internet required for
+`pytest`. Covers: plan validation, manifest collection and round-trips,
+bytecode compilation, packager launcher generation, verify_export failing
+closed, full exporter end-to-end with mock packager, CLI argument parsing.
+
+---
+
+## What is still deferred
+
+### Renderer seam
 
 `ViewportPanel` (in `ui/viewport.py`) renders game objects onto a Tk canvas for
-editor preview only. The `Engine` itself has no renderer
-dependency — it is renderer-agnostic by design.  A future `GameRenderer`
-protocol will allow swapping in a real renderer for both in-editor preview
-and exported games without changing the engine core.
+editor preview only. The `Engine` itself is renderer-agnostic. A future
+`GameRenderer` protocol will allow swapping in a real renderer for both
+in-editor preview and exported games.
 
-## Audited Export Boundary
+Until a renderer backend exists, the exported game cannot actually display
+anything — the export pipeline packages and verifies structure but the game
+itself will need its own renderer wiring.
 
-The audit in `docs/URSINA_INTEGRATION_MAP.md` confirms that Ursina's `build.py`
-is not an Expra release owner. Expra wheel/build scripts, release tests,
-versioning, hashes, and verification remain authoritative. Ursina's useful
-concepts are future references only: asset manifests, stripped runtime
-contents, platform targets, and controlled asset invalidation for hot reload.
-Export still requires a renderer/platform backend and must produce a game
-runtime with no Tk or Panda/Ursina dependency; no existing Expra engine,
-coordinator, editor, or release system is replaced.
+### Dependency resolution from pyproject.toml
 
-## Platform, Reload, And Ownership Boundaries
+`GameExporter._resolve_packages()` currently uses only `plan.extra_packages`.
+A complete implementation would call `uv pip compile pyproject.toml` to
+auto-resolve the full dependency graph for the target platform.
 
-Expra's existing release tooling, wheel scripts, release tests, versioning,
-hashes, and verification remain the release owner. Ursina exporter concepts
-are future references only, not a replacement build path. Existing coordinator
-owners remain the owners of background work and UI delivery.
+### macOS target
 
-Hot reload, if added, will use controlled asset invalidation rather than
-`exec`. Window/display settings belong behind a platform backend. Renderer
-implementation, mobile touch, color/gradient editing, radial menus, grid
-editor behavior, and dialogue presentation remain deferred contracts rather
-than export features. Exported games must have no Panda/Ursina/Tk game runtime.
+Not implemented. Would need a framework Python bundle strategy.
+
+### Single-file executable
+
+PyInstaller / Nuitka integration is not implemented. Current output is a
+directory with a launcher script, not a single `.exe`.
+
+### Hot reload
+
+If added, will use controlled asset invalidation rather than `exec`. No
+global scene state mutation from exported games.
+
+---
+
+## Ownership boundaries (unchanged)
+
+- `_release.py` owns the Expra **engine wheel** build. It is not touched by the
+  export pipeline.
+- `AppCoordinator` / `ButtonCoordinator` / `TkDeliveryQueue` remain the owners
+  of background work and UI delivery.
+- Security model, firewall configuration, HMAC secrets, fencing tokens — none
+  of these are touched by the export pipeline.
+- Exported games must have no Panda / Ursina / Tk game runtime dependency.
+
