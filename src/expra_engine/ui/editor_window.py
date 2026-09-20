@@ -18,6 +18,7 @@ import contextlib
 import json
 import logging
 import tkinter as tk
+from dataclasses import replace
 from pathlib import Path
 from tkinter import filedialog, messagebox
 from tkinter import ttk as tkttk
@@ -31,9 +32,11 @@ from expra_engine.coordinators.ui_coordinator import RenderIntent, UICoordinator
 from expra_engine.core.component import TransformComponent
 from expra_engine.core.engine import Engine, EngineRunState
 from expra_engine.core.scene import Scene
-from expra_engine.editor.delivery import TkDeliveryQueue
 from expra_engine.editor.commands import CommandStack, DeleteEntityCommand, RenameEntityCommand
+from expra_engine.editor.delivery import TkDeliveryQueue
 from expra_engine.editor.export_dialog import ExportDialog
+from expra_engine.editor.preferences import PreferencesStore
+from expra_engine.editor.window_placement import WindowGeometry
 from expra_engine.ui.console import ConsolePanel
 from expra_engine.ui.hierarchy import HierarchyPanel
 from expra_engine.ui.inspector import InspectorPanel
@@ -58,6 +61,7 @@ _INSPECTOR_WIDTH = 300
 _INSPECTOR_MIN_WIDTH = 260
 _BOTTOM_HEIGHT = 150
 _BOTTOM_MIN_HEIGHT = 96
+_PREFERENCES_PATH = Path.home() / ".expra" / "preferences.json"
 
 
 class EditorWindow:
@@ -68,6 +72,9 @@ class EditorWindow:
         self._is_closing = False
         self._pending_timer_ids: set[str] = set()
         self._sash_after_id: str | None = None
+        self._preferences_path = _PREFERENCES_PATH
+        self._preferences_store = PreferencesStore()
+        self._preferences = self._preferences_store.load(self._preferences_path)
 
         # Root window — ttkbootstrap Window replaces bare tk.Tk
         try:
@@ -76,6 +83,9 @@ class EditorWindow:
             self._root = ttk.Window(themename="darkly")
         self._root.title("Expra Editor")
         self._root.geometry(f"{_WINDOW_WIDTH}x{_WINDOW_HEIGHT}")
+        saved_geometry = WindowGeometry.from_tk_geometry(self._preferences.window_geometry or "")
+        if saved_geometry is not None:
+            self._root.geometry(saved_geometry.to_tk_geometry())
         self._root.minsize(_WINDOW_MIN_WIDTH, _WINDOW_MIN_HEIGHT)
         self._root.protocol("WM_DELETE_WINDOW", self._on_close)
         self._colors = accent_theme_colors("cyan")
@@ -227,17 +237,29 @@ class EditorWindow:
 
         file_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="File", menu=file_menu)
-        file_menu.add_command(label="New Scene", command=lambda: self._actions.dispatch("new_scene"), accelerator="")
-        file_menu.add_command(label="Save Scene...", command=lambda: self._actions.dispatch("save_scene"), accelerator="")
+        file_menu.add_command(
+            label="New Scene", command=lambda: self._actions.dispatch("new_scene"), accelerator=""
+        )
+        file_menu.add_command(
+            label="Save Scene...",
+            command=lambda: self._actions.dispatch("save_scene"),
+            accelerator="",
+        )
         file_menu.add_separator()
-        file_menu.add_command(label="Export Game...", command=lambda: self._actions.dispatch("editor.export_game"))
+        file_menu.add_command(
+            label="Export Game...", command=lambda: self._actions.dispatch("editor.export_game")
+        )
         file_menu.add_separator()
         file_menu.add_command(label="Quit", command=self._on_close)
 
         edit_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Edit", menu=edit_menu)
-        edit_menu.add_command(label="Undo", command=lambda: self._actions.dispatch("undo"), accelerator="Ctrl+Z")
-        edit_menu.add_command(label="Redo", command=lambda: self._actions.dispatch("redo"), accelerator="Ctrl+Y")
+        edit_menu.add_command(
+            label="Undo", command=lambda: self._actions.dispatch("undo"), accelerator="Ctrl+Z"
+        )
+        edit_menu.add_command(
+            label="Redo", command=lambda: self._actions.dispatch("redo"), accelerator="Ctrl+Y"
+        )
         self._edit_menu = edit_menu
 
     def _act_export_game(self) -> None:
@@ -269,7 +291,6 @@ class EditorWindow:
     # ------------------------------------------------------------------
     # Action registration
     # ------------------------------------------------------------------
-
 
     def _register_actions(self) -> None:
         a = self._actions
@@ -556,6 +577,14 @@ class EditorWindow:
 
     def _on_close(self) -> None:
         self._is_closing = True
+        geometry = WindowGeometry.from_tk_geometry(self._root.geometry())
+        if geometry is not None:
+            self._preferences = replace(
+                self._preferences,
+                window_geometry=geometry.to_tk_geometry(),
+            )
+            with contextlib.suppress(OSError, TypeError, ValueError):
+                self._preferences_store.save(self._preferences_path, self._preferences)
         if self._sash_after_id is not None:
             with contextlib.suppress(tk.TclError):
                 self._root.after_cancel(self._sash_after_id)

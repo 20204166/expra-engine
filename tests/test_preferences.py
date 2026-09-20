@@ -77,6 +77,13 @@ class PreferencesStoreTests(unittest.TestCase):
             self.assertIsInstance(loaded.recent_projects, tuple)
             self.assertEqual(loaded.recent_projects, ("/game1", "/game2", "/game3"))
 
+    def test_window_geometry_round_trips(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "prefs.json"
+            self.store.save(path, EditorPreferences(window_geometry="1280x800+10+20"))
+            loaded = self.store.load(path)
+            self.assertEqual(loaded.window_geometry, "1280x800+10+20")
+
 
 if __name__ == "__main__":
     unittest.main()

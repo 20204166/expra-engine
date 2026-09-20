@@ -18,6 +18,7 @@ class EditorPreferences:
     theme: str = "darkly"
     recent_projects: tuple[str, ...] = ()
     autosave_interval_ms: int = 30_000
+    window_geometry: str | None = None
     schema_version: int = _SCHEMA_VERSION
 
 
@@ -43,6 +44,11 @@ class PreferencesStore:
                 recent_projects=tuple(data.get("recent_projects", ())),
                 autosave_interval_ms=int(
                     data.get("autosave_interval_ms", _DEFAULTS.autosave_interval_ms)
+                ),
+                window_geometry=(
+                    str(data["window_geometry"])
+                    if data.get("window_geometry") is not None
+                    else None
                 ),
                 schema_version=_SCHEMA_VERSION,
             )
