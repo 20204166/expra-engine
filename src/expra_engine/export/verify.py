@@ -2,24 +2,65 @@
 
 from __future__ import annotations
 
+import ast
 import json
 from pathlib import Path
 
-_REQUIRED_MANIFEST_KEYS: frozenset[str] = frozenset({
-    "game_name",
-    "game_version",
-    "engine_version",
-    "target",
-    "python_version",
-    "arch",
-    "compile_bytecode",
-    "entry_point",
-    "build_timestamp",
-})
+_FORBIDDEN_IMPORTS: tuple[str, ...] = (
+    "tkinter",
+    "ttkbootstrap",
+    "expra_engine.editor",
+    "expra_engine.ui",
+    "expra_engine.design",
+)
+
+_REQUIRED_MANIFEST_KEYS: frozenset[str] = frozenset(
+    {
+        "game_name",
+        "game_version",
+        "engine_version",
+        "target",
+        "python_version",
+        "arch",
+        "compile_bytecode",
+        "entry_point",
+        "build_timestamp",
+    }
+)
 
 
 class ExportVerificationError(RuntimeError):
     pass
+
+
+def _is_forbidden_import(module: str, forbidden: str) -> bool:
+    return module == forbidden or module.startswith(f"{forbidden}.")
+
+
+def _scan_for_forbidden_imports(export_dir: Path) -> list[str]:
+    """Return paths and imports that must not ship in a game export."""
+    violations: list[str] = []
+    for py_file in export_dir.rglob("*.py"):
+        try:
+            source = py_file.read_text(encoding="utf-8", errors="replace")
+            tree = ast.parse(source, filename=str(py_file))
+        except (OSError, SyntaxError):
+            continue
+
+        imported_modules: list[str] = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imported_modules.extend(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module is not None:
+                imported_modules.append(node.module)
+
+        for module in imported_modules:
+            for forbidden in _FORBIDDEN_IMPORTS:
+                if _is_forbidden_import(module, forbidden):
+                    relative_path = py_file.relative_to(export_dir)
+                    violations.append(f"{relative_path}: forbidden import '{module}'")
+                    break
+    return violations
 
 
 def verify_export(build_dir: Path) -> None:
@@ -59,3 +100,8 @@ def verify_export(build_dir: Path) -> None:
 
     if "entries" not in asset_data:
         raise ExportVerificationError("asset_manifest.json missing 'entries' key")
+
+    forbidden_imports = _scan_for_forbidden_imports(build_dir)
+    if forbidden_imports:
+        details = "; ".join(forbidden_imports)
+        raise ExportVerificationError(f"Forbidden imports in export: {details}")
