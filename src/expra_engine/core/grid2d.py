@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import copy
 from collections.abc import Callable, Iterator
+from typing import Any, cast
 
 __all__ = ("Grid2D",)
 
@@ -200,10 +201,10 @@ class Grid2D[T]:
         x0, y0 = int(x), int(y)
         x1, y1 = min(x0 + 1, self._width - 1), min(y0 + 1, self._height - 1)
         tx, ty = x - x0, y - y0
-        v00 = self._cells[x0][y0]
-        v10 = self._cells[x1][y0]
-        v01 = self._cells[x0][y1]
-        v11 = self._cells[x1][y1]
+        v00 = float(cast(Any, self._cells[x0][y0]))
+        v10 = float(cast(Any, self._cells[x1][y0]))
+        v01 = float(cast(Any, self._cells[x0][y1]))
+        v11 = float(cast(Any, self._cells[x1][y1]))
         return float(
             (v00 * (1.0 - tx) + v10 * tx) * (1.0 - ty) + (v01 * (1.0 - tx) + v11 * tx) * ty
         )

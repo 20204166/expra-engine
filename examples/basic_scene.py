@@ -26,10 +26,7 @@ def main() -> None:
 
     reloaded = Scene.from_dict(json.loads(data))
     print("\nReloaded:", reloaded)
-    print("IDs match:", all(
-        scene.find_entity(e.entity_id) is not None
-        for e in reloaded.entities
-    ))
+    print("IDs match:", all(scene.find_entity(e.entity_id) is not None for e in reloaded.entities))
 
 
 if __name__ == "__main__":

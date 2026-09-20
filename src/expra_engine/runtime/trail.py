@@ -43,8 +43,11 @@ class TrailRenderer:
         while self._points and self._points[0].age >= self.max_lifetime:
             self._points.popleft()
 
-        if self._last_x is None or (
-            (x - self._last_x) ** 2 + (y - self._last_y) ** 2 >= self.min_spacing**2
+        last_x, last_y = self._last_x, self._last_y
+        if (
+            last_x is None
+            or last_y is None
+            or ((x - last_x) ** 2 + (y - last_y) ** 2 >= self.min_spacing**2)
         ):
             self._points.append(TrailPoint(x, y))
             self._last_x, self._last_y = x, y

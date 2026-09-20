@@ -6,12 +6,14 @@ import os
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 from unittest.mock import patch
 
 from examples.neon_arena.game import NeonArenaGame, load_scene
+from expra_engine.core.component import TransformComponent
 from expra_engine.core.engine import Engine
-from expra_engine.runtime import PygameRuntime
+from expra_engine.runtime import PygameRuntime, ScriptComponent, ScriptRegistry
+from expra_engine.runtime.input import ActionId, PhysicalInput
 
 PROJECT_DIR = Path(__file__).parents[1] / "examples" / "neon_arena"
 
@@ -45,6 +47,15 @@ class _FakePygame:
     def __init__(self, frames: list[list[Any]]) -> None:
         self.event = SimpleNamespace(get=lambda: frames.pop(0))
         self.display = _FakeDisplay()
+        self.key = SimpleNamespace(
+            name=lambda key: {
+                self.K_LEFT: "left",
+                self.K_RIGHT: "right",
+                self.K_UP: "up",
+                self.K_DOWN: "down",
+                self.K_r: "r",
+            }[key]
+        )
 
     def quit(self) -> None:
         pass
@@ -73,6 +84,22 @@ def _running_game(frames: list[list[Any]], clock_ticks: list[int]) -> tuple[Neon
     return game, engine
 
 
+def _running_scripted() -> Engine:
+    engine = Engine()
+    engine.set_scene(load_scene(PROJECT_DIR / "scenes" / "scripted.json"))
+    engine.set_script_registry(ScriptRegistry(PROJECT_DIR))
+    for action, key in (
+        ("move_left", _FakePygame.K_LEFT),
+        ("move_right", _FakePygame.K_RIGHT),
+        ("move_up", _FakePygame.K_UP),
+        ("move_down", _FakePygame.K_DOWN),
+        ("restart", _FakePygame.K_r),
+    ):
+        engine.input_map.bind(ActionId(action), PhysicalInput("keyboard", str(key)))
+    engine.play()
+    return engine
+
+
 class TestNeonArena(unittest.TestCase):
     def test_entrypoint_creates_a_new_surface_for_video_resize(self) -> None:
         entrypoint = importlib.import_module("examples.neon_arena.__main__")
@@ -83,8 +110,6 @@ class TestNeonArena(unittest.TestCase):
                 [],
             ]
         )
-        fake_pygame.VIDEORESIZE = 4
-
         with (
             patch.dict(
                 os.environ,
@@ -142,6 +167,32 @@ class TestNeonArena(unittest.TestCase):
 
         self.assertEqual(report["frames_updated"], 2)
         self.assertEqual(report["frames_rendered"], 2)
+        self.assertTrue(report["runtime_started"])
+        self.assertTrue(report["completed"])
+
+    def test_scripted_entrypoint_smoke_loads_project_behaviours(self) -> None:
+        entrypoint = importlib.import_module("examples.neon_arena.__main__")
+        report_path = PROJECT_DIR / "test-scripted-smoke-report.json"
+        fake_pygame = _SmokePygame()
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "EXPRA_NEON_MODE": "scripted",
+                    "EXPRA_SMOKE_FRAMES": "2",
+                    "EXPRA_SMOKE_REPORT": str(report_path),
+                },
+                clear=False,
+            ),
+            patch.object(entrypoint.importlib, "import_module", return_value=fake_pygame),
+        ):
+            try:
+                entrypoint.main()
+                report = json.loads(report_path.read_text(encoding="utf-8"))
+            finally:
+                report_path.unlink(missing_ok=True)
+
         self.assertTrue(report["runtime_started"])
         self.assertTrue(report["completed"])
 
@@ -224,7 +275,9 @@ class TestNeonArena(unittest.TestCase):
 
         game.restart()
 
-        self.assertEqual(engine.active_scene.to_dict(), saved_before)
+        active_scene = engine.active_scene
+        assert active_scene is not None
+        self.assertEqual(active_scene.to_dict(), saved_before)
         self.assertEqual(game.score, 0)
         self.assertEqual(game.status, "")
         self.assertEqual(game.player_transform.x, saved_before["entities"][0]["components"][0]["x"])
@@ -232,11 +285,124 @@ class TestNeonArena(unittest.TestCase):
         self.assertEqual(json.loads(scene_path.read_text(encoding="utf-8")), saved_before)
         engine.stop()
 
+    def test_scripted_mode_matches_legacy_gameplay_and_cleans_up(self) -> None:
+        engine = _running_scripted()
+        self.assertFalse(any(isinstance(system, NeonArenaGame) for system in engine._systems))
+        self.assertEqual(
+            {type(behaviour).__name__ for behaviour in engine.behaviour_system.instances},
+            {"PlayerBehaviour", "ArenaBehaviour", "GameController"},
+        )
+        active_scene = engine.active_scene
+        assert active_scene is not None
+        player = active_scene.get_entities_by_tag("player")[0]
+        target = active_scene.get_entities_by_tag("target")[0]
+        transform = player.get_component(TransformComponent)
+        target_transform = target.get_component(TransformComponent)
+        assert transform is not None and target_transform is not None
+        transform.x = target_transform.x - 1.0
+        action = engine.input_map.press(PhysicalInput("keyboard", str(_FakePygame.K_RIGHT)))[0]
+        engine.signal(action)
+        engine.tick(1.0 / 60.0)
+        controller = next(
+            behaviour
+            for behaviour in engine.behaviour_system.instances
+            if type(behaviour).__name__ == "GameController"
+        )
+        self.assertEqual(transform.x, 69.5)
+        controller_state = cast(Any, controller)
+        self.assertEqual(controller_state.score, 1)
+        self.assertEqual(controller_state.status, "won")
+        self.assertEqual(controller_state.won_events, 1)
+        engine.stop()
+        self.assertEqual(engine.behaviour_system.instances, ())
+
+    def test_scripted_exposed_speed_changes_movement_without_legacy_system(self) -> None:
+        engine = _running_scripted()
+        edit_scene = engine.edit_scene
+        assert edit_scene is not None
+        entity = edit_scene.find_entity("neon-arena-player")
+        assert entity is not None
+        component = entity.get_component(ScriptComponent)
+        assert component is not None
+        component.exposed_values["speed"] = 10.0
+        engine.stop()
+        engine.play()
+        action = engine.input_map.press(PhysicalInput("keyboard", str(_FakePygame.K_RIGHT)))[0]
+        engine.signal(action)
+        engine.tick(0.5)
+        active_scene = engine.active_scene
+        assert active_scene is not None
+        player = active_scene.get_entities_by_tag("player")[0]
+        transform = player.get_component(TransformComponent)
+        assert transform is not None
+        self.assertEqual(transform.x, 15.0)
+        engine.stop()
+
+    def test_scripted_restart_recreates_behaviours_and_resets_runtime_state(self) -> None:
+        engine = _running_scripted()
+        active_scene = engine.active_scene
+        assert active_scene is not None
+        player = active_scene.get_entities_by_tag("player")[0]
+        target = active_scene.get_entities_by_tag("target")[0]
+        transform = player.get_component(TransformComponent)
+        assert transform is not None
+        controller = next(
+            behaviour
+            for behaviour in engine.behaviour_system.instances
+            if type(behaviour).__name__ == "GameController"
+        )
+        cast(Any, controller).score = 1
+        cast(Any, controller).status = "won"
+        transform.x = 75.0
+        target.enabled = False
+        old_instances = engine.behaviour_system.instances
+
+        engine.signal(engine.input_map.press(PhysicalInput("keyboard", str(_FakePygame.K_r)))[0])
+        engine.tick(1.0 / 60.0)
+
+        self.assertEqual(engine.run_state.value, "play")
+        self.assertIsNot(old_instances, engine.behaviour_system.instances)
+        new_controller = next(
+            behaviour
+            for behaviour in engine.behaviour_system.instances
+            if type(behaviour).__name__ == "GameController"
+        )
+        self.assertEqual(cast(Any, new_controller).score, 0)
+        self.assertEqual(cast(Any, new_controller).status, "")
+        restarted_scene = engine.active_scene
+        assert restarted_scene is not None
+        restarted_player = restarted_scene.get_entities_by_tag("player")[0]
+        restarted_target = restarted_scene.get_entities_by_tag("target")[0]
+        restarted_transform = restarted_player.get_component(TransformComponent)
+        assert restarted_transform is not None
+        self.assertEqual(restarted_transform.x, 10.0)
+        self.assertTrue(restarted_target.enabled)
+        engine.stop()
+
+    def test_pygame_key_names_become_semantic_input_events(self) -> None:
+        engine = Engine()
+        engine.set_scene(load_scene(PROJECT_DIR / "scenes" / "scripted.json"))
+        engine.input_map.bind(ActionId("move_right"), PhysicalInput("keyboard", "right"))
+        pygame = _FakePygame([[SimpleNamespace(type=_FakePygame.KEYDOWN, key=_FakePygame.K_RIGHT)]])
+        runtime = PygameRuntime(
+            engine,
+            pygame_module=pygame,
+            clock=_FakeClock([16]),
+            surface_factory=pygame.display.set_mode,
+        )
+        received: list[Any] = []
+        engine.signal = received.append  # type: ignore[method-assign]
+        engine.play()
+        runtime._poll_events()
+        self.assertEqual(received[0].action, ActionId("move_right"))
+        engine.stop()
+
 
 class _SmokePygame:
     QUIT = 1
     KEYDOWN = 2
     KEYUP = 3
+    VIDEORESIZE = 4
     K_LEFT = 10
     K_RIGHT = 11
     K_UP = 12

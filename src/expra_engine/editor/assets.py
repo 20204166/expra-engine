@@ -45,6 +45,15 @@ class AssetEntry:
 
         return self.path
 
+    @property
+    def kind(self) -> str:
+        """Return the editor-facing asset kind, including registered audio files."""
+        if self.is_folder:
+            return "Folder"
+        if self.path.suffix.casefold() in {".wav", ".ogg", ".mp3", ".flac", ".m4a"}:
+            return "Audio"
+        return "File"
+
 
 @dataclass(frozen=True)
 class AssetScanRequest:

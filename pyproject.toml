@@ -25,6 +25,7 @@ dev = [
 [project.scripts]
 expra-editor = "expra_engine.main:main"
 expra-export = "expra_engine.export.cli:main"
+expra-new = "expra_engine.project_cli:main"
 
 [tool.setuptools.dynamic]
 version = { attr = "expra_engine._version.__version__" }

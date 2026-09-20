@@ -108,6 +108,15 @@ class AssetBrowserPanel(tk.Frame):
     def current_directory(self) -> Path:
         return self._current_directory
 
+    def set_root_directory(self, directory: Path) -> None:
+        """Switch the browser to a new project asset root."""
+        self._root_directory = directory.resolve()
+        self._resource_root = self._root_directory
+        self._current_directory = self._root_directory
+        self._selected_entry = None
+        self._path_var.set(str(self._current_directory))
+        self.refresh()
+
     @property
     def selected_entry(self) -> AssetEntry | None:
         return self._selected_entry
@@ -153,7 +162,7 @@ class AssetBrowserPanel(tk.Frame):
                 "end",
                 iid=iid,
                 text=entry.name,
-                values=("Folder" if entry.is_folder else "File", str(entry.logical_id or "")),
+                values=(entry.kind, str(entry.logical_id or "")),
             )
         self._selected_entry = None
 

@@ -1,6 +1,17 @@
 {
   "name": "Neon Arena",
+  "game_version": "1.0.0",
+  "start_scene": "scenes/main.json",
+  "entry_point": "scripted_main.py",
   "scenes": [
-    "scenes/main.json"
-  ]
+    "scenes/main.json",
+    "scenes/scripted.json"
+  ],
+  "input": {
+    "move_left": "keyboard:left",
+    "move_right": "keyboard:right",
+    "move_up": "keyboard:up",
+    "move_down": "keyboard:down",
+    "restart": "keyboard:r"
+  }
 }

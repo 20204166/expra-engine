@@ -6,6 +6,7 @@ import importlib
 from collections.abc import Callable
 from typing import Any
 
+from expra_engine.runtime.input import PhysicalInput
 from expra_engine.runtime.rendering import (
     OrthographicCamera,
     RenderContext,
@@ -127,5 +128,23 @@ class PygameRuntime:
                     self.renderer.resize(self._context.viewport)
             elif event_type == self.pygame.KEYDOWN:
                 self._keys.add(event.key)
+                self._signal_input("press", event.key)
             elif event_type == self.pygame.KEYUP:
                 self._keys.discard(event.key)
+                self._signal_input("release", event.key)
+
+    def _signal_input(self, phase: str, key: Any) -> None:
+        """Translate a backend key event into the engine's semantic input map."""
+        input_map = getattr(self.engine, "input_map", None)
+        signal = getattr(self.engine, "signal", None)
+        if input_map is None or signal is None:
+            return
+        key_name = str(key)
+        key_api = getattr(self.pygame, "key", None)
+        name = getattr(key_api, "name", None)
+        if callable(name):
+            key_name = str(name(key))
+        physical = PhysicalInput("keyboard", key_name)
+        transitions = getattr(input_map, phase)(physical)
+        for action_event in transitions:
+            signal(action_event)

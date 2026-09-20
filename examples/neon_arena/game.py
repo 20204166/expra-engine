@@ -92,7 +92,11 @@ class NeonArenaGame(RuntimeSystem):
 
         target = self.target
         target_transform = self.target_transform
-        if target.enabled and abs(transform.x - target_transform.x) <= 1.0 and abs(transform.y - target_transform.y) <= 1.0:
+        if (
+            target.enabled
+            and abs(transform.x - target_transform.x) <= 1.0
+            and abs(transform.y - target_transform.y) <= 1.0
+        ):
             target.enabled = False
             self.score += 1
             self.status = "won"
@@ -105,7 +109,9 @@ class NeonArenaGame(RuntimeSystem):
         engine.play()
 
     def _axis(self, positive_key: Any, negative_key: Any) -> int:
-        return int(self.runtime.is_key_down(positive_key)) - int(self.runtime.is_key_down(negative_key))
+        return int(self.runtime.is_key_down(positive_key)) - int(
+            self.runtime.is_key_down(negative_key)
+        )
 
     def _entity(self, tag: str) -> Any:
         scene = self._engine.active_scene if self._engine is not None else None

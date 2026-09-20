@@ -1,0 +1,78 @@
+{
+  "scene_id": "neon-arena-scripted",
+  "name": "Neon Arena (Scripted)",
+  "entities": [
+    {
+      "entity_id": "neon-arena-player",
+      "name": "Player",
+      "enabled": true,
+      "layer": 1,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 10.0,
+          "y": 50.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "script",
+          "enabled": true,
+          "script_id": "project://scripts/player_behaviour.py",
+          "behaviour_class": "PlayerBehaviour",
+          "exposed_values": {"speed": 30.0},
+          "order": 0
+        }
+      ],
+      "tags": ["player"]
+    },
+    {
+      "entity_id": "neon-arena-target",
+      "name": "Target",
+      "enabled": true,
+      "layer": 1,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 70.0,
+          "y": 50.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "script",
+          "enabled": true,
+          "script_id": "project://scripts/arena_behaviour.py",
+          "behaviour_class": "ArenaBehaviour",
+          "exposed_values": {},
+          "order": 0
+        }
+      ],
+      "tags": ["target"]
+    },
+    {
+      "entity_id": "neon-arena-controller",
+      "name": "Game Controller",
+      "enabled": true,
+      "layer": 0,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "script",
+          "enabled": true,
+          "script_id": "project://scripts/game_controller.py",
+          "behaviour_class": "GameController",
+          "exposed_values": {"target_score": 1},
+          "order": 0
+        }
+      ],
+      "tags": ["game_controller"]
+    }
+  ]
+}

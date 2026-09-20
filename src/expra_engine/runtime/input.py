@@ -88,6 +88,11 @@ class InputMap:
         self._held.discard(binding)
         return True
 
+    def clear(self) -> None:
+        """Remove all project bindings and held state."""
+        self._bindings.clear()
+        self._held.clear()
+
     def press(self, physical: PhysicalInput) -> tuple[ActionEvent, ...]:
         """Resolve a physical press into one semantic action event."""
         binding = self._bindings.get(physical)

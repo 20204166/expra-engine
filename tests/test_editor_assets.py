@@ -58,6 +58,10 @@ class TestAssetNormalization(unittest.TestCase):
         self.assertEqual(entry.display_path, path)
         self.assertEqual(entry.logical_id, ResourceId.parse("assets://hero.png"))
 
+    def test_audio_assets_are_registered_as_audio_entries(self) -> None:
+        self.assertEqual(AssetEntry(Path("theme.ogg"), "theme.ogg", False).kind, "Audio")
+        self.assertEqual(AssetEntry(Path("theme.wav"), "theme.wav", False).kind, "Audio")
+
 
 class TestAssetBrowserState(unittest.TestCase):
     def test_selection_and_folder_navigation_update_display_path(self) -> None:

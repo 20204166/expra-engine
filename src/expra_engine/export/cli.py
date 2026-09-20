@@ -12,6 +12,7 @@ import sys
 import threading
 from pathlib import Path
 
+from expra_engine.core.project import Project, ProjectError
 from expra_engine.export.events import ExportProgressEvent
 from expra_engine.export.exporter import ExportError, GameExporter
 from expra_engine.export.plan import ExportPlan, ExportTarget, PythonArch, RuntimeProfile
@@ -36,7 +37,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output directory (default: <project>/builds)",
     )
     parser.add_argument("--game-name", default=None, help="Game name (default: project dir name)")
-    parser.add_argument("--game-version", default="1.0.0", metavar="VERSION")
+    parser.add_argument("--game-version", default=None, metavar="VERSION")
     parser.add_argument("--python-version", default="3.12.4", metavar="X.Y.Z")
     parser.add_argument("--arch", choices=["amd64", "arm64"], default="amd64")
     parser.add_argument(
@@ -47,7 +48,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--entry-point",
-        default="__main__.py",
+        default=None,
         help="Entry point relative to project dir",
     )
     parser.add_argument(
@@ -70,15 +71,21 @@ def cli_main(argv: list[str] | None = None) -> int:
     project_dir = args.project.resolve()
     output_dir = (args.output or project_dir / "builds").resolve()
     game_name = args.game_name or project_dir.name
+    try:
+        project = Project.load(project_dir)
+    except ProjectError:
+        project = None
+    entry_point = args.entry_point or (project.entry_point if project else "__main__.py")
+    game_version = args.game_version or (project.game_version if project else "1.0.0")
 
     try:
         plan = ExportPlan(
             project_dir=project_dir,
-            entry_point=args.entry_point,
+            entry_point=entry_point,
             output_dir=output_dir,
             target=ExportTarget(args.target),
             game_name=game_name,
-            game_version=args.game_version,
+            game_version=game_version,
             python_version=args.python_version,
             arch=PythonArch(args.arch),
             compile_bytecode=not args.no_bytecode,

@@ -24,7 +24,28 @@ class TestBuildParser(unittest.TestCase):
             project = Path(tmp) / "game"
             project.mkdir()
             args = build_parser().parse_args([str(project), "--target", "linux"])
-            self.assertEqual(args.game_version, "1.0.0")
+            self.assertIsNone(args.game_version)
+
+    def test_project_manifest_supplies_entry_point_and_version(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp) / "game"
+            project.mkdir()
+            (project / "project.json").write_text(
+                '{"name": "game", "scenes": [], "entry_point": "scripted_main.py", '
+                '"game_version": "2.0.0"}'
+            )
+            (project / "scripted_main.py").write_text("pass")
+            output = Path(tmp) / "builds"
+            with patch(
+                "expra_engine.export.cli.GameExporter.export", return_value=output
+            ) as export:
+                self.assertEqual(
+                    cli_main([str(project), "--target", "linux", "--output", str(output)]),
+                    0,
+                )
+                plan = export.call_args.args[0]
+            self.assertEqual(plan.entry_point, "scripted_main.py")
+            self.assertEqual(plan.game_version, "2.0.0")
 
     def test_no_bytecode_flag(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

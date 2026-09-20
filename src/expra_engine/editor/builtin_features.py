@@ -32,10 +32,28 @@ def build_builtin_features(window: Any) -> tuple[EditorFeatureSpec, ...]:
         EditorFeatureSpec(
             "scene",
             actions=(
+                EditorActionSpec("new_project", window._act_new_project),
+                EditorActionSpec("open_project", window._act_open_project),
+                EditorActionSpec("open_project_manifest", window._act_open_project_manifest),
+                EditorActionSpec("close_project", window._act_close_project, enabled=False),
+                EditorActionSpec("import_asset", window._act_import_asset, enabled=False),
+                EditorActionSpec("configure_input", window._act_configure_input, enabled=False),
                 EditorActionSpec("new_scene", window._act_new_scene),
-                EditorActionSpec("save_scene", window._act_save_scene),
+                EditorActionSpec("save_scene", window._act_save_scene, enabled=False),
             ),
             menus=(
+                MenuContribution(
+                    "File", "New Project...", "new_project", group="project", order=-2
+                ),
+                MenuContribution(
+                    "File", "Open Project...", "open_project", group="project", order=-1
+                ),
+                MenuContribution(
+                    "File", "Open Project Manifest...", "open_project_manifest", group="project"
+                ),
+                MenuContribution("File", "Close Project", "close_project", group="project"),
+                MenuContribution("File", "Import Asset...", "import_asset", group="project"),
+                MenuContribution("File", "Input Settings...", "configure_input", group="project"),
                 MenuContribution("File", "New Scene", "new_scene", group="scene", order=0),
                 MenuContribution("File", "Save Scene...", "save_scene", group="scene", order=1),
             ),

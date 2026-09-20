@@ -37,6 +37,8 @@ class ExportDialog(ttk.Toplevel):
         button_coordinator: ButtonCoordinator,
         *,
         on_complete: Callable[[Path], None] | None = None,
+        game_version: str = "1.0.0",
+        entry_point: str = "__main__.py",
     ) -> None:
         super().__init__(parent)  # type: ignore[arg-type]
         self.title("Export Game")
@@ -45,6 +47,8 @@ class ExportDialog(ttk.Toplevel):
         self._app = app_coordinator
         self._buttons = button_coordinator
         self._on_complete = on_complete
+        self._game_version = game_version
+        self._entry_point = entry_point
 
         self._build_ui()
         self._register_actions()
@@ -75,7 +79,7 @@ class ExportDialog(ttk.Toplevel):
         )
 
         ttk.Label(frame, text="Version:").grid(row=2, column=0, sticky="w", **pad)
-        self._version_var = tk.StringVar(value="1.0.0")
+        self._version_var = tk.StringVar(value=self._game_version)
         ttk.Entry(frame, textvariable=self._version_var, width=14).grid(
             row=2, column=1, sticky="w", **pad
         )
@@ -133,7 +137,7 @@ class ExportDialog(ttk.Toplevel):
         try:
             plan = ExportPlan(
                 project_dir=self._project,
-                entry_point="__main__.py",
+                entry_point=getattr(self, "_entry_point", "__main__.py"),
                 output_dir=Path(self._output_var.get()).resolve(),
                 target=ExportTarget(self._target_var.get()),
                 game_name=self._name_var.get(),

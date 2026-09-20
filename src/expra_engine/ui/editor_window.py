@@ -32,6 +32,7 @@ from expra_engine.coordinators.button_coordinator import ButtonCoordinator
 from expra_engine.coordinators.ui_coordinator import RenderIntent, UICoordinator
 from expra_engine.core.component import TransformComponent
 from expra_engine.core.engine import Engine, EngineRunState
+from expra_engine.core.project import Project
 from expra_engine.core.scene import Scene
 from expra_engine.editor.builtin_features import build_builtin_features
 from expra_engine.editor.commands import (
@@ -50,6 +51,7 @@ from expra_engine.editor.contributions import (
 from expra_engine.editor.delivery import TkDeliveryQueue
 from expra_engine.editor.export_dialog import ExportDialog
 from expra_engine.editor.preferences import PreferencesStore
+from expra_engine.editor.project_workflow import ProjectWorkflow
 from expra_engine.editor.script_tools import attach_script, create_behaviour_script
 from expra_engine.editor.window_placement import WindowGeometry
 from expra_engine.runtime.script_component import ScriptComponent
@@ -125,6 +127,7 @@ class EditorWindow:
             ui=self._ui,
             app=self._coordinator,
             root=self._root,
+            project=self._engine.project,
         )
         self._shortcuts = ShortcutRegistry()
         self._contributions = ContributionRegistry(
@@ -144,6 +147,7 @@ class EditorWindow:
         self._render_generations: dict[str, int] = {"inspector": 0}
         self._render_owners: dict[str, str | None] = {"inspector": None}
         self._command_stack: CommandStack = CommandStack()
+        self._project_workflow = ProjectWorkflow(self)
 
         self._register_actions()
         self._build_layout()
@@ -264,6 +268,7 @@ class EditorWindow:
             if width <= 1 or height <= 1:
                 self._sash_after_id = self._root.after(25, self._set_initial_sashes)
                 return
+
             self._content_paned.sashpos(0, _HIERARCHY_WIDTH)
             self._content_paned.sashpos(1, max(_HIERARCHY_WIDTH + 260, width - _INSPECTOR_WIDTH))
             self._main_paned.sashpos(0, max(300, height - _BOTTOM_HEIGHT))
@@ -271,6 +276,36 @@ class EditorWindow:
             self._clamp_vertical_sash()
         except tk.TclError:
             return
+
+    def show_project_welcome(self) -> None:
+        """Show a small non-blocking project manager for no-project startup."""
+        welcome = tk.Toplevel(self._root)
+        welcome.title("Expra Project Manager")
+        welcome.transient(self._root)
+        welcome.resizable(False, False)
+        tk.Label(
+            welcome,
+            text="Start an Expra game project",
+            padx=24,
+            pady=16,
+        ).pack()
+        tk.Label(
+            welcome,
+            text="Create a new project or open an existing project workspace.",
+            padx=24,
+            pady=12,
+        ).pack()
+        buttons = tk.Frame(welcome)
+        buttons.pack(padx=18, pady=(0, 18), fill="x")
+        tk.Button(buttons, text="New Project", command=self._act_new_project).pack(
+            side="left", padx=4
+        )
+        tk.Button(buttons, text="Open Project", command=self._act_open_project).pack(
+            side="left", padx=4
+        )
+        tk.Button(buttons, text="Continue Scratch Scene", command=welcome.destroy).pack(
+            side="left", padx=4
+        )
 
     def _clamp_horizontal_sashes(self, _event: Any = None) -> None:
         try:
@@ -334,11 +369,16 @@ class EditorWindow:
         self._update_play_pause_state()
 
     def _act_export_game(self) -> None:
+        if self._engine.project is None:
+            messagebox.showwarning("Export Game", "Open a project before exporting.")
+            return
         ExportDialog(
             self._root,
-            Path(".").resolve(),
+            self._engine.project.path,
             self._coordinator,
             self._actions,
+            game_version=self._engine.project.game_version,
+            entry_point=self._engine.project.entry_point,
         )
 
     def _act_undo(self) -> None:
@@ -391,18 +431,59 @@ class EditorWindow:
         self._update_play_pause_state()
         self._present_all()
 
+    # ------------------------------------------------------------------
+    # Project and scene actions
+    # ------------------------------------------------------------------
+
     def _act_new_scene(self) -> None:
-        scene = Scene("New Scene")
+        project = self._engine.project
+        if project is not None:
+            name = simpledialog.askstring("New Scene", "Scene name:", parent=self._root)
+            if not name:
+                return
+            relative = f"scenes/{Path(name).stem}.json"
+            scene = Scene(name)
+            project.register_scene_path(relative)
+            self._last_save_path = project.path / relative
+        else:
+            scene = Scene("New Scene")
         self._engine.set_scene(scene)
         self._selected_id = None
         self._actions.set_enabled("delete_entity", False)
         self._console.log(f"[Editor] Created scene: {scene.name}")
         self._present_all()
 
+    def _act_new_project(self) -> None:
+        self._project_workflow.new_project()
+
+    def _act_open_project(self) -> None:
+        self._project_workflow.open_project()
+
+    def _act_open_project_manifest(self) -> None:
+        self._project_workflow.open_project_manifest()
+
+    def _act_import_asset(self) -> None:
+        self._project_workflow.import_assets()
+
+    def _act_configure_input(self) -> None:
+        self._project_workflow.configure_input()
+
+    def _act_close_project(self) -> None:
+        self._project_workflow.close_project()
+
+    def _open_loaded_project(self, project: Project) -> None:
+        self._project_workflow.open_loaded(project)
+
     def _act_save_scene(self) -> None:
         scene = self._engine.edit_scene
         if scene is None:
             messagebox.showwarning("Save Scene", "No scene to save.")
+            return
+        project = self._engine.project
+        if project is not None and self._last_save_path is not None:
+            relative = self._last_save_path.resolve().relative_to(project.path)
+            project.save_scene(scene, relative.as_posix())
+            self._console.log(f"[Editor] Scene saved: {self._last_save_path}")
             return
         path = filedialog.asksaveasfilename(
             title="Save Scene",
@@ -455,7 +536,7 @@ class EditorWindow:
         return lambda: self._act_open_recent(project)
 
     def _act_open_recent(self, project: str) -> None:
-        self._console.log(f"[Editor] Recent project selected: {project}")
+        self._project_workflow.open_recent(project)
 
     def _act_add_entity(self) -> None:
         if self._engine.run_state != EngineRunState.EDIT:
@@ -465,6 +546,10 @@ class EditorWindow:
     def _act_delete_entity(self) -> None:
         if self._engine.run_state == EngineRunState.EDIT and self._selected_id:
             self._on_hierarchy_delete(self._selected_id)
+
+    # ------------------------------------------------------------------
+    # Scripting actions
+    # ------------------------------------------------------------------
 
     def _act_new_script(self) -> None:
         project = self._engine.project
@@ -525,10 +610,6 @@ class EditorWindow:
             self._on_hierarchy_select(entity.entity_id)
             self._present_all()
 
-    # ------------------------------------------------------------------
-    # Hierarchy callbacks
-    # ------------------------------------------------------------------
-
     def _on_hierarchy_select(self, entity_id: str | None) -> None:
         self._selected_id = entity_id
         self._actions.set_enabled("delete_entity", entity_id is not None)
@@ -541,6 +622,10 @@ class EditorWindow:
         self._actions.set_enabled("attach_script", entity_id is not None and not has_script)
         self._actions.set_enabled("remove_script", has_script)
         self._present_selection(scene, entity)
+
+    # ------------------------------------------------------------------
+    # Hierarchy callbacks
+    # ------------------------------------------------------------------
 
     def _on_hierarchy_create(self) -> None:
         if self._engine.run_state != EngineRunState.EDIT:
@@ -573,10 +658,6 @@ class EditorWindow:
             self._actions.set_enabled("delete_entity", False)
         self._update_undo_redo_state()
         self._present_all()
-
-    # ------------------------------------------------------------------
-    # Inspector callbacks
-    # ------------------------------------------------------------------
 
     def _on_transform_change(self, entity_id: str, field: str, value: float) -> None:
         if self._engine.run_state != EngineRunState.EDIT:
@@ -623,6 +704,10 @@ class EditorWindow:
         entity.enabled = enabled
         self._present_all()
 
+    # ------------------------------------------------------------------
+    # Inspector callbacks
+    # ------------------------------------------------------------------
+
     def _on_script_value_change(
         self, entity_id: str, component_index: int, field: str, value: Any
     ) -> None:
@@ -637,12 +722,12 @@ class EditorWindow:
         self._update_undo_redo_state()
         self._present_all()
 
-    # ------------------------------------------------------------------
-    # Viewport callbacks
-    # ------------------------------------------------------------------
-
     def _on_viewport_entity_click(self, entity_id: str) -> None:
         self._on_hierarchy_select(entity_id)
+
+        # ------------------------------------------------------------------
+        # Runtime refresh and scene setup
+        # ------------------------------------------------------------------
         self._hierarchy.select(entity_id)
 
     # ------------------------------------------------------------------
@@ -668,10 +753,16 @@ class EditorWindow:
         self._actions.set_enabled(
             "delete_entity", state == EngineRunState.EDIT and self._selected_id is not None
         )
+        self._update_project_actions()
 
-    # ------------------------------------------------------------------
-    # Default scene
-    # ------------------------------------------------------------------
+    def _update_project_actions(self) -> None:
+        has_project = self._engine.project is not None
+        self._actions.set_enabled("save_scene", has_project)
+        self._actions.set_enabled("close_project", has_project)
+        self._actions.set_enabled("new_script", has_project)
+        self._actions.set_enabled("import_asset", has_project)
+        self._actions.set_enabled("configure_input", has_project)
+        self._actions.set_enabled("editor.export_game", has_project)
 
     def _create_default_scene(self) -> None:
         scene = Scene("Sample Scene")
@@ -685,7 +776,7 @@ class EditorWindow:
         self._present_all()
 
     # ------------------------------------------------------------------
-    # Coordinated presentation
+    # Coordinated presentation and lifecycle
     # ------------------------------------------------------------------
 
     def _request_render(
@@ -746,10 +837,6 @@ class EditorWindow:
         self._request_render("viewport", (scene, self._selected_id), priority=10)
         self._request_render("toolbar", self._engine.run_state, priority=40)
         self._ui.end_batch()
-
-    # ------------------------------------------------------------------
-    # Lifecycle
-    # ------------------------------------------------------------------
 
     def _on_close(self) -> None:
         self._is_closing = True

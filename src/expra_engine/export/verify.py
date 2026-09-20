@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import ast
+import dis
 import json
+import marshal
 from pathlib import Path
+from types import CodeType
 
 _FORBIDDEN_IMPORTS: tuple[str, ...] = (
     "tkinter",
@@ -63,7 +66,32 @@ def _scan_for_forbidden_imports(export_dir: Path) -> list[str]:
                     relative_path = py_file.relative_to(export_dir)
                     violations.append(f"{relative_path}: forbidden import '{module}'")
                     break
+    for pyc_file in export_dir.rglob("*.pyc"):
+        try:
+            with pyc_file.open("rb") as stream:
+                stream.read(16)
+                code = marshal.load(stream)
+        except (OSError, EOFError, ValueError, TypeError):
+            continue
+        for module in _iter_imports(code):
+            for forbidden in _FORBIDDEN_IMPORTS:
+                if _is_forbidden_import(module, forbidden):
+                    relative_path = pyc_file.relative_to(export_dir)
+                    violations.append(f"{relative_path}: forbidden import '{module}'")
+                    break
     return violations
+
+
+def _iter_imports(code: object):
+    """Yield import names from a compiled code object and nested functions."""
+    if not isinstance(code, CodeType):
+        return
+    for instruction in dis.get_instructions(code):
+        if instruction.opname == "IMPORT_NAME" and isinstance(instruction.argval, str):
+            yield instruction.argval
+    for constant in getattr(code, "co_consts", ()):
+        if hasattr(constant, "co_code"):
+            yield from _iter_imports(constant)
 
 
 def verify_export(build_dir: Path) -> None:

@@ -253,6 +253,8 @@ _RUNTIME_CORE_MODULES = (
     "entity.py",
     "errors.py",
     "math_utils.py",
+    "project.py",
+    "persistence.py",
     "safe_expression.py",
     "scene.py",
     "string_utils.py",
@@ -281,6 +283,19 @@ def _stage_pygame_runtime(site_packages: Path) -> None:
     )
     for module in _RUNTIME_CORE_MODULES:
         shutil.copy2(source_root / "core" / module, core_root / module)
+
+    # Project Behaviours need the renderer-neutral logical-ID contract, but the
+    # full editor filesystem package imports editor-only persistence helpers.
+    filesystem_root = package_root / "filesystem"
+    filesystem_root.mkdir()
+    for module in ("__init__.py", "errors.py", "ids.py"):
+        shutil.copy2(source_root / "filesystem" / module, filesystem_root / module)
+    (filesystem_root / "__init__.py").write_text(
+        '"""Runtime-only logical resource IDs."""\n'
+        "from .ids import ResourceId\n"
+        '__all__ = ["ResourceId"]\n',
+        encoding="utf-8",
+    )
 
     runtime_root = package_root / "runtime"
     shutil.copytree(source_root / "runtime", runtime_root)

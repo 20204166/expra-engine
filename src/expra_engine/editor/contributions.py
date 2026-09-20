@@ -24,6 +24,7 @@ class EditorContext:
     ui: Any
     app: Any | None = None
     root: Any | None = None
+    project: Any | None = None
 
 
 @dataclass(frozen=True, slots=True)

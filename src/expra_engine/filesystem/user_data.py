@@ -9,7 +9,7 @@ import tempfile
 from pathlib import Path
 from typing import Literal
 
-from expra_engine.editor.persistence import atomic_write_text, fsync_directory
+from expra_engine.core.persistence import atomic_write_text, fsync_directory
 
 from .errors import FilesystemError
 

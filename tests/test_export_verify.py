@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import py_compile
 import tempfile
 import unittest
 from pathlib import Path
@@ -102,6 +103,16 @@ class TestVerifyExport(unittest.TestCase):
     def test_export_containing_tkinter_import_is_rejected(self) -> None:
         _write_valid_manifests(self._build)
         (self._build / "main.py").write_text("import tkinter\n")
+
+        with self.assertRaisesRegex(ExportVerificationError, "forbidden"):
+            verify_export(self._build)
+
+    def test_bytecode_export_containing_tkinter_import_is_rejected(self) -> None:
+        _write_valid_manifests(self._build)
+        source = self._build / "main.py"
+        source.write_text("import tkinter\n")
+        py_compile.compile(str(source), cfile=str(self._build / "main.pyc"), doraise=True)
+        source.unlink()
 
         with self.assertRaisesRegex(ExportVerificationError, "forbidden"):
             verify_export(self._build)

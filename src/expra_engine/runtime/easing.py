@@ -282,6 +282,3 @@ class CubicBezier:
             + 6.0 * (1.0 - t) * t * (self.x2 - self.x1)
             + 3.0 * t**2 * (1.0 - self.x2)
         )
-
-
-__all__ = [name for name in globals() if not name.startswith("_")]

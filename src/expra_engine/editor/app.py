@@ -21,4 +21,6 @@ class EditorApplication:
     def run(self) -> None:
         """Build the editor window and start the Tk main loop (blocks until close)."""
         self._window = EditorWindow(self._engine, theme=self._theme)
+        if self._engine.project is None:
+            self._window.show_project_welcome()
         self._window.run()

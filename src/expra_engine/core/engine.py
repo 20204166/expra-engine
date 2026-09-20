@@ -33,7 +33,7 @@ from typing import TYPE_CHECKING
 from expra_engine.core.scene import Scene
 from expra_engine.core.utils import get_time
 from expra_engine.runtime.behaviour import Behaviour, BehaviourFactory
-from expra_engine.runtime.input import InputMap
+from expra_engine.runtime.input import ActionId, InputMap, PhysicalInput
 
 if TYPE_CHECKING:
     from expra_engine.core.project import Project
@@ -144,6 +144,11 @@ class Engine:
 
     def set_project(self, project: Project | None) -> None:
         self._project = project
+        self._input_map.clear()
+        if project is not None:
+            for action, physical in project.input_settings.items():
+                device, control = physical.split(":", 1)
+                self._input_map.bind(ActionId(action), PhysicalInput(device, control))
         if self._behaviour_system is not None and hasattr(
             self._behaviour_system.registry, "project_root"
         ):
@@ -293,6 +298,12 @@ class Engine:
                 self.stop()
 
         return dt
+
+    def signal(self, event: object) -> None:
+        """Queue a runtime event for the next dispatch pass."""
+        if self._eq is None:
+            raise RuntimeError("engine is not running")
+        self._eq.signal(event)
 
     # ------------------------------------------------------------------
     # Runtime request events
