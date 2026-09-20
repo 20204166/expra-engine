@@ -17,6 +17,7 @@ from expra_engine.editor.assets import (
     normalize_entries,
     scan_directory,
 )
+from expra_engine.filesystem import ResourceId
 
 
 class TestAssetNormalization(unittest.TestCase):
@@ -48,6 +49,14 @@ class TestAssetNormalization(unittest.TestCase):
 
     def test_empty_results_are_normalized(self) -> None:
         self.assertEqual(normalize_entries([], filter_text="missing"), ())
+
+    def test_entry_keeps_display_path_and_logical_id(self) -> None:
+        path = Path("/project/assets/hero.png")
+        entry = AssetEntry(path, "hero.png", False, ResourceId.parse("assets://hero.png"))
+
+        self.assertEqual(entry.path, path)
+        self.assertEqual(entry.display_path, path)
+        self.assertEqual(entry.logical_id, ResourceId.parse("assets://hero.png"))
 
 
 class TestAssetBrowserState(unittest.TestCase):
@@ -102,6 +111,17 @@ class TestAssetRequestsAndResults(unittest.TestCase):
         self.assertEqual(calls, [Path("/missing")])
         self.assertEqual(result.entries, ())
         self.assertEqual(result.error, "folder-missing")
+
+    def test_scan_assigns_project_relative_logical_ids(self) -> None:
+        root = Path("/project/assets")
+        request = AssetScanRequest(root, generation=1, resource_root=root)
+
+        result = scan_directory(request, lambda _path: [root / "textures" / "hero.png"])
+
+        self.assertEqual(result.entries[0].path, root / "textures" / "hero.png")
+        self.assertEqual(
+            result.entries[0].logical_id, ResourceId.parse("assets://textures/hero.png")
+        )
 
     def test_scan_reports_permission_error(self) -> None:
         request = AssetScanRequest(Path("/private"), generation=3)

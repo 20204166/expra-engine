@@ -24,11 +24,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("project", type=Path, help="Game project directory")
     parser.add_argument(
-        "--target", choices=["windows", "linux"], required=True,
+        "--target",
+        choices=["windows", "linux"],
+        required=True,
         help="Target platform",
     )
     parser.add_argument(
-        "--output", type=Path, default=None,
+        "--output",
+        type=Path,
+        default=None,
         help="Output directory (default: <project>/builds)",
     )
     parser.add_argument("--game-name", default=None, help="Game name (default: project dir name)")
@@ -36,15 +40,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--python-version", default="3.12.4", metavar="X.Y.Z")
     parser.add_argument("--arch", choices=["amd64", "arm64"], default="amd64")
     parser.add_argument(
-        "--entry-point", default="__main__.py",
+        "--entry-point",
+        default="__main__.py",
         help="Entry point relative to project dir",
     )
     parser.add_argument(
-        "--no-bytecode", action="store_true",
+        "--no-bytecode",
+        action="store_true",
         help="Skip bytecode compilation (ship .py source)",
     )
     parser.add_argument(
-        "--no-debug-launcher", action="store_true",
+        "--no-debug-launcher",
+        action="store_true",
         help="Do not generate a debug launcher",
     )
     return parser

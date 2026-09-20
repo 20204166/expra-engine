@@ -17,16 +17,51 @@ import zipfile
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from expra_engine.export.manifest import AssetManifest
 
 
 class PackagerError(RuntimeError):
     pass
 
 
+def write_runtime_manifest(build_dir: Path, manifest: AssetManifest) -> None:
+    """Write mount metadata using paths relative to the exported build."""
+    import json
+
+    mounts: dict[tuple[str, str | None], dict[str, object]] = {}
+    for entry in manifest.entries:
+        if entry.logical_id is None:
+            continue
+        scheme, remainder = entry.logical_id.split("://", 1)
+        namespace = None
+        if scheme == "package":
+            namespace, _ = remainder.split("/", 1)
+        mounts.setdefault(
+            (scheme, namespace),
+            {
+                "name": f"exported-{scheme}{('-' + namespace) if namespace else ''}",
+                "scheme": scheme,
+                "namespace": namespace,
+                "source": "resources",
+                "read_only": True,
+            },
+        )
+    (build_dir / "runtime_manifest.json").write_text(
+        json.dumps({"mounts": list(mounts.values())}, indent=2)
+    )
+
+
 # Packages that must never be installed into exported games.
-_BLOCKED_PACKAGES: frozenset[str] = frozenset({
-    "tkinter", "ttkbootstrap", "expra-engine-editor",
-})
+_BLOCKED_PACKAGES: frozenset[str] = frozenset(
+    {
+        "tkinter",
+        "ttkbootstrap",
+        "expra-engine-editor",
+    }
+)
 
 
 def _is_blocked(pkg: str) -> bool:
@@ -103,6 +138,7 @@ class WindowsPackager(TargetPackager):
             progress(f"Downloading Windows embedded Python {python_version} ({arch})")
             if downloader is None:
                 import urllib.request
+
                 urllib.request.urlretrieve(url, cached_zip)
             else:
                 downloader(url, cached_zip)
@@ -153,15 +189,23 @@ class WindowsPackager(TargetPackager):
             progress(f"Downloading {pkg}")
             result = subprocess.run(
                 [
-                    sys.executable, "-m", "pip", "download",
-                    "--platform", platform_tag,
-                    "--python-version", python_tag,
-                    "--implementation", "cp",
-                    "--abi", abi,
+                    sys.executable,
+                    "-m",
+                    "pip",
+                    "download",
+                    "--platform",
+                    platform_tag,
+                    "--python-version",
+                    python_tag,
+                    "--implementation",
+                    "cp",
+                    "--abi",
+                    abi,
                     "--only-binary=:all:",
                     "--no-deps",
                     "--no-cache-dir",
-                    "--dest", str(cache_dir),
+                    "--dest",
+                    str(cache_dir),
                     pkg,
                 ],
                 capture_output=True,

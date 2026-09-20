@@ -61,29 +61,42 @@ class ExportDialog(ttk.Toplevel):
         ttk.Label(frame, text="Target:").grid(row=0, column=0, sticky="w", **pad)
         self._target_var = tk.StringVar(value="windows")
         ttk.Combobox(
-            frame, textvariable=self._target_var,
-            values=["windows", "linux"], state="readonly", width=14,
+            frame,
+            textvariable=self._target_var,
+            values=["windows", "linux"],
+            state="readonly",
+            width=14,
         ).grid(row=0, column=1, sticky="w", **pad)
 
         ttk.Label(frame, text="Game Name:").grid(row=1, column=0, sticky="w", **pad)
         self._name_var = tk.StringVar(value=self._project.name)
-        ttk.Entry(frame, textvariable=self._name_var, width=30).grid(row=1, column=1, sticky="ew", **pad)
+        ttk.Entry(frame, textvariable=self._name_var, width=30).grid(
+            row=1, column=1, sticky="ew", **pad
+        )
 
         ttk.Label(frame, text="Version:").grid(row=2, column=0, sticky="w", **pad)
         self._version_var = tk.StringVar(value="1.0.0")
-        ttk.Entry(frame, textvariable=self._version_var, width=14).grid(row=2, column=1, sticky="w", **pad)
+        ttk.Entry(frame, textvariable=self._version_var, width=14).grid(
+            row=2, column=1, sticky="w", **pad
+        )
 
         ttk.Label(frame, text="Python:").grid(row=3, column=0, sticky="w", **pad)
         self._python_var = tk.StringVar(value="3.12.4")
-        ttk.Entry(frame, textvariable=self._python_var, width=14).grid(row=3, column=1, sticky="w", **pad)
+        ttk.Entry(frame, textvariable=self._python_var, width=14).grid(
+            row=3, column=1, sticky="w", **pad
+        )
 
         ttk.Label(frame, text="Output dir:").grid(row=4, column=0, sticky="w", **pad)
         self._output_var = tk.StringVar(value=str(self._project / "builds"))
-        ttk.Entry(frame, textvariable=self._output_var, width=40).grid(row=4, column=1, sticky="ew", **pad)
+        ttk.Entry(frame, textvariable=self._output_var, width=40).grid(
+            row=4, column=1, sticky="ew", **pad
+        )
 
         self._bytecode_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(
-            frame, text="Compile to bytecode (.pyc)", variable=self._bytecode_var,
+            frame,
+            text="Compile to bytecode (.pyc)",
+            variable=self._bytecode_var,
         ).grid(row=5, column=0, columnspan=2, sticky="w", **pad)
 
         # Progress log
@@ -99,7 +112,8 @@ class ExportDialog(ttk.Toplevel):
         btn_frame = ttk.Frame(frame)
         btn_frame.grid(row=7, column=0, columnspan=2, sticky="e")
         self._export_btn = ttk.Button(
-            btn_frame, text="Export",
+            btn_frame,
+            text="Export",
             command=self._buttons.command(_ACTION_EXPORT),
         )
         self._export_btn.pack(side="right", padx=(4, 0))
@@ -137,9 +151,7 @@ class ExportDialog(ttk.Toplevel):
             emit_progress: Callable[[str], None],
         ) -> Path:
             def on_event(event: ExportProgressEvent) -> None:
-                emit_progress(
-                    f"[{event.phase.value:<22s}] {event.percent:3d}%  {event.message}"
-                )
+                emit_progress(f"[{event.phase.value:<22s}] {event.percent:3d}%  {event.message}")
 
             return GameExporter().export(plan, cancel=cancel, progress=on_event)
 

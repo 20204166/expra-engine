@@ -253,7 +253,9 @@ class ViewportPanel(tk.Frame):
                 tags=tag,
             )
             canvas.tag_bind(
-                tag, "<Button-1>", lambda _e, eid=entity.entity_id: self._click_entity(eid)  # type: ignore[misc]
+                tag,
+                "<Button-1>",
+                lambda _e, eid=entity.entity_id: self._click_entity(eid),  # type: ignore[misc]
             )
 
     def _on_click(self, event: Any) -> None:

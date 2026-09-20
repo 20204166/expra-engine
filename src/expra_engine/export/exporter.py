@@ -16,13 +16,22 @@ import tempfile
 import threading
 from collections.abc import Callable
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from expra_engine.export.bytecode import BytecodeCompiler
 from expra_engine.export.events import ExportPhase, ExportProgressEvent
-from expra_engine.export.manifest import AssetManifest, BuildManifest
-from expra_engine.export.packager import LinuxPackager, TargetPackager, WindowsPackager
+from expra_engine.export.manifest import AssetEntry, AssetManifest, BuildManifest
+from expra_engine.export.packager import (
+    LinuxPackager,
+    TargetPackager,
+    WindowsPackager,
+    write_runtime_manifest,
+)
 from expra_engine.export.plan import ExportPlan, ExportTarget
 from expra_engine.export.verify import verify_export
+
+if TYPE_CHECKING:
+    from expra_engine.filesystem import ResourceService
 
 
 class ExportError(RuntimeError):
@@ -119,7 +128,14 @@ class GameExporter:
             extra_exclude_patterns=plan.exclude_patterns,
             include_source=True,
         )
-        _copy_assets(plan.project_dir, game_source_dir, asset_manifest)
+        if plan.resource_service is not None and plan.resource_ids:
+            resolved_manifest = AssetManifest.collect(
+                plan.project_dir,
+                resource_service=plan.resource_service,
+                logical_ids=plan.resource_ids,
+            )
+            asset_manifest = _merge_manifests(asset_manifest, resolved_manifest)
+        _copy_assets(plan.project_dir, game_source_dir, asset_manifest, plan.resource_service)
 
         # Stage 2: bytecode (optional)
         if plan.compile_bytecode:
@@ -168,6 +184,7 @@ class GameExporter:
         # Stage 5: write manifests
         emit(ExportPhase.WRITING_MANIFESTS, "Writing manifests", 80)
         (build_dir / "asset_manifest.json").write_text(asset_manifest.to_json())
+        write_runtime_manifest(build_dir, asset_manifest)
 
         build_manifest = BuildManifest(
             game_name=plan.game_name,
@@ -184,13 +201,21 @@ class GameExporter:
 
         # Stage 6: launchers
         packager.make_launcher(
-            build_dir, plan.game_name, plan.entry_point, safe_name,
-            is_pyc=plan.compile_bytecode, debug=False,
+            build_dir,
+            plan.game_name,
+            plan.entry_point,
+            safe_name,
+            is_pyc=plan.compile_bytecode,
+            debug=False,
         )
         if plan.debug_launcher:
             packager.make_launcher(
-                build_dir, plan.game_name, plan.entry_point, safe_name,
-                is_pyc=plan.compile_bytecode, debug=True,
+                build_dir,
+                plan.game_name,
+                plan.entry_point,
+                safe_name,
+                is_pyc=plan.compile_bytecode,
+                debug=True,
             )
 
 
@@ -199,13 +224,28 @@ class GameExporter:
 # ------------------------------------------------------------------
 
 
-def _copy_assets(source: Path, dest: Path, manifest: AssetManifest) -> None:
+def _copy_assets(
+    source: Path,
+    dest: Path,
+    manifest: AssetManifest,
+    resource_service: ResourceService | None = None,
+) -> None:
     dest.mkdir(parents=True, exist_ok=True)
     for entry in manifest.entries:
-        src = source / entry.path
-        dst = dest / entry.path
+        destination = entry.destination or entry.path
+        dst = dest / destination
         dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(src, dst)
+        if entry.logical_id is not None and resource_service is not None:
+            dst.write_bytes(resource_service.read_bytes(entry.logical_id))
+        else:
+            shutil.copy2(source / entry.path, dst)
+
+
+def _merge_manifests(*manifests: AssetManifest) -> AssetManifest:
+    entries: list[AssetEntry] = []
+    for manifest in manifests:
+        entries.extend(manifest.entries)
+    return AssetManifest(entries=sorted(entries, key=lambda entry: entry.path))
 
 
 def _select_packager(target: ExportTarget) -> TargetPackager:
@@ -217,6 +257,7 @@ def _select_packager(target: ExportTarget) -> TargetPackager:
 def _engine_version() -> str:
     try:
         import importlib.metadata
+
         return importlib.metadata.version("expra_engine")
     except Exception:  # noqa: BLE001
         return "unknown"

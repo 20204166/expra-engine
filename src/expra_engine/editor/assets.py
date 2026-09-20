@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
+from expra_engine.filesystem import ResourceId
+
 
 class AssetMode(Enum):
     """Whether a browser interaction opens an existing file or saves one."""
@@ -35,6 +37,13 @@ class AssetEntry:
     path: Path
     name: str
     is_folder: bool
+    logical_id: ResourceId | None = None
+
+    @property
+    def display_path(self) -> Path:
+        """Return the physical path used for display and browser operations."""
+
+        return self.path
 
 
 @dataclass(frozen=True)
@@ -46,6 +55,7 @@ class AssetScanRequest:
     mode: AssetMode = AssetMode.OPEN
     filter_text: str = ""
     cancelled: bool = False
+    resource_root: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -118,7 +128,7 @@ def scan_directory(
         return AssetScanResult(request.directory, request.generation, (), cancelled=True)
     try:
         entries = (
-            AssetEntry(path, path.name, path.is_dir())
+            _entry_for_path(path, request.resource_root)
             for path in enumerate_directory(request.directory)
         )
         normalized = normalize_entries(entries, filter_text=request.filter_text)
@@ -129,6 +139,17 @@ def scan_directory(
     except OSError:
         return AssetScanResult(request.directory, request.generation, (), error="folder-error")
     return AssetScanResult(request.directory, request.generation, normalized)
+
+
+def _entry_for_path(path: Path, resource_root: Path | None) -> AssetEntry:
+    logical_id = None
+    if resource_root is not None:
+        try:
+            relative_path = path.relative_to(resource_root)
+        except ValueError:
+            relative_path = path.resolve().relative_to(resource_root.resolve())
+        logical_id = ResourceId.from_project_path(relative_path)
+    return AssetEntry(path, path.name, path.is_dir(), logical_id)
 
 
 def accept_scan_result(result: AssetScanResult, *, current_generation: int) -> bool:

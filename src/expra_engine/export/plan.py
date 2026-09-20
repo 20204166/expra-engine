@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 
+from expra_engine.filesystem import ResourceId, ResourceService
+
 
 class ExportTarget(StrEnum):
     WINDOWS = "windows"
@@ -43,6 +45,8 @@ class ExportPlan:
     exclude_patterns: frozenset[str] = field(default_factory=frozenset)
     extra_packages: tuple[str, ...] = ()
     debug_launcher: bool = True
+    resource_service: ResourceService | None = None
+    resource_ids: tuple[ResourceId | str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.project_dir.is_dir():
@@ -56,10 +60,20 @@ class ExportPlan:
                 "Must start with alphanumeric and contain only A-Z, a-z, 0-9, space, _, -"
             )
         if not _SEMVER_RE.match(self.game_version):
-            raise ValueError(f"Invalid game_version {self.game_version!r}. Must start with major.minor")
+            raise ValueError(
+                f"Invalid game_version {self.game_version!r}. Must start with major.minor"
+            )
         if not _PY_VERSION_RE.match(self.python_version):
             raise ValueError(
                 f"Invalid python_version {self.python_version!r}. Must be major.minor.patch"
             )
         if not self.output_dir.is_absolute():
             raise ValueError(f"output_dir must be absolute: {self.output_dir}")
+        object.__setattr__(
+            self,
+            "resource_ids",
+            tuple(
+                item if isinstance(item, ResourceId) else ResourceId.parse(item)
+                for item in self.resource_ids
+            ),
+        )

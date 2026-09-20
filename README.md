@@ -84,6 +84,29 @@ Use `./scripts/install-user.sh --system` for a machine-wide install, or
 The install script verifies the wheel before installation and confirms the
 installed `expra-editor` version afterward.
 
+Install the latest published wheel directly from GitHub, with mandatory
+SHA-256 verification:
+
+```bash
+curl --fail --silent --show-error --location \
+  https://raw.githubusercontent.com/20204166/expra-engine/main/scripts/install-online.sh | bash
+```
+
+Use `--system` for a machine-wide install, or `--base-url=URL` when mirroring
+the wheel and `SHA256SUMS` to another location. Releases are published by
+pushing a matching `vMAJOR.MINOR.PATCH.BUILD` tag.
+
+On Windows PowerShell, use the adapted Expra online installer:
+
+```powershell
+irm https://raw.githubusercontent.com/20204166/expra-engine/main/install/install-online.ps1 | iex
+```
+
+It downloads the newest wheel named by `dist/SHA256SUMS`, verifies the digest,
+bootstraps Python 3.12 through `winget` when needed, installs for the current
+user, and verifies the installed version. Use `-System` with a downloaded copy
+for a machine-wide install.
+
 ## Threading invariant
 
 **Tk owns widgets. Background work never touches widgets.**
@@ -93,3 +116,6 @@ Results from background tasks cross from worker threads through the
 No worker ever calls `widget.configure()` directly.
 
 See `docs/THREADING.md` for details.
+
+See `docs/FILESYSTEM.md` for the logical-ID, mount, resource-service, package,
+and user-data APIs.

@@ -1,0 +1,33 @@
+name: Release Expra
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build and verify wheel
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m pip install --upgrade build
+          tag_version="${GITHUB_REF_NAME#v}"
+          source_version="$(python -c 'from expra_engine._release import read_current_version; from pathlib import Path; print(read_current_version(Path(".")))')"
+          test "$tag_version" = "$source_version"
+          python -m build --wheel --outdir dist .
+          python -m expra_engine._release sync-artifacts --package-dir .
+          python -m expra_engine._release verify-wheel "dist/expra_engine-${source_version}-py3-none-any.whl"
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/expra_engine-*.whl dist/SHA256SUMS --generate-notes

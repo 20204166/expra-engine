@@ -13,7 +13,6 @@ from pathlib import Path
 
 from expra_engine.export.packager import (
     LinuxPackager,
-    PackagerError,
     WindowsPackager,
     _is_blocked,
 )
@@ -61,7 +60,9 @@ class TestWindowsPackagerRuntime(unittest.TestCase):
         msgs: list[str] = []
 
         WindowsPackager().install_runtime(
-            "3.12.4", "amd64", dest,
+            "3.12.4",
+            "amd64",
+            dest,
             cache_dir=cache,
             cancel=cancel,
             progress=msgs.append,
@@ -85,7 +86,9 @@ class TestWindowsPackagerRuntime(unittest.TestCase):
 
         cancel = threading.Event()
         WindowsPackager().install_runtime(
-            "3.12.4", "amd64", dest,
+            "3.12.4",
+            "amd64",
+            dest,
             cache_dir=cache,
             cancel=cancel,
             progress=lambda _: None,
@@ -103,7 +106,9 @@ class TestWindowsPackagerRuntime(unittest.TestCase):
 
         download_called = []
         WindowsPackager().install_runtime(
-            "3.12.4", "amd64", dest,
+            "3.12.4",
+            "amd64",
+            dest,
             cache_dir=cache,
             cancel=cancel,
             progress=lambda _: None,
@@ -116,7 +121,9 @@ class TestWindowsPackagerRuntime(unittest.TestCase):
         cache = self._tmp / "cache"
         cancel = threading.Event()
         WindowsPackager().install_runtime(
-            "3.12.4", "amd64", dest,
+            "3.12.4",
+            "amd64",
+            dest,
             cache_dir=cache,
             cancel=cancel,
             progress=lambda _: None,
@@ -133,7 +140,9 @@ class TestWindowsPackagerRuntime(unittest.TestCase):
         cancel = threading.Event()
         for _ in range(2):
             WindowsPackager().install_runtime(
-                "3.12.4", "amd64", dest,
+                "3.12.4",
+                "amd64",
+                dest,
                 cache_dir=cache,
                 cancel=cancel,
                 progress=lambda _: None,
@@ -150,8 +159,12 @@ class TestWindowsPackagerLauncher(unittest.TestCase):
 
     def test_makes_bat_file(self) -> None:
         WindowsPackager().make_launcher(
-            self._tmp, "My Game", "__main__.py", "My_Game",
-            is_pyc=False, debug=False,
+            self._tmp,
+            "My Game",
+            "__main__.py",
+            "My_Game",
+            is_pyc=False,
+            debug=False,
         )
         bat = self._tmp / "My_Game.bat"
         self.assertTrue(bat.exists())
@@ -161,8 +174,12 @@ class TestWindowsPackagerLauncher(unittest.TestCase):
 
     def test_makes_debug_bat_file(self) -> None:
         WindowsPackager().make_launcher(
-            self._tmp, "My Game", "__main__.py", "My_Game",
-            is_pyc=False, debug=True,
+            self._tmp,
+            "My Game",
+            "__main__.py",
+            "My_Game",
+            is_pyc=False,
+            debug=True,
         )
         bat = self._tmp / "My_Game_debug.bat"
         self.assertTrue(bat.exists())
@@ -172,8 +189,12 @@ class TestWindowsPackagerLauncher(unittest.TestCase):
 
     def test_bat_uses_pyc_suffix(self) -> None:
         WindowsPackager().make_launcher(
-            self._tmp, "Game", "__main__.py", "Game",
-            is_pyc=True, debug=False,
+            self._tmp,
+            "Game",
+            "__main__.py",
+            "Game",
+            is_pyc=True,
+            debug=False,
         )
         content = (self._tmp / "Game.bat").read_text()
         self.assertIn("__main__.pyc", content)
@@ -185,8 +206,12 @@ class TestLinuxPackagerLauncher(unittest.TestCase):
 
     def test_makes_sh_file(self) -> None:
         LinuxPackager().make_launcher(
-            self._tmp, "My Game", "__main__.py", "My_Game",
-            is_pyc=False, debug=False,
+            self._tmp,
+            "My Game",
+            "__main__.py",
+            "My_Game",
+            is_pyc=False,
+            debug=False,
         )
         sh = self._tmp / "My_Game.sh"
         self.assertTrue(sh.exists())
@@ -196,8 +221,12 @@ class TestLinuxPackagerLauncher(unittest.TestCase):
 
     def test_makes_debug_sh_file(self) -> None:
         LinuxPackager().make_launcher(
-            self._tmp, "My Game", "__main__.py", "My_Game",
-            is_pyc=False, debug=True,
+            self._tmp,
+            "My Game",
+            "__main__.py",
+            "My_Game",
+            is_pyc=False,
+            debug=True,
         )
         sh = self._tmp / "My_Game_debug.sh"
         self.assertTrue(sh.exists())
@@ -206,7 +235,11 @@ class TestLinuxPackagerLauncher(unittest.TestCase):
 
     def test_space_in_name_replaced(self) -> None:
         LinuxPackager().make_launcher(
-            self._tmp, "Space Game", "__main__.py", "Space_Game",
-            is_pyc=False, debug=False,
+            self._tmp,
+            "Space Game",
+            "__main__.py",
+            "Space_Game",
+            is_pyc=False,
+            debug=False,
         )
         self.assertTrue((self._tmp / "Space_Game.sh").exists())

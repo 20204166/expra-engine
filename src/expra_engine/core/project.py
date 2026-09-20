@@ -16,6 +16,13 @@ from pathlib import Path
 from typing import Any
 
 from expra_engine.core.scene import Scene
+from expra_engine.filesystem import (
+    DirectoryMount,
+    MountSpec,
+    ResourceId,
+    ResourceResolver,
+    ResourceService,
+)
 
 
 class Project:
@@ -42,6 +49,30 @@ class Project:
     @property
     def assets_dir(self) -> Path:
         return self.path / "assets"
+
+    def asset_id(self, path: str | Path) -> ResourceId:
+        """Return the stable logical ID for an asset path.
+
+        Relative paths are relative to the project's assets directory. Absolute
+        paths are accepted only when they point inside that directory.
+        """
+
+        asset_path = Path(path)
+        if asset_path.is_absolute():
+            try:
+                asset_path = asset_path.resolve().relative_to(self.assets_dir.resolve())
+            except ValueError:
+                return ResourceId.from_project_path(asset_path)
+        return ResourceId.from_project_path(asset_path)
+
+    def resource_service(self) -> ResourceService:
+        """Build a renderer-neutral service for this project's assets."""
+
+        mount = DirectoryMount(
+            self.assets_dir,
+            MountSpec(name="project-assets", scheme="assets", read_only=False),
+        )
+        return ResourceService(ResourceResolver([mount]))
 
     @property
     def project_file(self) -> Path:

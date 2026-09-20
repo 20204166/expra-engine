@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
+import tempfile
 import unittest
 from pathlib import Path
-import tempfile
-import os
 
 from expra_engine.export.plan import ExportPlan, ExportTarget, PythonArch
+from expra_engine.filesystem import ResourceId
 
 
 def _make_project(tmp: str) -> tuple[Path, Path]:
@@ -25,15 +25,15 @@ class TestExportPlanValidation(unittest.TestCase):
         self._project, self._output = _make_project(self._tmp)
 
     def _plan(self, **overrides: object) -> ExportPlan:
-        defaults: dict = dict(
-            project_dir=self._project,
-            entry_point="__main__.py",
-            output_dir=self._output,
-            target=ExportTarget.WINDOWS,
-            game_name="My Game",
-            game_version="1.0.0",
-            python_version="3.12.4",
-        )
+        defaults: dict = {
+            "project_dir": self._project,
+            "entry_point": "__main__.py",
+            "output_dir": self._output,
+            "target": ExportTarget.WINDOWS,
+            "game_name": "My Game",
+            "game_version": "1.0.0",
+            "python_version": "3.12.4",
+        }
         defaults.update(overrides)
         return ExportPlan(**defaults)  # type: ignore[arg-type]
 
@@ -110,6 +110,10 @@ class TestExportPlanValidation(unittest.TestCase):
     def test_exclude_patterns_frozenset(self) -> None:
         plan = self._plan(exclude_patterns=frozenset({"debug/", "test/"}))
         self.assertIn("debug/", plan.exclude_patterns)
+
+    def test_logical_resources_are_part_of_the_plan(self) -> None:
+        plan = self._plan(resource_ids=("package://demo/texture.png",))
+        self.assertEqual(plan.resource_ids, (ResourceId.parse("package://demo/texture.png"),))
 
 
 class TestExportTarget(unittest.TestCase):

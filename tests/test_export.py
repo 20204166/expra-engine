@@ -24,6 +24,7 @@ from expra_engine.export.verify import ExportVerificationError, verify_export
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_project(tmp: Path, entry: str = "game/__main__.py") -> Path:
     """Create a minimal project tree and return project_dir."""
     project = tmp / "myproject"
@@ -51,8 +52,8 @@ def _valid_plan(project: Path, output: Path, **overrides: object) -> ExportPlan:
 # ExportPlan validation
 # ---------------------------------------------------------------------------
 
-class ExportPlanTests(unittest.TestCase):
 
+class ExportPlanTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.tmp = Path(self._tmp.name)
@@ -110,8 +111,8 @@ class ExportPlanTests(unittest.TestCase):
 # AssetManifest
 # ---------------------------------------------------------------------------
 
-class AssetManifestTests(unittest.TestCase):
 
+class AssetManifestTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.root = Path(self._tmp.name)
@@ -197,8 +198,8 @@ class AssetManifestTests(unittest.TestCase):
 # BuildManifest
 # ---------------------------------------------------------------------------
 
-class BuildManifestTests(unittest.TestCase):
 
+class BuildManifestTests(unittest.TestCase):
     def _make(self, **overrides: object) -> BuildManifest:
         defaults: dict[str, object] = {
             "game_name": "TestGame",
@@ -232,8 +233,8 @@ class BuildManifestTests(unittest.TestCase):
 # verify_export
 # ---------------------------------------------------------------------------
 
-class VerifyExportTests(unittest.TestCase):
 
+class VerifyExportTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.build_dir = Path(self._tmp.name) / "build"
@@ -301,12 +302,10 @@ class VerifyExportTests(unittest.TestCase):
 # ExportProgressEvent
 # ---------------------------------------------------------------------------
 
-class ExportProgressEventTests(unittest.TestCase):
 
+class ExportProgressEventTests(unittest.TestCase):
     def test_event_fields(self) -> None:
-        evt = ExportProgressEvent(
-            phase=ExportPhase.COLLECTING_ASSETS, message="msg", percent=42
-        )
+        evt = ExportProgressEvent(phase=ExportPhase.COLLECTING_ASSETS, message="msg", percent=42)
         self.assertEqual(evt.phase, ExportPhase.COLLECTING_ASSETS)
         self.assertEqual(evt.message, "msg")
         self.assertEqual(evt.percent, 42)
@@ -319,6 +318,7 @@ class ExportProgressEventTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # GameExporter (stub packager — no real network or disk I/O)
 # ---------------------------------------------------------------------------
+
 
 class _StubPackager:
     """Packager that writes minimal required files without network I/O."""
@@ -365,7 +365,6 @@ class _StubPackager:
 
 
 class GameExporterTests(unittest.TestCase):
-
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.tmp = Path(self._tmp.name)

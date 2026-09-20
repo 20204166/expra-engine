@@ -18,9 +18,7 @@ class TestBytecodeCompiler(unittest.TestCase):
         self._src.mkdir()
         self._dst.mkdir()
 
-    def _compile(
-        self, cancel: threading.Event | None = None
-    ) -> int:
+    def _compile(self, cancel: threading.Event | None = None) -> int:
         cancel = cancel or threading.Event()
         return BytecodeCompiler().compile(
             self._src,

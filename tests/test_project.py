@@ -7,9 +7,29 @@ from pathlib import Path
 
 from expra_engine.core.project import Project
 from expra_engine.core.scene import Scene
+from expra_engine.filesystem import ResourceId
 
 
 class TestProjectCreateAndSave(unittest.TestCase):
+    def test_asset_path_has_stable_project_relative_logical_id(self) -> None:
+        project = Project("Game", Path("/project"))
+
+        self.assertEqual(
+            project.asset_id(Path("textures") / "player.png"),
+            ResourceId.parse("assets://textures/player.png"),
+        )
+
+    def test_resource_service_mounts_assets_without_loading_values(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Project.create("Game", Path(tmp) / "project")
+            service = project.resource_service()
+
+            self.assertIsNone(getattr(project, "_resource_service", None))
+            mount = service.resolver.mount_for("project-assets")
+            self.assertIsNotNone(mount)
+            assert mount is not None
+            self.assertEqual(mount.spec.scheme, "assets")
+
     def test_create_makes_directory_and_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "my_project"

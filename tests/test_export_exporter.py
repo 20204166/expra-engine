@@ -6,15 +6,14 @@ import json
 import tempfile
 import threading
 import unittest
-import zipfile
 from pathlib import Path
 
 from expra_engine.export.events import ExportPhase, ExportProgressEvent
 from expra_engine.export.exporter import ExportError, GameExporter
-from expra_engine.export.manifest import BuildManifest
 from expra_engine.export.packager import TargetPackager
 from expra_engine.export.plan import ExportPlan, ExportTarget, PythonArch
 from expra_engine.export.verify import verify_export
+from expra_engine.filesystem import DirectoryMount, MountSpec, ResourceResolver, ResourceService
 
 
 class _NoopPackager(TargetPackager):
@@ -23,11 +22,15 @@ class _NoopPackager(TargetPackager):
     def __init__(self, target: ExportTarget) -> None:
         self._target = target
 
-    def install_runtime(self, python_version, arch, dest, *, cache_dir, cancel, progress, downloader=None):
+    def install_runtime(
+        self, python_version, arch, dest, *, cache_dir, cancel, progress, downloader=None
+    ):
         dest.mkdir(parents=True, exist_ok=True)
         (dest / "python.exe").write_bytes(b"stub")
 
-    def install_packages(self, packages, python_version, arch, site_packages, *, cache_dir, cancel, progress):
+    def install_packages(
+        self, packages, python_version, arch, site_packages, *, cache_dir, cancel, progress
+    ):
         site_packages.mkdir(parents=True, exist_ok=True)
 
     def make_launcher(self, build_dir, game_name, entry_point, source_subdir, *, is_pyc, debug):
@@ -42,7 +45,7 @@ def _make_project(tmp: Path) -> tuple[Path, Path]:
     (project / "__main__.py").write_text("print('hello')")
     (project / "assets").mkdir()
     (project / "assets" / "sprite.png").write_bytes(b"\x89PNG")
-    output = (tmp / "builds")
+    output = tmp / "builds"
     output.mkdir()
     return project, output
 
@@ -53,17 +56,17 @@ class TestGameExporter(unittest.TestCase):
         self._project, self._output = _make_project(self._tmp)
 
     def _plan(self, **overrides: object) -> ExportPlan:
-        defaults: dict = dict(
-            project_dir=self._project,
-            entry_point="__main__.py",
-            output_dir=self._output,
-            target=ExportTarget.WINDOWS,
-            game_name="Test Game",
-            game_version="1.0.0",
-            python_version="3.12.4",
-            arch=PythonArch.AMD64,
-            compile_bytecode=False,
-        )
+        defaults: dict = {
+            "project_dir": self._project,
+            "entry_point": "__main__.py",
+            "output_dir": self._output,
+            "target": ExportTarget.WINDOWS,
+            "game_name": "Test Game",
+            "game_version": "1.0.0",
+            "python_version": "3.12.4",
+            "arch": PythonArch.AMD64,
+            "compile_bytecode": False,
+        }
         defaults.update(overrides)
         return ExportPlan(**defaults)  # type: ignore[arg-type]
 
@@ -193,6 +196,28 @@ class TestGameExporter(unittest.TestCase):
         data = json.loads((out / "build_manifest.json").read_text())
         ts = data.get("build_timestamp", "")
         self.assertTrue(ts.startswith("202"))  # ISO timestamp
+
+    def test_runtime_manifest_uses_relative_mount_configuration(self) -> None:
+        service = ResourceService(
+            ResourceResolver(
+                [
+                    DirectoryMount(
+                        self._project / "assets",
+                        MountSpec(name="project-assets", scheme="assets"),
+                    )
+                ]
+            )
+        )
+        plan = self._plan(
+            resource_service=service,
+            resource_ids=("assets://sprite.png",),
+        )
+
+        out = self._export(plan)
+        self.assertTrue((out / "Test_Game" / "__main__.py").exists())
+        runtime_manifest = json.loads((out / "runtime_manifest.json").read_text())
+        self.assertEqual(runtime_manifest["mounts"][0]["source"], "resources")
+        self.assertNotIn(str(self._project), json.dumps(runtime_manifest))
 
 
 class TestGameExporterBytecode(unittest.TestCase):
