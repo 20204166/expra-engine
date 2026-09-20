@@ -13,6 +13,7 @@
 ## File Map
 
 - Create: `src/expra_engine/editor/contributions.py` — context, specs, registry, factories, lifecycle ownership, and render-target registry.
+- Create: `src/expra_engine/editor/builtin_features.py` — explicit built-in provider list that binds existing editor callbacks to contribution metadata.
 - Modify: `src/expra_engine/ui/editor_window.py` — opt-in composition, built-in provider list, migrated surfaces, render adapter, and shutdown ordering.
 - Modify: `src/expra_engine/ui/toolbar.py` — generic contribution-driven buttons while preserving existing style roles.
 - Modify: `src/expra_engine/ui/styles.py` — only explicit semantic-role mapping additions, if required.
@@ -86,7 +87,7 @@ Do not include the pre-existing unstaged export/UI changes in these commits unle
 
 ### Task 7: Create explicit built-in providers
 
-**Files:** `src/expra_engine/editor/contributions.py`, `src/expra_engine/ui/editor_window.py`, `tests/test_editor_contributions.py`
+**Files:** `src/expra_engine/editor/contributions.py`, `src/expra_engine/editor/builtin_features.py`, `src/expra_engine/ui/editor_window.py`, `tests/test_editor_contributions.py`
 
 - [ ] Write failing tests for explicit provider ordering and stable IDs for runtime, scene, entity, history, and export groups.
 - [ ] Add provider classes/functions that wrap existing `EditorWindow` callbacks through `EditorContext`; do not move business logic into metadata or factories.
