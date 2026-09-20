@@ -198,10 +198,23 @@ class PygameRenderer:
                         draw.line(self.surface, (255, 255, 255), position, direction)
                     except Exception:  # noqa: BLE001 - backend draw failures are frame-local
                         pass
+                elif entity.has_tag("enemy"):
+                    width = round(20 * abs(transform.scale_x))
+                    height = round(20 * abs(transform.scale_y))
+                    with suppress(Exception):
+                        draw.rect(
+                            self.surface,
+                            (255, 72, 178),
+                            self._rect_from_center(position, width, height),
+                        )
                 elif entity.has_tag("target") or entity.name.lower() == "target":
                     radius = round(8 * (abs(transform.scale_x) + abs(transform.scale_y)) / 2)
                     with suppress(Exception):
                         draw.circle(self.surface, (255, 72, 178), position, radius)
+                elif entity.has_tag("projectile"):
+                    radius = round(8 * (abs(transform.scale_x) + abs(transform.scale_y)) / 2)
+                    with suppress(Exception):
+                        draw.circle(self.surface, (245, 248, 255), position, radius)
 
         self._draw_text(f"Score: {frame.score}", (16, 12))
         if frame.status:

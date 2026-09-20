@@ -8,6 +8,7 @@ from expra_engine.core.component import (
     TransformComponent,
     component_from_dict,
     register_component_type,
+    registered_component_types,
 )
 from expra_engine.core.entity import Entity
 from expra_engine.runtime.behaviour import Behaviour
@@ -193,6 +194,10 @@ class TestTransformComponent(unittest.TestCase):
 
 
 class ComponentRegistryTests(unittest.TestCase):
+    def test_registered_component_types_exposes_editor_choices(self) -> None:
+        names = dict(registered_component_types())
+        self.assertIs(names["transform"], TransformComponent)
+
     def test_component_from_dict_known_type(self) -> None:
         component = component_from_dict({"type": "transform", "x": 1.0, "y": 2.0, "rotation": 0.0})
 

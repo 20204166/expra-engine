@@ -15,6 +15,13 @@ from expra_engine.runtime.input import PhysicalInput
 
 
 class TestProjectWorkflow(unittest.TestCase):
+    def test_new_project_has_standard_runtime_entry_point(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Project.create("Runtime", Path(tmp) / "runtime")
+            entry_point = project.path / "__main__.py"
+            self.assertTrue(entry_point.is_file())
+            self.assertIn("run_project", entry_point.read_text(encoding="utf-8"))
+
     def test_create_script_attach_save_close_reopen_and_resolve(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project = Project.create("Workflow", Path(tmp) / "workflow")

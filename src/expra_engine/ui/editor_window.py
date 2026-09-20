@@ -30,7 +30,7 @@ import ttkbootstrap as ttk
 from expra_engine.coordinators.app_coordinator import AppCoordinator
 from expra_engine.coordinators.button_coordinator import ButtonCoordinator
 from expra_engine.coordinators.ui_coordinator import RenderIntent, UICoordinator
-from expra_engine.core.component import TransformComponent
+from expra_engine.core.component import TransformComponent, registered_component_types
 from expra_engine.core.engine import Engine, EngineRunState
 from expra_engine.core.project import Project
 from expra_engine.core.scene import Scene
@@ -52,9 +52,11 @@ from expra_engine.editor.delivery import TkDeliveryQueue
 from expra_engine.editor.export_dialog import ExportDialog
 from expra_engine.editor.preferences import PreferencesStore
 from expra_engine.editor.project_workflow import ProjectWorkflow
+from expra_engine.editor.runtime_preview import RuntimePreviewLoop
 from expra_engine.editor.script_tools import attach_script, create_behaviour_script
 from expra_engine.editor.window_placement import WindowGeometry
 from expra_engine.runtime.script_component import ScriptComponent
+from expra_engine.runtime.script_registry import ScriptRegistry
 from expra_engine.ui.asset_browser import AssetBrowserPanel
 from expra_engine.ui.console import ConsolePanel
 from expra_engine.ui.hierarchy import HierarchyPanel
@@ -148,6 +150,13 @@ class EditorWindow:
         self._render_owners: dict[str, str | None] = {"inspector": None}
         self._command_stack: CommandStack = CommandStack()
         self._project_workflow = ProjectWorkflow(self)
+        self._runtime_preview = RuntimePreviewLoop(
+            self._root,
+            self._engine,
+            lambda: self._request_render(
+                "viewport", (self._engine.active_scene, None), priority=20
+            ),
+        )
 
         self._register_actions()
         self._build_layout()
@@ -242,6 +251,7 @@ class EditorWindow:
             on_rename=self._on_entity_rename,
             on_toggle_enabled=self._on_entity_toggle,
             on_script_value_change=self._on_script_value_change,
+            on_add_component=self._on_add_component,
         )
         self._inspector.pack(fill="both", expand=True)
         self._inspector_host = insp_frame
@@ -399,23 +409,19 @@ class EditorWindow:
         self._actions.set_enabled("undo", self._command_stack.can_undo)
         self._actions.set_enabled("redo", self._command_stack.can_redo)
 
-    # ------------------------------------------------------------------
-    # Action registration
-    # ------------------------------------------------------------------
-
     def _register_actions(self) -> None:
         for feature in build_builtin_features(self):
             self._contributions.register(feature)
         self._shortcuts.bind(self._root, self._actions)
         self._update_play_pause_state()
 
-    # ------------------------------------------------------------------
     # Engine actions
     # ------------------------------------------------------------------
 
     def _act_play(self) -> None:
         if self._engine.play():
             self._console.log("[Engine] Play", level="info")
+            self._runtime_preview.start()
         self._update_play_pause_state()
         self._present_all()
 
@@ -426,6 +432,7 @@ class EditorWindow:
         self._present_all()
 
     def _act_stop(self) -> None:
+        self._runtime_preview.stop()
         if self._engine.stop():
             self._console.log("[Engine] Stopped — scene restored", level="info")
         self._update_play_pause_state()
@@ -586,7 +593,13 @@ class EditorWindow:
         if not script_id or not class_name:
             return
         try:
-            attach_script(entity, script_id, class_name)
+            component = attach_script(entity, script_id, class_name)
+            with contextlib.suppress(OSError, ImportError, AttributeError, TypeError, ValueError):
+                project_root = self._engine.project.path if self._engine.project else Path.cwd()
+                behaviour_type = ScriptRegistry(project_root).resolve(script_id, class_name)
+                component.exposed_values = {
+                    name: field.default for name, field in behaviour_type.exposed_schema().items()
+                }
         except (ValueError, TypeError) as exc:
             messagebox.showerror("Attach Script", str(exc), parent=self._root)
             return
@@ -622,6 +635,24 @@ class EditorWindow:
         self._actions.set_enabled("attach_script", entity_id is not None and not has_script)
         self._actions.set_enabled("remove_script", has_script)
         self._present_selection(scene, entity)
+
+    def _on_add_component(self, component_name: str) -> None:
+        if self._engine.run_state != EngineRunState.EDIT or self._selected_id is None:
+            return
+        scene = self._engine.edit_scene
+        entity = scene.find_entity(self._selected_id) if scene else None
+        component_type = dict(registered_component_types()).get(component_name)
+        if entity is None or component_type is None:
+            return
+        if any(isinstance(component, component_type) for component in entity.components):
+            return
+        try:
+            entity.add_component(component_type())
+        except TypeError as exc:
+            messagebox.showerror("Add Component", str(exc), parent=self._root)
+            return
+        self._console.log(f"[Editor] Added {component_name} to {entity.name}")
+        self._present_all()
 
     # ------------------------------------------------------------------
     # Hierarchy callbacks
@@ -839,6 +870,7 @@ class EditorWindow:
         self._ui.end_batch()
 
     def _on_close(self) -> None:
+        self._runtime_preview.stop()
         self._is_closing = True
         if self._autosave_after_id is not None:
             with contextlib.suppress(tk.TclError):

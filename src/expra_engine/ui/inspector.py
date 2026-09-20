@@ -7,7 +7,7 @@ from collections.abc import Callable
 from tkinter import ttk
 from typing import Any
 
-from expra_engine.core.component import Component, TransformComponent
+from expra_engine.core.component import Component, TransformComponent, registered_component_types
 from expra_engine.core.entity import Entity
 from expra_engine.runtime.script_component import ScriptComponent
 from expra_engine.ui.layout import make_scrollable_frame
@@ -32,6 +32,7 @@ class InspectorPanel(tk.Frame):
         on_rename: Callable[[str, str], None] | None = None,
         on_toggle_enabled: Callable[[str, bool], None] | None = None,
         on_script_value_change: Callable[[str, int, str, Any], None] | None = None,
+        on_add_component: Callable[[str], None] | None = None,
     ) -> None:
         c = colors or COLORS
         super().__init__(parent, bg=c["panel_bg"])
@@ -40,6 +41,7 @@ class InspectorPanel(tk.Frame):
         self._on_rename = on_rename
         self._on_toggle_enabled = on_toggle_enabled
         self._on_script_value_change = on_script_value_change
+        self._on_add_component = on_add_component
         self._current_entity_id: str | None = None
         self._name_value = ""
         self._transform_vars: dict[str, tk.StringVar] = {}
@@ -94,6 +96,7 @@ class InspectorPanel(tk.Frame):
             return
 
         self._entity_section(entity)
+        self._add_component_section(entity)
         for index, component in enumerate(entity.components):
             if isinstance(component, TransformComponent):
                 self._transform_section(component)
@@ -172,6 +175,28 @@ class InspectorPanel(tk.Frame):
             style=STYLE_CHECKBUTTON,
         ).grid(row=1, column=1, sticky="w", pady=3)
         self._enabled_var = enabled_var
+
+    def _add_component_section(self, entity: Entity) -> None:
+        self._section_header("Components")
+        menu_button = ttk.Menubutton(self._content, text="+ Add Component")
+        menu = tk.Menu(menu_button, tearoff=0)
+        existing = {type(component) for component in entity.components}
+        for name, component_type in registered_component_types():
+            if component_type in existing:
+                continue
+            label = name.replace("_", " ").title()
+            menu.add_command(
+                label=label,
+                command=lambda component_name=name: self._emit_add_component(component_name),
+            )
+        if menu.index("end") is None:
+            menu.add_command(label="No components available", state="disabled")
+        menu_button["menu"] = menu
+        menu_button.pack(anchor="w", pady=(0, 4))
+
+    def _emit_add_component(self, component_name: str) -> None:
+        if self._on_add_component is not None:
+            self._on_add_component(component_name)
 
     def _transform_section(self, transform: TransformComponent) -> None:
         self._section_header("Transform")

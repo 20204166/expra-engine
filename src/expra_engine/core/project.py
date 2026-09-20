@@ -314,6 +314,12 @@ class Project:
             (stage / "scenes" / "main.json").write_text(
                 json.dumps(Scene("Main").to_dict(), indent=2) + "\n", encoding="utf-8"
             )
+            (stage / "__main__.py").write_text(
+                "from expra_engine.runtime.project_runner import run_project\n\n"
+                'if __name__ == "__main__":\n'
+                "    run_project()\n",
+                encoding="utf-8",
+            )
             if destination.exists():
                 destination.rmdir()
             os.replace(stage, destination)

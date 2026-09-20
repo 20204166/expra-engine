@@ -115,3 +115,8 @@ def component_from_dict(data: dict[str, Any]) -> Component:
 def register_component_type(name: str, cls: type[Component]) -> None:
     """Register a custom component type for deserialization."""
     _COMPONENT_REGISTRY[name] = cls
+
+
+def registered_component_types() -> tuple[tuple[str, type[Component]], ...]:
+    """Return registered component types in registration order for editor tooling."""
+    return tuple(_COMPONENT_REGISTRY.items())
