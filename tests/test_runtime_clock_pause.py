@@ -71,6 +71,19 @@ class TimeScaleTests(unittest.TestCase):
         _collect(clock, 0.5)
         self.assertAlmostEqual(clock.unscaled_elapsed, 0.5)
 
+    def test_time_scale_greater_than_one_fast_forwards(self) -> None:
+        clock = RuntimeClock(time_step=1.0 / 60.0, time_scale=2.0)
+        updates = _collect(clock, 1.0 / 60.0)
+        self.assertEqual(len(updates), 2)
+        for update in updates:
+            self.assertAlmostEqual(update.time_delta, 1.0 / 60.0)
+
+    def test_time_scale_returns_to_normal(self) -> None:
+        clock = RuntimeClock(time_step=1.0 / 60.0, time_scale=3.0)
+        clock.time_scale = 1.0
+        updates = _collect(clock, 1.0 / 60.0)
+        self.assertEqual(len(updates), 1)
+
     def test_negative_time_scale_rejected(self) -> None:
         with self.assertRaises(ValueError):
             RuntimeClock(time_scale=-0.1)
