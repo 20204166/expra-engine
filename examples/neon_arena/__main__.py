@@ -10,7 +10,12 @@ from pathlib import Path
 from typing import Any
 
 from expra_engine.core.engine import Engine
-from expra_engine.runtime import PygameRenderer, PygameRuntime, RenderFrame
+from expra_engine.runtime import (
+    PygameRenderer,
+    PygameRenderFrame,
+    PygameRuntime,
+    RenderContractFrame,
+)
 
 if __package__:
     from .game import NeonArenaGame, load_scene
@@ -68,11 +73,17 @@ def main() -> None:
         pygame.init()
         engine = Engine()
         engine.set_scene(load_scene(project_dir / "scenes" / "main.json"))
-        surface = pygame.display.set_mode((800, 600))
+        renderer = PygameRenderer(
+            pygame,
+            None,
+            world_bounds=(0, 0, 100, 100),
+            arena_bounds=(0, 0, 800, 600),
+        )
         runtime = PygameRuntime(
             engine,
+            renderer=renderer,
             pygame_module=pygame,
-            surface_factory=lambda size: surface,
+            surface_factory=pygame.display.set_mode,
             size=(800, 600),
         )
         game = NeonArenaGame(
@@ -83,22 +94,23 @@ def main() -> None:
             down_key=pygame.K_DOWN,
             restart_key=pygame.K_r,
         )
-        renderer = PygameRenderer(
-            pygame,
-            surface,
-            world_bounds=(0, 0, 100, 100),
-            arena_bounds=(0, 0, 800, 600),
-        )
         report["runtime_started"] = True
 
-        def render(_surface: Any, _engine: Any) -> None:
-            renderer.on_render(RenderFrame(engine.active_scene, score=game.score, status=game.status))
+        def frame_factory(current_engine: Any, elapsed: float) -> RenderContractFrame:
             report["frames_updated"] += 1
             report["frames_rendered"] += 1
             if smoke is not None and report["frames_rendered"] >= smoke.frame_limit:
                 runtime.stop()
+            return RenderContractFrame(
+                elapsed=elapsed,
+                payload=PygameRenderFrame(
+                    current_engine.active_scene,
+                    score=game.score,
+                    status=game.status,
+                ),
+            )
 
-        runtime.render_callback = render
+        runtime.frame_factory = frame_factory
         engine.add_system(game)
         engine.play()
         runtime.run()

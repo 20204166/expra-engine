@@ -4,7 +4,7 @@ import unittest
 from types import SimpleNamespace
 from typing import Any
 
-from expra_engine.runtime import PygameRuntime
+from expra_engine.runtime import PygameRuntime, RenderContext, RenderContractFrame, Viewport
 
 
 class _FakeSurface:
@@ -60,7 +60,141 @@ class _FakeEngine:
         self.dts.append(dt)
 
 
+class _RecordingRenderer:
+    capabilities = SimpleNamespace(resize=True)
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, object]] = []
+
+    def start(self, context: RenderContext) -> None:
+        self.calls.append(("start", context))
+
+    def render(self, frame: object) -> None:
+        self.calls.append(("render", frame))
+
+    def resize(self, viewport: Viewport) -> None:
+        self.calls.append(("resize", viewport))
+
+    def stop(self) -> None:
+        self.calls.append(("stop", None))
+
+
+class _FailingStopRenderer(_RecordingRenderer):
+    def stop(self) -> None:
+        self.calls.append(("stop", None))
+        raise RuntimeError("stop unavailable")
+
+
 class TestPygameRuntime(unittest.TestCase):
+    def test_starts_renderer_renders_contract_frames_and_stops_in_order(self) -> None:
+        pygame = _FakePygame([[], [SimpleNamespace(type=_FakePygame.QUIT)]])
+        renderer = _RecordingRenderer()
+        runtime = PygameRuntime(
+            _FakeEngine(),
+            renderer=renderer,
+            pygame_module=pygame,
+            clock=_FakeClock([16, 16]),
+            surface_factory=pygame.display.set_mode,
+            size=(320, 240),
+        )
+
+        runtime.run()
+
+        self.assertEqual([name for name, _ in renderer.calls], ["start", "render", "render", "stop"])
+        self.assertIsInstance(renderer.calls[0][1], RenderContext)
+        self.assertEqual(renderer.calls[0][1].viewport, Viewport(0, 0, 320, 240))
+
+    def test_frame_factory_supplies_backend_neutral_frame_payload_to_renderer(self) -> None:
+        pygame = _FakePygame([[], [SimpleNamespace(type=_FakePygame.QUIT)]])
+        renderer = _RecordingRenderer()
+        payload = object()
+        runtime = PygameRuntime(
+            _FakeEngine(),
+            renderer=renderer,
+            pygame_module=pygame,
+            clock=_FakeClock([16, 16]),
+            surface_factory=pygame.display.set_mode,
+            frame_factory=lambda engine, elapsed: RenderContractFrame(elapsed=elapsed, payload=payload),
+        )
+
+        runtime.run()
+
+        frames = [frame for name, frame in renderer.calls if name == "render"]
+        self.assertEqual(len(frames), 2)
+        self.assertIs(frames[0].payload, payload)
+        self.assertNotIn("pygame", type(frames[0].payload).__module__.lower())
+
+    def test_resize_preserves_the_active_camera(self) -> None:
+        from expra_engine.runtime import OrthographicCamera
+
+        pygame = _FakePygame(
+            [[SimpleNamespace(type=4, size=(640, 480))], [SimpleNamespace(type=_FakePygame.QUIT)]]
+        )
+        pygame.VIDEORESIZE = 4
+        renderer = _RecordingRenderer()
+        camera = OrthographicCamera(position=(4, 5, 6), width=20, height=10, near=-3, far=7)
+        runtime = PygameRuntime(
+            _FakeEngine(),
+            renderer=renderer,
+            pygame_module=pygame,
+            clock=_FakeClock([16, 16]),
+            surface_factory=pygame.display.set_mode,
+            camera=camera,
+        )
+
+        runtime.run()
+
+        contexts = [value for name, value in renderer.calls if name == "start"]
+        resize_context = runtime._context
+        self.assertEqual(contexts[0].camera, camera)
+        self.assertEqual(resize_context.camera, camera)
+
+    def test_resize_event_updates_context_and_renderer(self) -> None:
+        pygame = _FakePygame(
+            [[SimpleNamespace(type=4, size=(640, 480))], [SimpleNamespace(type=_FakePygame.QUIT)]]
+        )
+        pygame.VIDEORESIZE = 4
+        renderer = _RecordingRenderer()
+        runtime = PygameRuntime(
+            _FakeEngine(), renderer=renderer, pygame_module=pygame,
+            clock=_FakeClock([16, 16]), surface_factory=pygame.display.set_mode,
+        )
+
+        runtime.run()
+
+        self.assertIn(("resize", Viewport(0, 0, 640, 480)), renderer.calls)
+
+    def test_renderer_stops_and_pygame_quits_when_render_raises(self) -> None:
+        pygame = _FakePygame([[]])
+        renderer = _RecordingRenderer()
+        def broken_render(frame: object) -> None:
+            renderer.calls.append(("render", frame))
+            raise RuntimeError("render unavailable")
+
+        renderer.render = broken_render
+        runtime = PygameRuntime(
+            _FakeEngine(), renderer=renderer, pygame_module=pygame,
+            clock=_FakeClock([16]), surface_factory=pygame.display.set_mode,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "render unavailable"):
+            runtime.run()
+
+        self.assertEqual([name for name, _ in renderer.calls], ["start", "render", "stop"])
+        self.assertEqual(pygame.quit_calls, 1)
+
+    def test_pygame_quits_even_when_renderer_stop_raises(self) -> None:
+        pygame = _FakePygame([[SimpleNamespace(type=_FakePygame.QUIT)]])
+        renderer = _FailingStopRenderer()
+        runtime = PygameRuntime(
+            _FakeEngine(), renderer=renderer, pygame_module=pygame,
+            clock=_FakeClock([16]), surface_factory=pygame.display.set_mode,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "stop unavailable"):
+            runtime.run()
+
+        self.assertEqual(pygame.quit_calls, 1)
     def test_exports_runtime_and_tracks_keyboard_state(self) -> None:
         pygame = _FakePygame(
             [

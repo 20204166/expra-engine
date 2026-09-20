@@ -74,6 +74,35 @@ def _running_game(frames: list[list[Any]], clock_ticks: list[int]) -> tuple[Neon
 
 
 class TestNeonArena(unittest.TestCase):
+    def test_entrypoint_creates_a_new_surface_for_video_resize(self) -> None:
+        entrypoint = importlib.import_module("examples.neon_arena.__main__")
+        report_path = PROJECT_DIR / "test-resize-report.json"
+        fake_pygame = _SmokePygame(
+            [
+                [SimpleNamespace(type=4, size=(1024, 768))],
+                [],
+            ]
+        )
+        fake_pygame.VIDEORESIZE = 4
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "EXPRA_SMOKE_FRAMES": "2",
+                    "EXPRA_SMOKE_REPORT": str(report_path),
+                },
+                clear=False,
+            ),
+            patch.object(entrypoint.importlib, "import_module", return_value=fake_pygame),
+        ):
+            try:
+                entrypoint.main()
+            finally:
+                report_path.unlink(missing_ok=True)
+
+        self.assertEqual(fake_pygame.display.sizes, [(800, 600), (1024, 768)])
+
     def test_smoke_configuration_requires_positive_frame_count(self) -> None:
         entrypoint = importlib.import_module("examples.neon_arena.__main__")
 
@@ -212,7 +241,11 @@ class _SmokePygame:
     K_r = 14
 
     class _Display:
+        def __init__(self) -> None:
+            self.sizes: list[tuple[int, int]] = []
+
         def set_mode(self, size: tuple[int, int]) -> object:
+            self.sizes.append(size)
             return object()
 
         def flip(self) -> None:
@@ -232,9 +265,9 @@ class _SmokePygame:
         def circle(self, surface: object, color: tuple[int, int, int], center: object, radius: int) -> None:
             pass
 
-    def __init__(self) -> None:
+    def __init__(self, frames: list[list[Any]] | None = None) -> None:
         self.display = self._Display()
-        self.event = SimpleNamespace(get=lambda: [])
+        self.event = SimpleNamespace(get=lambda: frames.pop(0) if frames else [])
         self.time = SimpleNamespace(Clock=self._Clock)
         self.draw = self._Draw()
 

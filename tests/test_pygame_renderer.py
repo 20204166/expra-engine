@@ -5,7 +5,19 @@ from types import SimpleNamespace
 
 from expra_engine.core.component import TransformComponent
 from expra_engine.core.scene import Scene
-from expra_engine.runtime import PygameRenderer, RenderFrame
+from expra_engine.runtime import (
+    OrthographicCamera,
+    PrimitiveDescriptor,
+    PygameRenderFrame,
+    PygameRenderer,
+    RenderContext,
+    RenderContractFrame,
+    RenderFrame,
+    RenderItem,
+    RenderPhase,
+    Transform,
+    Viewport,
+)
 
 
 class _FakeSurface:
@@ -48,6 +60,53 @@ class _FakePygame:
 
 
 class TestPygameRenderer(unittest.TestCase):
+    def test_render_frame_aliases_keep_protocol_and_legacy_hud_frames_distinct(self) -> None:
+        self.assertIs(RenderFrame, PygameRenderFrame)
+        self.assertIsNot(RenderContractFrame, PygameRenderFrame)
+
+    def test_implements_renderer_lifecycle_and_reports_headless_capability(self) -> None:
+        pygame = _FakePygame(_FakeFont())
+        renderer = PygameRenderer(pygame, _FakeSurface())
+        context = RenderContext(Viewport(0, 0, 800, 600))
+
+        self.assertTrue(renderer.capabilities.primitive)
+        self.assertTrue(renderer.capabilities.text)
+        self.assertTrue(renderer.capabilities.resize)
+        self.assertTrue(renderer.capabilities.headless)
+        renderer.start(context)
+        self.assertEqual(renderer.context, context)
+        renderer.resize(Viewport(0, 0, 320, 240))
+        self.assertEqual(renderer.context.viewport.width, 320)
+        renderer.stop()
+        self.assertIsNone(renderer.context)
+
+    def test_contract_frame_draws_visible_items_in_phase_layer_depth_order(self) -> None:
+        pygame = _FakePygame(_FakeFont())
+        renderer = PygameRenderer(pygame, _FakeSurface())
+        renderer.start(RenderContext(Viewport(0, 0, 100, 100), OrthographicCamera(width=10, height=10)))
+        primitive = PrimitiveDescriptor("rectangle", size=(2, 2))
+        frame = RenderContractFrame(
+            (
+                RenderItem("transparent", primitive, Transform(position=(3, 0, 0)), phase=RenderPhase.TRANSPARENT),
+                RenderItem("front", primitive, Transform(position=(2, 0, 1)), layer=1),
+                RenderItem("back", primitive, Transform(position=(1, 0, -1)), layer=1),
+                RenderItem("hidden", primitive, Transform(position=(100, 100, 0))),
+            )
+        )
+
+        renderer.render(frame)
+
+        drawn_rects = [entry[2] for entry in pygame.draw.rects[1:]]
+        self.assertEqual([rectangle.center for rectangle in drawn_rects], [(60, 50), (70, 50), (80, 50)])
+
+    def test_contract_frame_supports_headless_dummy_surface(self) -> None:
+        pygame = SimpleNamespace(draw=SimpleNamespace(), font=SimpleNamespace(Font=lambda *_: None))
+        renderer = PygameRenderer(pygame, None)
+        renderer.start(RenderContext(Viewport(0, 0, 100, 100)))
+
+        renderer.render(RenderContractFrame())
+        renderer.stop()
+
     def test_maps_transform_coordinates_into_arena_coordinates(self) -> None:
         scene = Scene("Arena")
         player = scene.create_entity("Player")

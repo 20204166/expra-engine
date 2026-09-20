@@ -3,13 +3,20 @@
 from __future__ import annotations
 
 import math
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any
 
 from expra_engine.core.component import TransformComponent
 from expra_engine.core.scene import Scene
+from expra_engine.runtime.rendering import (
+    Color,
+    RenderContext,
+    RendererCapabilities,
+)
+from expra_engine.runtime.rendering import RenderFrame as ContractRenderFrame
 
-__all__ = ("PygameRenderer", "RenderFrame")
+__all__ = ("PygameRenderFrame", "PygameRenderer", "RenderFrame")
 
 
 @dataclass(frozen=True)
@@ -47,7 +54,7 @@ class PygameRenderer:
     def __init__(
         self,
         pygame_module: Any,
-        surface: Any,
+        surface: Any | None,
         *,
         screen_size: tuple[int, int] = (800, 600),
         world_bounds: tuple[float, float, float, float] = (0, 0, 100, 100),
@@ -66,21 +73,66 @@ class PygameRenderer:
         except Exception:  # noqa: BLE001 - backend/font failures must not abort a frame
             self.font = None
         self._engine: Any = None
+        self.context: RenderContext | None = None
+        self.capabilities = RendererCapabilities(primitive=True, text=True, resize=True, headless=True)
 
-    def start(self, engine: Any) -> None:
-        """Attach to the runtime lifecycle without changing the Engine."""
-        self._engine = engine
+    def start(self, context: RenderContext) -> None:
+        self.context = context
+
+    def resize(self, viewport: Any) -> None:
+        self.context = RenderContext(viewport, self.context.camera) if self.context else RenderContext(viewport)
+        self.screen_size = (viewport.width, viewport.height)
+        self.arena_bounds = (self.arena_bounds[0], self.arena_bounds[1], viewport.width, viewport.height)
+
+    def set_surface(self, surface: Any) -> None:
+        self.surface = surface
 
     def stop(self) -> None:
         self._engine = None
+        self.context = None
+
+    def render(self, frame: ContractRenderFrame) -> None:
+        """Render a backend-neutral frame of primitive descriptors."""
+        context = self.context
+        if context is None:
+            return
+        draw = getattr(self.pygame, "draw", None)
+        if draw is None or self.surface is None:
+            return
+        with suppress(Exception):
+            draw.rect(self.surface, (10, 14, 30), self._rect(self.arena_bounds))
+        for item in frame.visible_items(context):
+            transform = item.world_transform
+            center = context.camera.project(transform.position, context.viewport)
+            position = (round(center[0]), round(center[1]))
+            color = self._color(item.material.color, item.material.opacity)
+            try:
+                if item.primitive.kind in ("rectangle", "rect"):
+                    width = round(abs(item.primitive.size[0] * transform.scale[0] / context.camera.width * context.viewport.width))
+                    height = round(abs(item.primitive.size[1] * transform.scale[1] / context.camera.height * context.viewport.height))
+                    draw.rect(self.surface, color, self._rect_from_center(position, width, height))
+                elif item.primitive.kind == "circle":
+                    radius = item.primitive.radius or item.primitive.size[0] / 2
+                    pixels = round(abs(radius * max(transform.scale[0], transform.scale[1]) / context.camera.width * context.viewport.width))
+                    draw.circle(self.surface, color, position, pixels)
+                elif item.primitive.kind == "point":
+                    draw.circle(self.surface, color, position, 1)
+            except Exception:  # noqa: BLE001 - backend draw failures are frame-local
+                pass
+        if isinstance(frame.payload, RenderFrame):
+            self.on_render(frame.payload)
+
+    @staticmethod
+    def _color(color: Color, opacity: float) -> tuple[int, ...]:
+        values = tuple(round(value * 255) for value in (color.red, color.green, color.blue))
+        alpha = round(color.alpha * opacity * 255)
+        return (*values, alpha) if alpha < 255 else values
 
     def on_render(self, frame: RenderFrame) -> None:
         """Render one frame of scene primitives and HUD text."""
         draw = self.pygame.draw
-        try:
+        with suppress(Exception):
             draw.rect(self.surface, (10, 14, 30), self._rect(self.arena_bounds))
-        except Exception:  # noqa: BLE001 - backend draw failures are frame-local
-            pass
         scene = frame.active_scene
         if scene is not None:
             for entity in scene.entities_by_layer():
@@ -113,17 +165,15 @@ class PygameRenderer:
                         pass
                 elif entity.has_tag("target") or entity.name.lower() == "target":
                     radius = round(8 * (abs(transform.scale_x) + abs(transform.scale_y)) / 2)
-                    try:
+                    with suppress(Exception):
                         draw.circle(self.surface, (255, 72, 178), position, radius)
-                    except Exception:  # noqa: BLE001 - backend draw failures are frame-local
-                        pass
 
         self._draw_text(f"Score: {frame.score}", (16, 12))
         if frame.status:
             self._draw_text(frame.status, (16, 44))
 
     def _draw_text(self, text: str, position: tuple[int, int]) -> None:
-        if self.font is None:
+        if self.font is None or self.surface is None:
             return
         try:
             rendered = self.font.render(text, True, (245, 248, 255))
@@ -155,3 +205,6 @@ class PygameRenderer:
 
     def _rect_from_center(self, center: tuple[int, int], width: int, height: int) -> Any:
         return self._rect((center[0] - width // 2, center[1] - height // 2, width, height))
+
+
+PygameRenderFrame = RenderFrame
