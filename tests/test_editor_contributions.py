@@ -158,6 +158,19 @@ class ContributionRegistryTests(unittest.TestCase):
         self.assertEqual(registry.menu_contributions()[0].label, "Example")
         self.assertEqual(registry.toolbar_contributions()[0].action_id, "example")
 
+    def test_invalid_style_role_fails_before_action_registration(self) -> None:
+        actions = ButtonCoordinator()
+        registry = ContributionRegistry(actions)
+        feature = EditorFeatureSpec(
+            "example",
+            actions=(EditorActionSpec("example", lambda: None),),
+            toolbars=(ToolbarContribution("example", "Example", style_role="missing"),),
+        )
+
+        with self.assertRaises(ValueError):
+            registry.register(feature)
+        self.assertEqual(actions.registered_ids(), ())
+
     def test_lifecycle_is_idempotent_and_start_failure_rolls_back(self) -> None:
         actions = ButtonCoordinator()
         context = EditorContext(engine=None, actions=actions, ui=None)

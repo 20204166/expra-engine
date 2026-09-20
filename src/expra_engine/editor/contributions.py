@@ -119,10 +119,12 @@ class ContributionRegistry:
         *,
         context: EditorContext | None = None,
         shortcuts: ShortcutRegistry | None = None,
+        style_roles: frozenset[str] = frozenset({"neutral", "play", "stop"}),
     ) -> None:
         self._context = context
         self._actions = actions
         self._shortcuts = shortcuts or ShortcutRegistry()
+        self._style_roles = style_roles
         self._features: dict[str, _FeatureRecord] = {}
 
     def register(self, feature: EditorFeature) -> None:
@@ -137,6 +139,13 @@ class ContributionRegistry:
             raise ValueError(f"Feature contains duplicate action IDs: {feature_id}")
         if any(not action_id for action_id in action_ids):
             raise ValueError(f"Feature contains an empty action ID: {feature_id}")
+        if any(not item.parent for item in feature.menus):
+            raise ValueError(f"Feature contains a menu without a parent: {feature_id}")
+        invalid_roles = {
+            item.style_role for item in feature.toolbars if item.style_role not in self._style_roles
+        }
+        if invalid_roles:
+            raise ValueError(f"Unknown toolbar style role: {sorted(invalid_roles)[0]}")
         existing_ids = set(self._actions.registered_ids())
         conflict = existing_ids.intersection(action_ids)
         if conflict:
