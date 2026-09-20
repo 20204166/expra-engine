@@ -9,6 +9,18 @@ from expra_engine.core.scene import Scene
 
 
 class TestSceneBasics(unittest.TestCase):
+    def test_entities_by_layer_sorted(self) -> None:
+        scene = Scene("test")
+        background = Entity(name="bg", layer=0)
+        foreground = Entity(name="fg", layer=2)
+        middle = Entity(name="mid", layer=1)
+        for entity in (background, foreground, middle):
+            scene.add_entity(entity)
+
+        ordered = scene.entities_by_layer()
+
+        self.assertEqual([entity.name for entity in ordered], ["bg", "mid", "fg"])
+
     def test_create_entity(self) -> None:
         scene = Scene("Test")
         entity = scene.create_entity("Player")

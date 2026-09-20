@@ -7,6 +7,11 @@ from expra_engine.core.entity import Entity
 
 
 class TestEntityBasics(unittest.TestCase):
+    def test_default_layer_is_zero(self) -> None:
+        entity = Entity(name="Background")
+
+        self.assertEqual(entity.layer, 0)
+
     def test_entity_has_stable_id(self) -> None:
         e = Entity("Player", entity_id="p-001")
         self.assertEqual(e.entity_id, "p-001")
@@ -78,6 +83,13 @@ class TestEntitySerialization(unittest.TestCase):
         e = Entity("Child", entity_id="c-1", parent_id="parent-id")
         loaded = Entity.from_dict(e.to_dict())
         self.assertEqual(loaded.parent_id, "parent-id")
+
+    def test_layer_round_trips_to_dict(self) -> None:
+        entity = Entity("Foreground", entity_id="f-1", layer=5)
+
+        loaded = Entity.from_dict(entity.to_dict())
+
+        self.assertEqual(loaded.layer, 5)
 
 
 class TestTransformComponent(unittest.TestCase):

@@ -28,11 +28,13 @@ class Entity:
         *,
         entity_id: str | None = None,
         enabled: bool = True,
+        layer: int = 0,
         parent_id: str | None = None,
     ) -> None:
         self.entity_id: str = entity_id or str(uuid.uuid4())
         self.name = name
         self.enabled = enabled
+        self.layer = layer
         self.parent_id = parent_id
         self._components: list[Component] = []
         self._tags: set[str] = set()
@@ -82,6 +84,7 @@ class Entity:
             "entity_id": self.entity_id,
             "name": self.name,
             "enabled": self.enabled,
+            "layer": self.layer,
             "parent_id": self.parent_id,
             "components": [c.to_dict() for c in self._components],
             "tags": sorted(self._tags),
@@ -93,6 +96,7 @@ class Entity:
             name=str(data["name"]),
             entity_id=str(data["entity_id"]),
             enabled=bool(data.get("enabled", True)),
+            layer=int(data.get("layer", 0)),
             parent_id=data.get("parent_id"),
         )
         for tag in data.get("tags", []):

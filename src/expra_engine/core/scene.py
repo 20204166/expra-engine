@@ -85,6 +85,7 @@ class Scene:
             new_root = Entity(
                 root.name,
                 enabled=root.enabled,
+                layer=root.layer,
                 parent_id=root.parent_id,
             )
             for comp in root.components:
@@ -108,6 +109,7 @@ class Scene:
                 original.name,
                 entity_id=new_id,
                 enabled=original.enabled,
+                layer=original.layer,
                 parent_id=new_parent_id,
             )
             for comp in original.components:
@@ -124,6 +126,10 @@ class Scene:
             if entity.entity_id == entity_id:
                 return entity
         return None
+
+    def entities_by_layer(self) -> list[Entity]:
+        """Return all entities sorted ascending by layer."""
+        return sorted(self._entities, key=lambda entity: entity.layer)
 
     def find_entity_by_name(self, name: str) -> Entity | None:
         for entity in self._entities:
