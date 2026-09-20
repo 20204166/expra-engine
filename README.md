@@ -53,6 +53,13 @@ python -m expra_engine
 
 The editor uses Tk through `expra_engine.ui`. It is not the game runtime.
 
+Game rendering is defined by the backend-neutral `Renderer` protocol in
+`expra_engine.runtime.rendering`. The current Pygame adapter uses an
+orthographic camera, viewport-aware culling, stable depth/layer ordering,
+parent transform composition, render phases, and backend-neutral primitive and
+material descriptors. These are 3D graphics principles applied to the 2D game
+path; meshes, lighting, and perspective are not required by the sample yet.
+
 ## Running The Neon Arena Sample
 
 The repository includes a real Pygame/SDL game at `examples/neon_arena`. Install

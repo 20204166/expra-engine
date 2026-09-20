@@ -21,6 +21,7 @@ distribution.
 | `editor/export_dialog.py` | Tkinter dialog wired via ButtonCoordinator → AppCoordinator |
 | `runtime/pygame_runtime.py` | Non-Tk SDL/Pygame window, input, timing, and loop |
 | `runtime/pygame_renderer.py` | Primitive 2D renderer and score/status HUD |
+| `runtime/rendering.py` | Backend-neutral renderer protocol and 3D-ready frame contracts |
 
 ### Runtime boundary enforced
 
@@ -36,6 +37,12 @@ The `pygame` runtime profile stages only the engine core/runtime modules needed
 by a game and installs Pygame into the target runtime. The editor-facing engine
 wheel remains a separate distribution artifact and is not copied wholesale into
 the game bundle.
+
+The renderer contract is intentionally independent of Pygame. It provides an
+orthographic camera, viewport mapping and culling, stable phase/layer/depth
+ordering, parent transform composition, and primitive/material descriptors.
+Pygame is currently the concrete adapter; another backend can implement the
+same `Renderer` lifecycle without changing `Engine` or game logic.
 
 ### Atomic build contract
 
@@ -73,7 +80,10 @@ closed, full exporter end-to-end with mock packager, CLI argument parsing.
 `Engine` is renderer-agnostic, while exported games can explicitly install the
 Pygame/SDL adapter and `PygameRenderer`. The current renderer intentionally
 supports primitive player/target shapes and HUD text; sprites, materials,
-audio, and a general renderer protocol remain future work.
+audio, meshes, lighting, perspective cameras, and a general asset/material
+library remain future work. The backend-neutral renderer protocol itself is
+implemented now so those features can be added without coupling the engine to
+Pygame.
 
 ### Dependency resolution from pyproject.toml
 
