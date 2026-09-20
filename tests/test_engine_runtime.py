@@ -30,6 +30,7 @@ from expra_engine.runtime.events import (
     StopScene,
     Update,
 )
+from expra_engine.runtime.input import ActionEvent, ActionId, PhysicalInput
 from expra_engine.runtime.system import RuntimeSystem
 from tests.test_runtime_behaviour import LifecycleBehaviour, lifecycle_factory
 
@@ -76,6 +77,14 @@ def _engine_with_log() -> tuple[Engine, _EventLog]:
 
 
 class TestEngineTick(unittest.TestCase):
+    def test_quit_action_stops_runtime_on_next_tick(self) -> None:
+        engine = Engine()
+        engine.set_scene(Scene("Test"))
+        engine.play()
+        engine.signal(ActionEvent(ActionId("quit"), "pressed", PhysicalInput("keyboard", "q")))
+        engine.tick(0.016)
+        self.assertEqual(engine.run_state, EngineRunState.EDIT)
+
     def test_tick_in_edit_state_returns_zero(self) -> None:
         engine = Engine()
         engine.set_scene(Scene("Test"))

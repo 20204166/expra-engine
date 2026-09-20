@@ -314,6 +314,19 @@ class Engine:
         if self._state in (EngineRunState.PLAY, EngineRunState.PAUSED):
             self._quit_requested = True
 
+    def on_action_event(self, event: object, signal: object) -> bool:
+        """Handle the conventional semantic quit action before Behaviours."""
+        from expra_engine.runtime.input import ActionEvent
+
+        if (
+            isinstance(event, ActionEvent)
+            and event.phase == "pressed"
+            and event.action.value == "quit"
+        ):
+            self._quit_requested = True
+            return True
+        return False
+
     def on_start_scene(self, event: object, signal: object) -> None:
         """Handle a queued request by pushing its materialized scene."""
         if self._state not in (EngineRunState.PLAY, EngineRunState.PAUSED):
