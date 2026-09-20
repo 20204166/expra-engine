@@ -3,10 +3,14 @@
 import unittest
 from time import perf_counter
 
+from expra_engine.core.string_utils import camel_to_snake as string_camel_to_snake
 from expra_engine.core.utils import camel_to_snake, get_time
 
 
 class TestCamelToSnake(unittest.TestCase):
+    def test_reuses_string_conversion_owner(self) -> None:
+        self.assertIs(camel_to_snake, string_camel_to_snake)
+
     def test_simple_word(self) -> None:
         self.assertEqual(camel_to_snake("Update"), "update")
 
