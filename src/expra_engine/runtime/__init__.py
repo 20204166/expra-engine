@@ -18,6 +18,7 @@ from expra_engine.runtime.events import (
 )
 from expra_engine.runtime.invoke import Repeater, after, every, invoke
 from expra_engine.runtime.platformer import PlatformerController2d, PlatformerPhase
+from expra_engine.runtime.pygame_renderer import PygameRenderer, RenderFrame
 from expra_engine.runtime.pygame_runtime import PygameRuntime
 from expra_engine.runtime.sequence import Func, Sequence, Wait
 from expra_engine.runtime.smooth_follow import SmoothFollow
@@ -34,11 +35,13 @@ __all__ = [
     "PlatformerController2d",
     "PlatformerPhase",
     "PygameRuntime",
+    "PygameRenderer",
     "Quit",
     "Repeater",
     "ReplaceScene",
     "RuntimeClock",
     "RuntimeSystem",
+    "RenderFrame",
     "SceneContinued",
     "ScenePaused",
     "SceneStarted",
