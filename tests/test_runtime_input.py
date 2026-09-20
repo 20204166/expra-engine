@@ -3,6 +3,9 @@
 import unittest
 from dataclasses import FrozenInstanceError
 
+from expra_engine.core.engine import Engine
+from expra_engine.core.scene import Scene
+from expra_engine.runtime import Behaviour
 from expra_engine.runtime.input import (
     ActionEvent,
     ActionId,
@@ -11,7 +14,59 @@ from expra_engine.runtime.input import (
 )
 
 
+class InputBehaviour(Behaviour):
+    def __init__(self, label: str, log: list[tuple[str, str]], consume: bool) -> None:
+        super().__init__()
+        self.label = label
+        self.log = log
+        self.consume = consume
+
+    def on_input(self, event: ActionEvent, signal: object) -> bool:
+        self.log.append((self.label, event.phase))
+        return self.consume
+
+
 class TestRuntimeInput(unittest.TestCase):
+    def test_action_events_propagate_until_consumed_for_pressed_and_released(self) -> None:
+        log: list[tuple[str, str]] = []
+        scene = Scene("Input")
+        entity = scene.create_entity("Actor")
+        entity.add_behaviour(
+            InputBehaviour("continue", log, consume=False),
+            runtime_factory=lambda: InputBehaviour("continue", log, consume=False),
+        )
+        entity.add_behaviour(
+            InputBehaviour("consume", log, consume=True),
+            runtime_factory=lambda: InputBehaviour("consume", log, consume=True),
+        )
+        entity.add_behaviour(
+            InputBehaviour("unreached", log, consume=False),
+            runtime_factory=lambda: InputBehaviour("unreached", log, consume=False),
+        )
+        engine = Engine()
+        engine.set_scene(scene)
+        engine.play()
+        action = ActionEvent(
+            ActionId("jump"),
+            "pressed",
+            PhysicalInput("keyboard", "space"),
+        )
+        release = ActionEvent(action.action, "released", action.physical)
+
+        engine._eq.signal(action)  # type: ignore[union-attr]
+        engine._eq.signal(release)  # type: ignore[union-attr]
+        engine._eq.drain()  # type: ignore[union-attr]
+
+        self.assertEqual(
+            log,
+            [
+                ("continue", "pressed"),
+                ("consume", "pressed"),
+                ("continue", "released"),
+                ("consume", "released"),
+            ],
+        )
+
     def test_resolves_physical_input_to_semantic_action_events(self) -> None:
         jump = ActionId("jump")
         space = PhysicalInput("keyboard", "space")

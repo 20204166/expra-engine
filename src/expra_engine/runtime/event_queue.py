@@ -29,6 +29,7 @@ from typing import Any
 
 from expra_engine.core.errors import BadEventHandlerException
 from expra_engine.core.utils import camel_to_snake
+from expra_engine.runtime.input import ActionEvent
 
 __all__ = ("EventQueue", "walk")
 
@@ -132,7 +133,7 @@ class EventQueue:
             if method is None or not callable(method):
                 continue
             try:
-                method(event, self.signal)
+                handled = method(event, self.signal)
             except TypeError as exc:
                 from inspect import signature
 
@@ -142,6 +143,8 @@ class EventQueue:
                 except TypeError:
                     raise BadEventHandlerException(obj, handler_name, event) from exc
                 raise
+            if isinstance(event, ActionEvent) and handled:
+                break
 
     def flush(self) -> None:
         """Discard all pending events.

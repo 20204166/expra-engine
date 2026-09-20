@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING
 
 from expra_engine.core.scene import Scene
 from expra_engine.core.utils import get_time
+from expra_engine.runtime.behaviour import Behaviour, BehaviourFactory
 
 if TYPE_CHECKING:
     from expra_engine.core.project import Project
@@ -147,7 +148,10 @@ class Engine:
     def play(self) -> bool:
         """Enter PLAY state. Returns True if state changed."""
         if self._state == EngineRunState.EDIT:
-            self._runtime_scene = self._copy_scene(self._edit_scene)
+            behaviour_factories = self._capture_behaviour_factories()
+            runtime_scene = self._copy_scene(self._edit_scene)
+            self._attach_runtime_behaviours(runtime_scene, behaviour_factories)
+            self._runtime_scene = runtime_scene
             self._state = EngineRunState.PLAY
             self._quit_requested = False
             self._last_update = time.monotonic()
@@ -389,6 +393,8 @@ class Engine:
         for system in self._systems:
             system.start(self)
 
+        self._start_behaviours()
+
         if self._scene_stack:
             self._eq.signal(SceneStarted())
             self._eq.drain()
@@ -402,6 +408,8 @@ class Engine:
             self._eq.signal(SceneStopped())
             self._eq.drain()
 
+        self._stop_behaviours()
+
         for system in reversed(self._systems):
             system.stop()
 
@@ -409,6 +417,85 @@ class Engine:
             self._clock.reset()
         self._eq = None
         self._clock = None
+
+    def _capture_behaviour_factories(
+        self,
+    ) -> dict[str, list[tuple[Behaviour, BehaviourFactory]]]:
+        """Capture and validate edit-scene factories before scene cloning."""
+        captured: dict[str, list[tuple[Behaviour, BehaviourFactory]]] = {}
+        if self._edit_scene is None:
+            return captured
+
+        for entity in self._edit_scene.entities:
+            behaviours = entity.behaviours
+            factories = entity._behaviour_factories
+            if len(behaviours) != len(factories):
+                raise ValueError(
+                    f"entity {entity.entity_id!r} has a missing runtime behaviour factory"
+                )
+            pairs: list[tuple[Behaviour, BehaviourFactory]] = []
+            for behaviour, factory in zip(behaviours, factories, strict=True):
+                if not callable(factory):
+                    raise ValueError(
+                        f"runtime behaviour factory for entity {entity.entity_id!r} "
+                        "must be callable"
+                    )
+                pairs.append((behaviour, factory))
+            if pairs:
+                captured[entity.entity_id] = pairs
+        return captured
+
+    @staticmethod
+    def _attach_runtime_behaviours(
+        runtime_scene: Scene | None,
+        captured: dict[str, list[tuple[Behaviour, BehaviourFactory]]],
+    ) -> None:
+        """Create and attach fresh behaviours to their cloned entities."""
+        if runtime_scene is None:
+            return
+
+        for entity_id, pairs in captured.items():
+            entity = runtime_scene.find_entity(entity_id)
+            if entity is None:
+                raise ValueError(
+                    f"runtime scene is missing entity {entity_id!r} for behaviours"
+                )
+            for _, factory in pairs:
+                try:
+                    behaviour = factory()
+                except Exception as exc:
+                    raise ValueError(
+                        f"runtime behaviour factory for entity {entity_id!r} failed"
+                    ) from exc
+                if not isinstance(behaviour, Behaviour):
+                    raise ValueError(
+                        f"runtime behaviour factory for entity {entity_id!r} "
+                        "must return a Behaviour"
+                    )
+                if behaviour.entity is not None:
+                    raise ValueError(
+                        f"runtime behaviour factory for entity {entity_id!r} "
+                        "returned an already-owned Behaviour"
+                    )
+                entity.add_behaviour(behaviour, runtime_factory=factory)
+
+    def _start_behaviours(self) -> None:
+        """Start behaviours attached to the base runtime scene in order."""
+        if self._runtime_scene is None:
+            return
+        for entity in self._runtime_scene.entities:
+            for behaviour in entity.behaviours:
+                behaviour.on_start()
+
+    def _stop_behaviours(self) -> None:
+        """Stop and detach behaviours before runtime teardown."""
+        if self._runtime_scene is None:
+            return
+        for entity in self._runtime_scene.entities:
+            for behaviour in entity.behaviours:
+                behaviour.on_stop()
+            for behaviour in entity.behaviours:
+                entity.remove_behaviour(behaviour)
 
     def _build_dispatch_root(self) -> object:
         """Build the object whose ``children`` tree receives broadcast events.

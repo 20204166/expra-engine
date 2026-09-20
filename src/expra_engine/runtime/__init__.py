@@ -1,6 +1,7 @@
 """Expra game runtime subsystem."""
 
 from expra_engine.runtime.animator import AnimatorStateMachine
+from expra_engine.runtime.behaviour import Behaviour, BehaviourFactory
 from expra_engine.runtime.clock import RuntimeClock
 from expra_engine.runtime.easing import CubicBezier
 from expra_engine.runtime.event_queue import EventQueue, walk
@@ -18,7 +19,7 @@ from expra_engine.runtime.events import (
 )
 from expra_engine.runtime.invoke import Repeater, after, every, invoke
 from expra_engine.runtime.platformer import PlatformerController2d, PlatformerPhase
-from expra_engine.runtime.pygame_renderer import PygameRenderFrame, PygameRenderer, RenderFrame
+from expra_engine.runtime.pygame_renderer import PygameRenderer, PygameRenderFrame, RenderFrame
 from expra_engine.runtime.pygame_runtime import PygameRuntime
 from expra_engine.runtime.rendering import (
     Color,
@@ -44,6 +45,8 @@ from expra_engine.runtime.tween import Tween
 
 __all__ = [
     "AnimatorStateMachine",
+    "Behaviour",
+    "BehaviourFactory",
     "Color",
     "CubicBezier",
     "EventQueue",
@@ -54,8 +57,8 @@ __all__ = [
     "PlatformerController2d",
     "PlatformerPhase",
     "PrimitiveDescriptor",
-    "PygameRenderer",
     "PygameRenderFrame",
+    "PygameRenderer",
     "PygameRuntime",
     "Quit",
     "RenderContext",

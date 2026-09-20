@@ -18,6 +18,7 @@ from typing import Any
 
 from expra_engine.core.engine import Engine, EngineRunState
 from expra_engine.core.scene import Scene
+from expra_engine.runtime import Behaviour
 from expra_engine.runtime.events import (
     Quit,
     ReplaceScene,
@@ -30,6 +31,7 @@ from expra_engine.runtime.events import (
     Update,
 )
 from expra_engine.runtime.system import RuntimeSystem
+from tests.test_runtime_behaviour import LifecycleBehaviour, lifecycle_factory
 
 
 class _EventLog(RuntimeSystem):
@@ -286,6 +288,95 @@ class TestEngineEditSceneIsolation(unittest.TestCase):
         engine.replace_scene(Scene("NewScene"))
         engine.stop()
         self.assertIs(engine.edit_scene, original)
+
+
+class TestEngineBehaviourRuntimeLifecycle(unittest.TestCase):
+    def _scene_with_behaviours(
+        self,
+        log: list[tuple[Behaviour, str, str | None]],
+    ) -> tuple[Engine, Scene, tuple[LifecycleBehaviour, LifecycleBehaviour]]:
+        engine = Engine()
+        scene = Scene("Edit", scene_id="edit-1")
+        first_entity = scene.create_entity("First", entity_id="entity-1")
+        second_entity = scene.create_entity("Second", entity_id="entity-2")
+        first_behaviour = LifecycleBehaviour(log)
+        second_behaviour = LifecycleBehaviour(log)
+        first_entity.add_behaviour(first_behaviour, runtime_factory=lifecycle_factory(log))
+        second_entity.add_behaviour(second_behaviour, runtime_factory=lifecycle_factory(log))
+        engine.set_scene(scene)
+        return engine, scene, (first_behaviour, second_behaviour)
+
+    def test_play_clones_behaviours_by_stable_entity_id_and_isolates_edit_scene(self) -> None:
+        log: list[tuple[Behaviour, str, str | None]] = []
+        engine, edit_scene, edit_behaviours = self._scene_with_behaviours(log)
+
+        self.assertTrue(engine.play())
+
+        runtime_scene = engine.active_scene
+        self.assertIsNotNone(runtime_scene)
+        assert runtime_scene is not None
+        runtime_behaviours = tuple(
+            entity.behaviours for entity in runtime_scene.entities
+        )
+        self.assertEqual(
+            [entity.entity_id for entity in runtime_scene.entities],
+            ["entity-1", "entity-2"],
+        )
+        self.assertEqual([len(behaviours) for behaviours in runtime_behaviours], [1, 1])
+        self.assertIsNot(runtime_behaviours[0][0], edit_behaviours[0])
+        self.assertIsNot(runtime_behaviours[1][0], edit_behaviours[1])
+        self.assertEqual(
+            [(callback, entity_id) for _, callback, entity_id in log],
+            [
+                ("attach", "entity-1"),
+                ("attach", "entity-2"),
+                ("attach", "entity-1"),
+                ("attach", "entity-2"),
+                ("start", "entity-1"),
+                ("start", "entity-2"),
+            ],
+        )
+        self.assertEqual(edit_scene.entities[0].behaviours, (edit_behaviours[0],))
+        self.assertEqual(edit_scene.entities[1].behaviours, (edit_behaviours[1],))
+        self.assertNotIn(
+            "start",
+            [callback for instance, callback, _ in log if instance in edit_behaviours],
+        )
+
+    def test_play_without_factory_fails_before_leaving_edit_state(self) -> None:
+        log: list[tuple[Behaviour, str, str | None]] = []
+        engine, edit_scene, (edit_behaviour, _) = self._scene_with_behaviours(log)
+        edit_scene.entities[0]._behaviour_factories.clear()  # type: ignore[attr-defined]
+
+        with self.assertRaisesRegex(ValueError, "factory"):
+            engine.play()
+
+        self.assertEqual(engine.run_state, EngineRunState.EDIT)
+        self.assertIs(engine.edit_scene, edit_scene)
+        self.assertIsNone(engine._runtime_scene)
+        self.assertIs(edit_behaviour.entity, edit_scene.entities[0])
+        self.assertEqual([callback for _, callback, _ in log], ["attach", "attach"])
+
+    def test_stop_calls_runtime_stop_before_detach_and_not_edit_behaviour(self) -> None:
+        log: list[tuple[Behaviour, str, str | None]] = []
+        engine, _, edit_behaviours = self._scene_with_behaviours(log)
+        engine.play()
+        runtime_scene = engine.active_scene
+        assert runtime_scene is not None
+        runtime_behaviours = tuple(entity.behaviours[0] for entity in runtime_scene.entities)
+        log.clear()
+
+        self.assertTrue(engine.stop())
+
+        for runtime_behaviour in runtime_behaviours:
+            runtime_callbacks = [
+                callback for instance, callback, _ in log if instance is runtime_behaviour
+            ]
+            self.assertEqual(runtime_callbacks, ["stop", "detach"])
+        self.assertEqual(
+            [callback for instance, callback, _ in log if instance in edit_behaviours],
+            [],
+        )
 
 
 if __name__ == "__main__":

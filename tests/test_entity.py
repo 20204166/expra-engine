@@ -10,6 +10,22 @@ from expra_engine.core.component import (
     register_component_type,
 )
 from expra_engine.core.entity import Entity
+from expra_engine.runtime.behaviour import Behaviour
+
+
+class RecordingBehaviour(Behaviour):
+    def __init__(self) -> None:
+        super().__init__()
+        self.attach_owner = None
+        self.detach_count = 0
+
+    def on_attach(self, entity: Entity) -> None:
+        self.attach_owner = entity
+        assert self.entity is entity
+        assert self in entity.behaviours
+
+    def on_detach(self) -> None:
+        self.detach_count += 1
 
 
 class TestEntityBasics(unittest.TestCase):
@@ -57,6 +73,56 @@ class TestEntityBasics(unittest.TestCase):
         t = TransformComponent()
         result = e.remove_component(t)
         self.assertFalse(result)
+
+
+class TestEntityBehaviours(unittest.TestCase):
+    def test_add_behaviour_preserves_order_and_supports_type_lookup(self) -> None:
+        entity = Entity("Hero")
+        first = RecordingBehaviour()
+        second = RecordingBehaviour()
+
+        entity.add_behaviour(first, runtime_factory=RecordingBehaviour)
+        entity.add_behaviour(second, runtime_factory=RecordingBehaviour)
+
+        self.assertEqual(entity.behaviours, (first, second))
+        self.assertIs(entity.get_behaviour(RecordingBehaviour), first)
+        with self.assertRaises(AttributeError):
+            entity.behaviours.append(first)  # type: ignore[attr-defined]
+
+    def test_add_behaviour_requires_callable_runtime_factory(self) -> None:
+        entity = Entity("Hero")
+        behaviour = RecordingBehaviour()
+
+        with self.assertRaises(TypeError):
+            entity.add_behaviour(behaviour)  # type: ignore[call-arg]
+        with self.assertRaises(ValueError):
+            entity.add_behaviour(behaviour, runtime_factory=object())  # type: ignore[arg-type]
+
+    def test_add_behaviour_rejects_duplicate_and_cross_owner_attachment(self) -> None:
+        first_entity = Entity("First")
+        second_entity = Entity("Second")
+        behaviour = RecordingBehaviour()
+        first_entity.add_behaviour(behaviour, runtime_factory=RecordingBehaviour)
+
+        with self.assertRaises(ValueError):
+            first_entity.add_behaviour(behaviour, runtime_factory=RecordingBehaviour)
+        with self.assertRaises(ValueError):
+            second_entity.add_behaviour(behaviour, runtime_factory=RecordingBehaviour)
+
+        self.assertEqual(behaviour.attach_owner, first_entity)
+        self.assertEqual(behaviour.detach_count, 0)
+
+    def test_remove_behaviour_detaches_once_and_clears_owner(self) -> None:
+        entity = Entity("Hero")
+        behaviour = RecordingBehaviour()
+        entity.add_behaviour(behaviour, runtime_factory=RecordingBehaviour)
+
+        self.assertTrue(entity.remove_behaviour(behaviour))
+        self.assertEqual(behaviour.detach_count, 1)
+        self.assertIsNone(behaviour.entity)
+        self.assertEqual(entity.behaviours, ())
+        self.assertFalse(entity.remove_behaviour(behaviour))
+        self.assertEqual(behaviour.detach_count, 1)
 
 
 class TestEntitySerialization(unittest.TestCase):

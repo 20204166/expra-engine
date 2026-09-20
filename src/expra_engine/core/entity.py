@@ -8,9 +8,14 @@ from __future__ import annotations
 
 import contextlib
 import uuid
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from expra_engine.core.component import Component, component_from_dict
+
+if TYPE_CHECKING:
+    from expra_engine.runtime.behaviour import Behaviour, BehaviourFactory
+    from expra_engine.runtime.events import Update
+    from expra_engine.runtime.input import ActionEvent
 
 C = TypeVar("C", bound=Component)
 
@@ -37,6 +42,8 @@ class Entity:
         self.layer = layer
         self.parent_id = parent_id
         self._components: list[Component] = []
+        self._behaviours: list[Behaviour] = []
+        self._behaviour_factories: list[BehaviourFactory] = []
         self._tags: set[str] = set()
 
     @property
@@ -61,6 +68,61 @@ class Entity:
 
     def get_components(self, cls: type[C]) -> list[C]:
         return [c for c in self._components if isinstance(c, cls)]
+
+    @property
+    def behaviours(self) -> tuple[Behaviour, ...]:
+        """Return attached runtime behaviours in insertion order."""
+        return tuple(self._behaviours)
+
+    def add_behaviour(self, behaviour: Behaviour, *, runtime_factory: BehaviourFactory) -> None:
+        """Attach an unowned runtime behaviour to this entity."""
+        if not callable(runtime_factory):
+            raise ValueError("runtime_factory must be callable")
+        if behaviour.entity is not None:
+            raise ValueError("behaviour is already owned by an entity")
+
+        self._behaviours.append(behaviour)
+        self._behaviour_factories.append(runtime_factory)
+        behaviour.entity = self
+        behaviour.on_attach(self)
+
+    def remove_behaviour(self, behaviour: Behaviour) -> bool:
+        """Detach a behaviour, returning whether it was attached."""
+        try:
+            index = self._behaviours.index(behaviour)
+        except ValueError:
+            return False
+
+        self._behaviours.pop(index)
+        self._behaviour_factories.pop(index)
+        try:
+            behaviour.on_detach()
+        finally:
+            behaviour.entity = None
+        return True
+
+    def get_behaviour(self, cls: type[Behaviour]) -> Behaviour | None:
+        """Return the first attached behaviour matching ``cls``."""
+        for behaviour in self._behaviours:
+            if isinstance(behaviour, cls):
+                return behaviour
+        return None
+
+    def on_update(self, event: Update, signal: Any) -> None:
+        """Dispatch an update to the currently eligible behaviours."""
+        for behaviour in tuple(self._behaviours):
+            if not self.enabled or behaviour.entity is not self or not behaviour.enabled:
+                continue
+            behaviour.on_update(event, signal)
+
+    def on_action_event(self, event: ActionEvent, signal: Any) -> bool:
+        """Dispatch input until an eligible behaviour consumes it."""
+        for behaviour in tuple(self._behaviours):
+            if not self.enabled or behaviour.entity is not self or not behaviour.enabled:
+                continue
+            if behaviour.on_input(event, signal):
+                return True
+        return False
 
     @property
     def tags(self) -> frozenset[str]:
