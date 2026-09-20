@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 from expra_engine.editor.export_dialog import _ACTION_EXPORT, ExportDialog
+from expra_engine.export.plan import RuntimeProfile
 
 
 class ExportDialogActionTests(unittest.TestCase):
@@ -54,6 +55,17 @@ class ExportDialogActionTests(unittest.TestCase):
             self.assertEqual(app.run.call_args.args[0], _ACTION_EXPORT)
             self.assertTrue(callable(app.run.call_args.args[1]))
             self.assertEqual(app.run.call_args.kwargs["on_result"], dialog._on_result)
+
+    def test_start_export_uses_pygame_runtime_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            from unittest.mock import patch
+
+            project = Path(tmp)
+            (project / "__main__.py").write_text("print('hello')\n", encoding="utf-8")
+            dialog, _, _ = self._make_dialog(project)
+            with patch("expra_engine.editor.export_dialog.ExportPlan") as plan:
+                dialog._start_export()
+            self.assertEqual(plan.call_args.kwargs["runtime_profile"], RuntimeProfile.PYGAME)
 
     def test_result_logs_and_calls_completion(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

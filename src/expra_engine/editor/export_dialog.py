@@ -20,7 +20,7 @@ from expra_engine.coordinators.app_coordinator import AppCoordinator
 from expra_engine.coordinators.button_coordinator import ButtonCoordinator
 from expra_engine.export.events import ExportProgressEvent
 from expra_engine.export.exporter import GameExporter
-from expra_engine.export.plan import ExportPlan, ExportTarget, PythonArch
+from expra_engine.export.plan import ExportPlan, ExportTarget, PythonArch, RuntimeProfile
 
 _ACTION_EXPORT = "export_game"
 _ACTION_CANCEL = "export_game_cancel"
@@ -145,6 +145,7 @@ class ExportDialog(ttk.Toplevel):
                 python_version=self._python_var.get(),
                 arch=PythonArch.AMD64,
                 compile_bytecode=self._bytecode_var.get(),
+                runtime_profile=RuntimeProfile.PYGAME,
             )
         except ValueError as e:
             self._log_line(f"Error: {e}")
