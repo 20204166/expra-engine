@@ -78,11 +78,26 @@ class EditorFeature(Protocol):
     shortcuts: tuple[ShortcutContribution, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class EditorFeatureSpec:
+    """Concrete immutable feature declaration for explicit registries."""
+
+    feature_id: str
+    actions: tuple[EditorActionSpec, ...] = ()
+    menus: tuple[MenuContribution, ...] = ()
+    toolbars: tuple[ToolbarContribution, ...] = ()
+    shortcuts: tuple[ShortcutContribution, ...] = ()
+    start: Callable[[EditorContext], None] | None = None
+    stop: Callable[[EditorContext], None] | None = None
+
+
 @dataclass(slots=True)
 class _FeatureRecord:
     feature: EditorFeature
     action_ids: tuple[str, ...]
     shortcut_sequences: tuple[str, ...]
+    menus: tuple[MenuContribution, ...]
+    toolbars: tuple[ToolbarContribution, ...]
     started: bool = False
 
 
@@ -137,7 +152,15 @@ class ContributionRegistry:
             shortcut_sequences=tuple(
                 self._shortcuts.normalize(item.sequence) for item in feature.shortcuts
             ),
+            menus=feature.menus,
+            toolbars=feature.toolbars,
         )
+
+    def menu_contributions(self) -> tuple[MenuContribution, ...]:
+        return tuple(item for record in self._features.values() for item in record.menus)
+
+    def toolbar_contributions(self) -> tuple[ToolbarContribution, ...]:
+        return tuple(item for record in self._features.values() for item in record.toolbars)
 
     def unregister(self, feature_id: str) -> None:
         record = self._features.get(feature_id)
@@ -284,3 +307,28 @@ class RenderTargetRegistry:
 
     def apply(self, intent: Any) -> None:
         self.callback_for(intent.target)(intent)
+
+
+class MenuFactory:
+    """Build menu commands from metadata and coordinator commands."""
+
+    def __init__(self, menus: dict[str, Any]) -> None:
+        self._menus = menus
+
+    def build(
+        self,
+        contributions: tuple[MenuContribution, ...],
+        actions: Any,
+    ) -> None:
+        ordered = sorted(contributions, key=lambda item: (item.parent, item.group, item.order))
+        for contribution in ordered:
+            menu = self._menus.get(contribution.parent)
+            if menu is None:
+                raise KeyError(f"Unknown menu: {contribution.parent}")
+            if contribution.separator_before:
+                menu.add_separator()
+            menu.add_command(
+                label=contribution.label,
+                command=actions.command(contribution.action_id),
+                accelerator=contribution.accelerator,
+            )

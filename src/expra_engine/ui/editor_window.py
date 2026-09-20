@@ -33,6 +33,18 @@ from expra_engine.core.component import TransformComponent
 from expra_engine.core.engine import Engine, EngineRunState
 from expra_engine.core.scene import Scene
 from expra_engine.editor.commands import CommandStack, DeleteEntityCommand, RenameEntityCommand
+from expra_engine.editor.contributions import (
+    ContributionRegistry,
+    EditorActionSpec,
+    EditorContext,
+    EditorFeatureSpec,
+    MenuContribution,
+    MenuFactory,
+    RenderTargetRegistry,
+    ShortcutContribution,
+    ShortcutRegistry,
+    ToolbarContribution,
+)
 from expra_engine.editor.delivery import TkDeliveryQueue
 from expra_engine.editor.export_dialog import ExportDialog
 from expra_engine.editor.preferences import PreferencesStore
@@ -102,6 +114,20 @@ class EditorWindow:
         self._coordinator = AppCoordinator(deliver=self._delivery_queue)
         self._actions = ButtonCoordinator()
         self._ui = UICoordinator()
+        self._editor_context = EditorContext(
+            engine=self._engine,
+            actions=self._actions,
+            ui=self._ui,
+            app=self._coordinator,
+            root=self._root,
+        )
+        self._shortcuts = ShortcutRegistry()
+        self._contributions = ContributionRegistry(
+            self._actions,
+            context=self._editor_context,
+            shortcuts=self._shortcuts,
+        )
+        self._render_targets = RenderTargetRegistry()
 
         self._timer = TimerDelivery(
             master=self._root,
@@ -129,7 +155,11 @@ class EditorWindow:
         main.pack(fill="both", expand=True)
 
         # Toolbar at top
-        self._toolbar = build_toolbar(main, actions=self._actions)
+        self._toolbar = build_toolbar(
+            main,
+            actions=self._actions,
+            contributions=self._contributions.toolbar_contributions(),
+        )
 
         # Center and console are independently resizable; the viewport gets the
         # flexible weight while side panes retain usable minimum widths.
@@ -189,6 +219,7 @@ class EditorWindow:
         # Bottom: console (fixed height)
         self._console = ConsolePanel(self._console_host, colors=self._colors)
         self._console.pack(fill="both", expand=True)
+        self._register_render_targets()
         self._sash_after_id = self._root.after_idle(self._set_initial_sashes)
 
     def _set_initial_sashes(self) -> None:
@@ -240,33 +271,29 @@ class EditorWindow:
 
         file_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="File", menu=file_menu)
-        file_menu.add_command(
-            label="New Scene", command=lambda: self._actions.dispatch("new_scene"), accelerator=""
-        )
-        file_menu.add_command(
-            label="Save Scene...",
-            command=lambda: self._actions.dispatch("save_scene"),
-            accelerator="",
-        )
         self._recent_menu = tk.Menu(file_menu, tearoff=0)
         file_menu.add_cascade(label="Open Recent", menu=self._recent_menu)
         self._populate_recent_projects()
-        file_menu.add_separator()
-        file_menu.add_command(
-            label="Export Game...", command=lambda: self._actions.dispatch("editor.export_game")
-        )
         file_menu.add_separator()
         file_menu.add_command(label="Quit", command=self._on_close)
 
         edit_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Edit", menu=edit_menu)
-        edit_menu.add_command(
-            label="Undo", command=lambda: self._actions.dispatch("undo"), accelerator="Ctrl+Z"
-        )
-        edit_menu.add_command(
-            label="Redo", command=lambda: self._actions.dispatch("redo"), accelerator="Ctrl+Y"
-        )
         self._edit_menu = edit_menu
+        MenuFactory({"File": file_menu, "Edit": edit_menu}).build(
+            self._contributions.menu_contributions(),
+            self._actions,
+        )
+
+    def _register_render_targets(self) -> None:
+        self._render_targets.register(
+            "hierarchy", lambda intent: self._hierarchy.render(intent.payload)
+        )
+        self._render_targets.register(
+            "inspector", lambda intent: self._inspector.render(intent.payload)
+        )
+        self._render_targets.register("viewport", self._render_viewport)
+        self._render_targets.register("toolbar", lambda _intent: self._update_play_pause_state())
 
     def _act_export_game(self) -> None:
         ExportDialog(
@@ -299,19 +326,83 @@ class EditorWindow:
     # ------------------------------------------------------------------
 
     def _register_actions(self) -> None:
-        a = self._actions
-        a.register("play", self._act_play)
-        a.register("pause", self._act_pause)
-        a.register("stop", self._act_stop)
-        a.register("new_scene", self._act_new_scene)
-        a.register("save_scene", self._act_save_scene)
-        a.register("add_entity", self._act_add_entity)
-        a.register("delete_entity", self._act_delete_entity, enabled=False)
-        a.register("editor.export_game", self._act_export_game)
-        a.register("undo", self._act_undo, enabled=False)
-        a.register("redo", self._act_redo, enabled=False)
-        self._root.bind_all("<Control-z>", lambda _e: self._actions.dispatch("undo"))
-        self._root.bind_all("<Control-y>", lambda _e: self._actions.dispatch("redo"))
+        features = (
+            EditorFeatureSpec(
+                "runtime",
+                actions=(
+                    EditorActionSpec("play", self._act_play),
+                    EditorActionSpec("pause", self._act_pause),
+                    EditorActionSpec("stop", self._act_stop),
+                ),
+                toolbars=(
+                    ToolbarContribution(
+                        "play", "▶  Play", group="runtime", order=0, style_role="play"
+                    ),
+                    ToolbarContribution("pause", "⏸  Pause", group="runtime", order=1),
+                    ToolbarContribution(
+                        "stop", "⏹  Stop", group="runtime", order=2, style_role="stop"
+                    ),
+                ),
+            ),
+            EditorFeatureSpec(
+                "scene",
+                actions=(
+                    EditorActionSpec("new_scene", self._act_new_scene),
+                    EditorActionSpec("save_scene", self._act_save_scene),
+                ),
+                menus=(
+                    MenuContribution("File", "New Scene", "new_scene", group="scene", order=0),
+                    MenuContribution("File", "Save Scene...", "save_scene", group="scene", order=1),
+                ),
+                toolbars=(
+                    ToolbarContribution("new_scene", "New Scene", group="scene", order=0),
+                    ToolbarContribution("save_scene", "Save", group="scene", order=1),
+                ),
+            ),
+            EditorFeatureSpec(
+                "entity",
+                actions=(
+                    EditorActionSpec("add_entity", self._act_add_entity),
+                    EditorActionSpec("delete_entity", self._act_delete_entity, enabled=False),
+                ),
+            ),
+            EditorFeatureSpec(
+                "history",
+                actions=(
+                    EditorActionSpec("undo", self._act_undo, enabled=False),
+                    EditorActionSpec("redo", self._act_redo, enabled=False),
+                ),
+                menus=(
+                    MenuContribution(
+                        "Edit", "Undo", "undo", group="history", order=0, accelerator="Ctrl+Z"
+                    ),
+                    MenuContribution(
+                        "Edit", "Redo", "redo", group="history", order=1, accelerator="Ctrl+Y"
+                    ),
+                ),
+                shortcuts=(
+                    ShortcutContribution("<Control-z>", "undo"),
+                    ShortcutContribution("<Control-y>", "redo"),
+                ),
+            ),
+            EditorFeatureSpec(
+                "export",
+                actions=(EditorActionSpec("editor.export_game", self._act_export_game),),
+                menus=(
+                    MenuContribution(
+                        "File",
+                        "Export Game...",
+                        "editor.export_game",
+                        group="build",
+                        order=0,
+                        separator_before=True,
+                    ),
+                ),
+            ),
+        )
+        for feature in features:
+            self._contributions.register(feature)
+        self._shortcuts.bind(self._root, self._actions)
         self._update_play_pause_state()
 
     # ------------------------------------------------------------------
@@ -584,21 +675,14 @@ class EditorWindow:
             payload_set=True,
             priority=priority,
         )
-        self._ui.request(intent, self._apply_render)
+        self._ui.request(intent, self._render_targets.callback_for(target))
 
-    def _apply_render(self, intent: RenderIntent) -> None:
-        if intent.target == "hierarchy":
-            self._hierarchy.render(intent.payload)
-        elif intent.target == "inspector":
-            self._inspector.render(intent.payload)
-        elif intent.target == "viewport":
-            payload = intent.payload
-            if not isinstance(payload, tuple) or len(payload) != 2:
-                return
-            scene, selected_id = payload
-            self._viewport.render(scene, selected_id)
-        elif intent.target == "toolbar":
-            self._update_play_pause_state()
+    def _render_viewport(self, intent: RenderIntent) -> None:
+        payload = intent.payload
+        if not isinstance(payload, tuple) or len(payload) != 2:
+            return
+        scene, selected_id = payload
+        self._viewport.render(scene, selected_id)
 
     def _present_selection(self, scene: Scene | None, entity: Any) -> None:
         self._ui.begin_batch()
@@ -640,6 +724,7 @@ class EditorWindow:
                 self._root.after_cancel(self._sash_after_id)
             self._sash_after_id = None
         self._timer.cancel_all()
+        self._contributions.stop_all()
         self._delivery_queue.close()
         self._coordinator.shutdown()
         self._ui.shutdown()

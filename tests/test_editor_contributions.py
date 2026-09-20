@@ -9,11 +9,15 @@ from expra_engine.editor.contributions import (
     ContributionRegistry,
     EditorActionSpec,
     EditorContext,
+    EditorFeatureSpec,
     MenuContribution,
+    MenuFactory,
     ShortcutContribution,
     ShortcutRegistry,
     ToolbarContribution,
 )
+from expra_engine.ui.styles import STYLE_NEUTRAL_BUTTON, STYLE_PLAY_BUTTON
+from expra_engine.ui.toolbar import toolbar_style_for_role
 
 
 class Feature:
@@ -73,6 +77,14 @@ class EditorContributionMetadataTests(unittest.TestCase):
         with self.assertRaises(AttributeError):
             context.engine = "other"  # type: ignore[misc]
 
+    def test_feature_spec_has_explicit_empty_surface_defaults(self) -> None:
+        feature = EditorFeatureSpec("example", actions=())
+
+        self.assertEqual(feature.feature_id, "example")
+        self.assertEqual(feature.menus, ())
+        self.assertEqual(feature.toolbars, ())
+        self.assertEqual(feature.shortcuts, ())
+
 
 class ContributionRegistryTests(unittest.TestCase):
     def test_register_delegates_action_execution_to_button_coordinator(self) -> None:
@@ -129,6 +141,21 @@ class ContributionRegistryTests(unittest.TestCase):
             registry.register(feature)
         self.assertEqual(actions.registered_ids(), ())
 
+    def test_registry_exposes_owned_surface_contributions(self) -> None:
+        actions = ButtonCoordinator()
+        registry = ContributionRegistry(actions)
+        feature = EditorFeatureSpec(
+            "example",
+            actions=(EditorActionSpec("example", lambda: None),),
+            menus=(MenuContribution("File", "Example", "example"),),
+            toolbars=(ToolbarContribution("example", "Example"),),
+        )
+
+        registry.register(feature)
+
+        self.assertEqual(registry.menu_contributions()[0].label, "Example")
+        self.assertEqual(registry.toolbar_contributions()[0].action_id, "example")
+
     def test_lifecycle_is_idempotent_and_start_failure_rolls_back(self) -> None:
         actions = ButtonCoordinator()
         context = EditorContext(engine=None, actions=actions, ui=None)
@@ -165,6 +192,40 @@ class ContributionRegistryTests(unittest.TestCase):
 
         self.assertEqual(first.stopped, 1)
         self.assertEqual(second.stopped, 1)
+
+
+class MenuFactoryTests(unittest.TestCase):
+    def test_build_routes_menu_command_through_actions(self) -> None:
+        class Menu:
+            def __init__(self) -> None:
+                self.commands: list[dict[str, object]] = []
+
+            def add_command(self, **kwargs: object) -> None:
+                self.commands.append(kwargs)
+
+            def add_separator(self) -> None:
+                self.commands.append({"separator": True})
+
+        actions = ButtonCoordinator()
+        calls: list[str] = []
+        actions.register("example", lambda: calls.append("called"))
+        menu = Menu()
+        MenuFactory({"File": menu}).build(
+            (MenuContribution("File", "Example", "example", accelerator="Ctrl+E"),),
+            actions,
+        )
+
+        menu.commands[0]["command"]()
+        self.assertEqual(calls, ["called"])
+        self.assertEqual(menu.commands[0]["accelerator"], "Ctrl+E")
+
+
+class ToolbarStyleTests(unittest.TestCase):
+    def test_semantic_style_roles_resolve_to_existing_styles(self) -> None:
+        self.assertEqual(toolbar_style_for_role("neutral"), STYLE_NEUTRAL_BUTTON)
+        self.assertEqual(toolbar_style_for_role("play"), STYLE_PLAY_BUTTON)
+        with self.assertRaises(ValueError):
+            toolbar_style_for_role("missing")
 
     def test_shortcuts_normalize_and_reject_duplicates(self) -> None:
         shortcuts = ShortcutRegistry()
