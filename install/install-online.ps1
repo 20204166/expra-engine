@@ -59,7 +59,7 @@ try {
 
     $candidates = [System.Collections.Generic.List[object]]::new()
     if (Get-Command "py" -ErrorAction SilentlyContinue) {
-        $candidates.Add((New-PythonCandidate "py" @("-3")))
+        $candidates.Add((New-PythonCandidate "py"))
     }
     foreach ($name in @("python3.14", "python3.13", "python3.12", "python3", "python")) {
         if (Get-Command $name -ErrorAction SilentlyContinue) {
