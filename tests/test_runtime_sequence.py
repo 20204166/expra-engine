@@ -56,6 +56,11 @@ class SequenceTests(unittest.TestCase):
         sequence.update(0.0)
         self.assertEqual(values, [1, 1])
 
+    def test_empty_looping_sequence_finishes(self) -> None:
+        sequence = Sequence(loop=True)
+        sequence.update(0.0)
+        self.assertTrue(sequence.finished)
+
 
 if __name__ == "__main__":
     unittest.main()

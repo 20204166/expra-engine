@@ -14,6 +14,7 @@ Tests cover:
 """
 
 import unittest
+from math import inf, nan
 from typing import Any
 
 from expra_engine.runtime.clock import RuntimeClock
@@ -95,6 +96,17 @@ class TestRuntimeClockFixed(unittest.TestCase):
     def test_negative_time_step_raises(self) -> None:
         with self.assertRaises(ValueError):
             RuntimeClock(time_step=-1.0)
+
+    def test_non_finite_clock_configuration_raises(self) -> None:
+        for time_step, time_scale in ((inf, 1.0), (nan, 1.0), (0.1, inf), (0.1, nan)):
+            with self.subTest(time_step=time_step, time_scale=time_scale), self.assertRaises(ValueError):
+                RuntimeClock(time_step=time_step, time_scale=time_scale)
+
+    def test_non_finite_idle_delta_raises(self) -> None:
+        clock = self._make()
+        for delta in (nan, -inf):
+            with self.subTest(delta=delta), self.assertRaises(ValueError):
+                clock.on_idle(Idle(delta), _Collector())
 
 
 class TestRuntimeClockCustomStep(unittest.TestCase):

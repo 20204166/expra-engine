@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from math import exp, isfinite
+from math import isfinite
+
+from expra_engine.core import math_utils
 
 __all__ = ("exponential_follow",)
 
@@ -24,8 +26,7 @@ def exponential_follow(
         raise ValueError("speed must be finite and non-negative")
 
     destination = (float(target[0]) + float(offset[0]), float(target[1]) + float(offset[1]))
-    factor = 1.0 - exp(-speed * delta)
     return (
-        float(current[0]) + (destination[0] - float(current[0])) * factor,
-        float(current[1]) + (destination[1] - float(current[1])) * factor,
+        math_utils.lerp_exponential_decay(float(current[0]), destination[0], delta, speed),
+        math_utils.lerp_exponential_decay(float(current[1]), destination[1], delta, speed),
     )

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from math import nan
 import unittest
 
 from expra_engine.runtime.trail import TrailRenderer
@@ -35,6 +36,11 @@ class TrailRendererTests(unittest.TestCase):
             TrailRenderer(max_segments=0)
         with self.assertRaises(ValueError):
             TrailRenderer(min_spacing=-1.0)
+
+    def test_non_finite_positions_raise(self) -> None:
+        trail = TrailRenderer()
+        with self.assertRaises(ValueError):
+            trail.update(0.0, nan, 0.0)
 
 
 if __name__ == "__main__":

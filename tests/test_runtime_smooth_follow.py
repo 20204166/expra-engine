@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from math import inf, nan
 import unittest
 
 from expra_engine.runtime.smooth_follow import SmoothFollow
@@ -30,6 +31,13 @@ class SmoothFollowTests(unittest.TestCase):
             SmoothFollow(speed=0.0)
         with self.assertRaises(ValueError):
             SmoothFollow().update(-1.0, 0.0, 0.0)
+
+    def test_non_finite_targets_and_snap_positions_raise(self) -> None:
+        follow = SmoothFollow()
+        with self.assertRaises(ValueError):
+            follow.update(0.1, nan, 0.0)
+        with self.assertRaises(ValueError):
+            follow.snap_to(inf, 0.0)
 
 
 if __name__ == "__main__":

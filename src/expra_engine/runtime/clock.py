@@ -20,6 +20,7 @@ Expra-specific differences:
 from __future__ import annotations
 
 from collections.abc import Callable
+from math import isfinite
 from typing import Any
 
 from expra_engine.runtime.events import Idle, Update
@@ -54,9 +55,9 @@ class RuntimeClock:
     """
 
     def __init__(self, time_step: float = 1.0 / 60.0, time_scale: float = 1.0) -> None:
-        if time_step <= 0:
+        if not isfinite(time_step) or time_step <= 0:
             raise ValueError(f"time_step must be positive, got {time_step!r}")
-        if time_scale < 0.0:
+        if not isfinite(time_scale) or time_scale < 0.0:
             raise ValueError(f"time_scale must be non-negative, got {time_scale!r}")
         self.time_step = time_step
         self.time_scale = time_scale
@@ -101,6 +102,10 @@ class RuntimeClock:
         When paused or time_scale is 0, scaled updates are suppressed;
         the unscaled elapsed counter still advances.
         """
+        if not isfinite(event.time_delta) or event.time_delta < 0.0:
+            raise ValueError("idle delta must be finite and non-negative")
+        if not isfinite(self.time_scale) or self.time_scale < 0.0:
+            raise ValueError(f"time_scale must be non-negative, got {self.time_scale!r}")
         self._unscaled_elapsed += event.time_delta
         if self._paused or self.time_scale == 0.0:
             return

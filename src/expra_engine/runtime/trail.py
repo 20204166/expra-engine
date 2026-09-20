@@ -38,6 +38,8 @@ class TrailRenderer:
     def update(self, dt: float, x: float, y: float) -> None:
         if not math.isfinite(dt) or dt < 0.0:
             raise ValueError("dt must be finite and non-negative")
+        if not math.isfinite(x) or not math.isfinite(y):
+            raise ValueError("trail coordinates must be finite")
         for point in self._points:
             point.age += dt
         while self._points and self._points[0].age >= self.max_lifetime:

@@ -40,6 +40,9 @@ class Sequence:
             raise ValueError("dt must be finite and non-negative")
         if self.finished:
             return
+        if not self._steps:
+            self.finished = True
+            return
 
         remaining = dt
         while self._index < len(self._steps):

@@ -2,11 +2,26 @@
 
 import unittest
 from math import inf
+from unittest.mock import call, patch
 
+from expra_engine.core import math_utils
 from expra_engine.runtime.follow import exponential_follow
 
 
 class TestExponentialFollow(unittest.TestCase):
+    def test_uses_canonical_exponential_decay_primitive(self) -> None:
+        with patch.object(math_utils, "lerp_exponential_decay", side_effect=(3.0, 4.0)) as decay:
+            result = exponential_follow((0.0, 0.0), (10.0, 20.0), 0.5, 2.0, (1.0, 2.0))
+
+        self.assertEqual(result, (3.0, 4.0))
+        self.assertEqual(
+            decay.call_args_list,
+            [
+                call(0.0, 11.0, 0.5, 2.0),
+                call(0.0, 22.0, 0.5, 2.0),
+            ],
+        )
+
     def test_position_converges_exponentially_toward_target(self) -> None:
         current = (0.0, 0.0)
         target = (10.0, -4.0)
