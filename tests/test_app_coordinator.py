@@ -8,6 +8,7 @@ Adapted from System Analyzer tests/test_components.py — behavior preserved:
 - subscriber pattern
 """
 
+import threading
 import unittest
 from typing import Any
 
@@ -174,6 +175,28 @@ class TestAppCoordinatorCancellation(unittest.TestCase):
         delivery.flush()
         # cancelled run's result should not appear
         self.assertNotIn("result", results)
+
+    def test_submit_after_shutdown_is_rejected(self) -> None:
+        coord = AppCoordinator()
+        coord.shutdown()
+        with self.assertRaises(RuntimeError):
+            coord.run("after-shutdown", lambda _cancel, _progress: None)
+
+    def test_cancel_all_returns_while_worker_is_running(self) -> None:
+        started = threading.Event()
+        blocker = threading.Event()
+        coord = AppCoordinator()
+
+        def slow_task(_cancel: threading.Event, _progress: object) -> str:
+            started.set()
+            blocker.wait(timeout=2.0)
+            return "done"
+
+        coord.run("slow", slow_task)
+        self.assertTrue(started.wait(timeout=1.0))
+        coord.cancel_all()
+        blocker.set()
+        coord.shutdown()
 
 
 class TestAppCoordinatorSubscribers(unittest.TestCase):

@@ -98,6 +98,7 @@ class AppCoordinator:
         self._coalesced_callbacks: dict[str, Callable[[], None]] = {}
         self._coalesced_pending: set[str] = set()
         self._deferred_triggers: dict[str, Callable[[], None]] = {}
+        self._closed = False
 
     def _submit_default(self, worker: Callable[[], None]) -> Future[Any]:
         if self._executor is None:
@@ -142,6 +143,8 @@ class AppCoordinator:
         on_finished: Callable[[], None] | None = None,
         cache_policy: CachePolicy = CachePolicy.NONE,
     ) -> int | None:
+        if self._closed:
+            raise RuntimeError("AppCoordinator is shut down")
         state = self.state(key)
         if state.in_flight:
             state.rerun_requested = True
@@ -363,6 +366,7 @@ class AppCoordinator:
             self.cancel(key, cancellation_message)
 
     def shutdown(self) -> None:
+        self._closed = True
         if self._executor is not None:
             self._executor.shutdown(wait=False, cancel_futures=True)
             self._executor = None

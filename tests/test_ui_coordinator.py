@@ -126,6 +126,32 @@ class TestUICoordinatorShutdown(unittest.TestCase):
         self.assertFalse(result)
 
 
+class TestUICoordinatorBatchDepth(unittest.TestCase):
+    def test_nested_batch_requires_matching_end(self) -> None:
+        applied: list[str] = []
+        coord = UICoordinator()
+        coord.begin_batch()
+        coord.begin_batch()
+        coord.request(RenderIntent(target="toolbar"), lambda _intent: applied.append("done"))
+        coord.end_batch()
+        self.assertEqual(applied, [])
+        coord.end_batch()
+        self.assertEqual(applied, ["done"])
+
+    def test_end_batch_without_begin_is_noop(self) -> None:
+        UICoordinator().end_batch()
+
+    def test_flush_clears_all_pending(self) -> None:
+        applied: list[str] = []
+        coord = UICoordinator()
+        coord.begin_batch()
+        coord.request(RenderIntent(target="a"), lambda _intent: applied.append("a"))
+        coord.request(RenderIntent(target="b"), lambda _intent: applied.append("b"))
+        coord.flush()
+        self.assertEqual(set(applied), {"a", "b"})
+        self.assertEqual(coord.pending_count, 0)
+
+
 class TestUICoordinatorMetrics(unittest.TestCase):
     def test_metrics_track_requests_and_commits(self) -> None:
         coord = UICoordinator()
