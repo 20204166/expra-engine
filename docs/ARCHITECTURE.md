@@ -62,6 +62,10 @@ and editor presentation (`ui`) into distinct layers.
 | Runtime metrics                   | ObservabilityWatcher           | `observability.py`                  |
 | Version string                    | __version__                    | `_version.py`                       |
 | Release pipeline                  | prepare_build, sync_artifacts  | `_release.py`                       |
+| Bounded numeric expressions       | `core.safe_expression`         | `core/safe_expression.py`           |
+| Editor expression import boundary | `editor.safe_expression`       | `editor/safe_expression.py`         |
+| Game input/timing/2D contracts    | runtime modules                | `runtime/input.py`, `timeline.py`, `animation.py`, `follow.py`, `tilemap.py`, `dialogue.py` |
+| Editor asset scan contract        | editor assets + existing owners | `editor/assets.py`, `AppCoordinator`, `TkDeliveryQueue` |
 
 ---
 
@@ -171,6 +175,13 @@ backend rather than importing Tk. The boundary is intended to support HUDs,
 menus, inventories, dialogue, touch controls, safe areas, DPI scaling, and
 multiple aspect ratios without coupling shipped games to editor widgets. See
 `docs/GAME_UI_FUTURE.md`; this pass does not implement that runtime system.
+
+The implemented input, timeline, animation, follow, tilemap, and dialogue
+modules remain pure runtime contracts. They do not introduce Panda, Ursina, or
+Tk into a game runtime. Window/display settings belong behind a future
+platform backend; renderer implementation, mobile touch, color/gradient
+editing, radial menus, grid editor behavior, and dialogue presentation remain
+deferred.
 
 ## Play / Stop Runtime Isolation
 
@@ -286,3 +297,5 @@ Not implemented until the project format and renderer seam are stabilised.
 
 A future remote-connect feature would allow the editor to connect to a running
 game instance for live debugging and hot-reload.  Not implemented in this phase.
+If pursued, hot reload will use controlled asset invalidation rather than
+`exec`; existing coordinator owners and release tooling remain authoritative.

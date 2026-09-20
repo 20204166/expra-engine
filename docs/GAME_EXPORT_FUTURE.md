@@ -41,3 +41,27 @@ editor preview only. The `Engine` itself has no renderer
 dependency — it is renderer-agnostic by design.  A future `GameRenderer`
 protocol will allow swapping in a real renderer for both in-editor preview
 and exported games without changing the engine core.
+
+## Audited Export Boundary
+
+The audit in `docs/URSINA_INTEGRATION_MAP.md` confirms that Ursina's `build.py`
+is not an Expra release owner. Expra wheel/build scripts, release tests,
+versioning, hashes, and verification remain authoritative. Ursina's useful
+concepts are future references only: asset manifests, stripped runtime
+contents, platform targets, and controlled asset invalidation for hot reload.
+Export still requires a renderer/platform backend and must produce a game
+runtime with no Tk or Panda/Ursina dependency; no existing Expra engine,
+coordinator, editor, or release system is replaced.
+
+## Platform, Reload, And Ownership Boundaries
+
+Expra's existing release tooling, wheel scripts, release tests, versioning,
+hashes, and verification remain the release owner. Ursina exporter concepts
+are future references only, not a replacement build path. Existing coordinator
+owners remain the owners of background work and UI delivery.
+
+Hot reload, if added, will use controlled asset invalidation rather than
+`exec`. Window/display settings belong behind a platform backend. Renderer
+implementation, mobile touch, color/gradient editing, radial menus, grid
+editor behavior, and dialogue presentation remain deferred contracts rather
+than export features. Exported games must have no Panda/Ursina/Tk game runtime.

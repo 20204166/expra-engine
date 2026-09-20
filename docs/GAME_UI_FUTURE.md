@@ -52,8 +52,36 @@ backend without changing game-facing layout code.
   widgets, so HUDs, pause menus, inventories, dialogue, quest logs, and touch
   controls can share the same scene-independent UI tree.
 
-## Scope Of This Pass
+## Historical Editor Scope
 
-This editor-polish pass only establishes the boundary and shared vocabulary.
-It does not add `GameCanvas`, runtime widgets, input routing, a renderer, safe
-area calculations, or export integration.
+The original editor-polish pass established the boundary and shared vocabulary.
+The current additive foundation now includes renderer-neutral geometry,
+nine-slice data, control state, focus/pointer contracts, runtime input,
+timelines, animation, follow, tilemap, dialogue, and editor asset-scan
+contracts. It still does not add `GameCanvas`, runtime widgets, a renderer, or
+export integration.
+
+## Runtime Contract Status
+
+The approved runtime foundations are pure data/contracts in
+`runtime/input.py`, `runtime/timeline.py`, `runtime/animation.py`,
+`runtime/follow.py`, `runtime/tilemap.py`, and `runtime/dialogue.py`.
+`editor/assets.py` is an editor-side async asset scan contract owned by the
+existing `AppCoordinator` and `TkDeliveryQueue`; it is not game UI runtime.
+Bounded numeric parsing is canonical in `core/safe_expression.py`, with
+`editor/safe_expression.py` serving only as the editor re-export boundary.
+
+There is no Panda/Ursina/Tk game runtime. Renderer implementation, dialogue
+presentation, color/gradient editing, radial menus, grid editor behavior,
+mobile touch translation, and platform display/window handling remain deferred
+behind explicit renderer or platform seams.
+
+## Audited Contract Direction
+
+The audit in `docs/URSINA_INTEGRATION_MAP.md` confirms that the next smallest
+renderer-neutral foundations are logical geometry, safe-area and
+reference-resolution layout, nine-slice patch data, pure control state, focus,
+and pointer contracts. These are data/runtime concerns, not Tk widgets or
+Panda3D objects. Existing `Engine`/`Entity`/`Component` and coordinator owners
+remain unchanged; window/display settings belong behind a future platform
+backend, and a game runtime must never import the Tk editor path.
