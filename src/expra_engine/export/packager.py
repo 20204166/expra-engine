@@ -332,8 +332,9 @@ class LinuxPackager(TargetPackager):
         launcher = build_dir / launch_name
         python_rel = "./runtime/bin/python3"
         with launcher.open("w", newline="\n") as f:
-            f.write("#!/bin/sh\n")
+            f.write("#!/usr/bin/env bash\n")
             f.write("set -e\n")
+            f.write("set -o pipefail\n")
             f.write('SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"\n')
             f.write(f'cd "$SCRIPT_DIR/{source_subdir}"\n')
             if debug:

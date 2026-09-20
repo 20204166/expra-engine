@@ -5,6 +5,7 @@ All network calls are replaced by injected fake downloaders or stubs.
 
 from __future__ import annotations
 
+import subprocess
 import tempfile
 import threading
 import unittest
@@ -232,6 +233,27 @@ class TestLinuxPackagerLauncher(unittest.TestCase):
         self.assertTrue(sh.exists())
         content = sh.read_text()
         self.assertIn("log.txt", content)
+        self.assertIn("set -e", content)
+        self.assertIn("set -o pipefail", content)
+
+    def test_debug_sh_returns_game_failure(self) -> None:
+        runtime = self._tmp / "runtime" / "bin"
+        runtime.mkdir(parents=True)
+        python = runtime / "python3"
+        python.write_text("#!/bin/sh\nexit 17\n")
+        python.chmod(0o755)
+        LinuxPackager().make_launcher(
+            self._tmp,
+            "Failing Game",
+            "__main__.py",
+            "Failing_Game",
+            is_pyc=False,
+            debug=True,
+        )
+        game_dir = self._tmp / "Failing_Game"
+        game_dir.mkdir()
+        result = subprocess.run([str(self._tmp / "Failing_Game_debug.sh")], capture_output=True)
+        self.assertEqual(result.returncode, 17)
 
     def test_space_in_name_replaced(self) -> None:
         LinuxPackager().make_launcher(

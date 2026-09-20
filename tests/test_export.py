@@ -211,6 +211,7 @@ class BuildManifestTests(unittest.TestCase):
             "compile_bytecode": True,
             "entry_point": "game/__main__.py",
             "build_timestamp": "2026-01-01T00:00:00+00:00",
+            "runtime_profile": "none",
         }
         defaults.update(overrides)
         return BuildManifest(**defaults)  # type: ignore[arg-type]
@@ -254,6 +255,7 @@ class VerifyExportTests(unittest.TestCase):
             "compile_bytecode": True,
             "entry_point": "game/__main__.py",
             "build_timestamp": "2026-01-01T00:00:00+00:00",
+            "runtime_profile": "none",
         }
         (self.build_dir / "build_manifest.json").write_text(json.dumps(manifest))
         (self.build_dir / "asset_manifest.json").write_text(json.dumps({"entries": []}))

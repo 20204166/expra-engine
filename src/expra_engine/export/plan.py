@@ -24,6 +24,13 @@ class PythonArch(StrEnum):
     ARM64 = "arm64"
 
 
+class RuntimeProfile(StrEnum):
+    """Explicit runtime dependency and engine-module selection."""
+
+    NONE = "none"
+    PYGAME = "pygame"
+
+
 _GAME_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _\-]*$")
 _SEMVER_RE = re.compile(r"^\d+\.\d+")
 _PY_VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
@@ -47,6 +54,7 @@ class ExportPlan:
     debug_launcher: bool = True
     resource_service: ResourceService | None = None
     resource_ids: tuple[ResourceId | str, ...] = ()
+    runtime_profile: RuntimeProfile = RuntimeProfile.NONE
 
     def __post_init__(self) -> None:
         if not self.project_dir.is_dir():

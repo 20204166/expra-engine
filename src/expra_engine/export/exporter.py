@@ -27,7 +27,7 @@ from expra_engine.export.packager import (
     WindowsPackager,
     write_runtime_manifest,
 )
-from expra_engine.export.plan import ExportPlan, ExportTarget
+from expra_engine.export.plan import ExportPlan, ExportTarget, RuntimeProfile
 from expra_engine.export.verify import verify_export
 
 if TYPE_CHECKING:
@@ -117,7 +117,8 @@ class GameExporter:
             site_packages = python_dir / "Lib" / "site-packages"
         else:
             python_dir = runtime_dir
-            site_packages = runtime_dir / "lib" / "python3" / "site-packages"
+            major, minor, _ = plan.python_version.split(".")
+            site_packages = runtime_dir / "lib" / f"python{major}.{minor}" / "site-packages"
 
         # Stage 1: collect assets
         emit(ExportPhase.COLLECTING_ASSETS, "Collecting game assets", 10)
@@ -170,7 +171,9 @@ class GameExporter:
         emit(ExportPhase.RESOLVING_DEPS, "Resolving dependencies", 60)
         if cancel.is_set():
             return
-        packages = list(plan.extra_packages)
+        if plan.runtime_profile is RuntimeProfile.PYGAME:
+            _stage_pygame_runtime(site_packages)
+        packages = _runtime_packages(plan)
         packager.install_packages(
             packages,
             plan.python_version,
@@ -196,6 +199,7 @@ class GameExporter:
             compile_bytecode=plan.compile_bytecode,
             entry_point=plan.entry_point,
             build_timestamp=datetime.datetime.now(tz=datetime.UTC).isoformat(),
+            runtime_profile=plan.runtime_profile.value,
         )
         (build_dir / "build_manifest.json").write_text(build_manifest.to_json())
 
@@ -239,6 +243,54 @@ def _copy_assets(
             dst.write_bytes(resource_service.read_bytes(entry.logical_id))
         else:
             shutil.copy2(source / entry.path, dst)
+
+
+_RUNTIME_CORE_MODULES = (
+    "bounds.py",
+    "component.py",
+    "directions.py",
+    "engine.py",
+    "entity.py",
+    "errors.py",
+    "math_utils.py",
+    "safe_expression.py",
+    "scene.py",
+    "string_utils.py",
+    "utils.py",
+)
+
+
+def _stage_pygame_runtime(site_packages: Path) -> None:
+    """Stage only the engine modules needed by the Pygame runtime profile."""
+    source_root = Path(__file__).resolve().parents[2] / "expra_engine"
+    package_root = site_packages / "expra_engine"
+    package_root.mkdir(parents=True, exist_ok=True)
+    for relative in ("__init__.py", "_version.py", "py.typed"):
+        shutil.copy2(source_root / relative, package_root / relative)
+
+    core_root = package_root / "core"
+    core_root.mkdir()
+    (core_root / "__init__.py").write_text(
+        "\"\"\"Runtime-only core exports.\"\"\"\n"
+        "from expra_engine.core.component import Component, TransformComponent\n"
+        "from expra_engine.core.engine import Engine, EngineRunState\n"
+        "from expra_engine.core.entity import Entity\n"
+        "from expra_engine.core.scene import Scene\n"
+        "\n__all__ = [\"Component\", \"Engine\", \"EngineRunState\", \"Entity\", \"Scene\", \"TransformComponent\"]\n",
+        encoding="utf-8",
+    )
+    for module in _RUNTIME_CORE_MODULES:
+        shutil.copy2(source_root / "core" / module, core_root / module)
+
+    runtime_root = package_root / "runtime"
+    shutil.copytree(source_root / "runtime", runtime_root)
+
+
+def _runtime_packages(plan: ExportPlan) -> list[str]:
+    packages = list(plan.extra_packages)
+    if plan.runtime_profile is RuntimeProfile.PYGAME:
+        packages.insert(0, "pygame>=2.6")
+    return packages
 
 
 def _merge_manifests(*manifests: AssetManifest) -> AssetManifest:

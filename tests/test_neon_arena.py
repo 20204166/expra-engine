@@ -1,16 +1,17 @@
 """Behavior tests for the standalone Neon Arena sample game."""
 
+import importlib
 import json
+import os
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-
-from expra_engine.core.engine import Engine
-from expra_engine.runtime import PygameRuntime
+from unittest.mock import patch
 
 from examples.neon_arena.game import NeonArenaGame, load_scene
-
+from expra_engine.core.engine import Engine
+from expra_engine.runtime import PygameRuntime
 
 PROJECT_DIR = Path(__file__).parents[1] / "examples" / "neon_arena"
 
@@ -73,6 +74,73 @@ def _running_game(frames: list[list[Any]], clock_ticks: list[int]) -> tuple[Neon
 
 
 class TestNeonArena(unittest.TestCase):
+    def test_smoke_configuration_requires_positive_frame_count(self) -> None:
+        entrypoint = importlib.import_module("examples.neon_arena.__main__")
+
+        with patch.dict(os.environ, {"EXPRA_SMOKE_FRAMES": "3"}, clear=False):
+            config = entrypoint.smoke_config_from_environment(PROJECT_DIR)
+
+        self.assertEqual(config.frame_limit, 3)
+        self.assertEqual(config.report_path, PROJECT_DIR / "smoke_report.json")
+
+        with patch.dict(os.environ, {"EXPRA_SMOKE_FRAMES": "0"}, clear=False), self.assertRaises(
+            ValueError
+        ):
+            entrypoint.smoke_config_from_environment(PROJECT_DIR)
+
+    def test_entrypoint_smoke_reports_updates_and_rendering_without_display(self) -> None:
+        entrypoint = importlib.import_module("examples.neon_arena.__main__")
+        report_path = PROJECT_DIR / "test-smoke-report.json"
+        fake_pygame = _SmokePygame()
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "EXPRA_SMOKE_FRAMES": "2",
+                    "EXPRA_SMOKE_REPORT": str(report_path),
+                },
+                clear=False,
+            ),
+            patch.object(entrypoint.importlib, "import_module", return_value=fake_pygame),
+        ):
+            try:
+                entrypoint.main()
+                report = json.loads(report_path.read_text(encoding="utf-8"))
+            finally:
+                report_path.unlink(missing_ok=True)
+
+        self.assertEqual(report["frames_updated"], 2)
+        self.assertEqual(report["frames_rendered"], 2)
+        self.assertTrue(report["runtime_started"])
+        self.assertTrue(report["completed"])
+
+    def test_entrypoint_smoke_reports_start_failure_and_propagates_it(self) -> None:
+        entrypoint = importlib.import_module("examples.neon_arena.__main__")
+        report_path = PROJECT_DIR / "test-smoke-failure-report.json"
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "EXPRA_SMOKE_FRAMES": "1",
+                    "EXPRA_SMOKE_REPORT": str(report_path),
+                },
+                clear=False,
+            ),
+            patch.object(entrypoint.importlib, "import_module", side_effect=RuntimeError("pygame missing")),
+        ):
+            try:
+                with self.assertRaisesRegex(RuntimeError, "pygame missing"):
+                    entrypoint.main()
+                report = json.loads(report_path.read_text(encoding="utf-8"))
+            finally:
+                report_path.unlink(missing_ok=True)
+
+        self.assertFalse(report["runtime_started"])
+        self.assertFalse(report["completed"])
+        self.assertEqual(report["error"], "pygame missing")
+
     def test_keyboard_movement_is_clamped_to_arena_bounds(self) -> None:
         game, engine = _running_game(
             [
@@ -131,6 +199,50 @@ class TestNeonArena(unittest.TestCase):
         self.assertTrue(game.target.enabled)
         self.assertEqual(json.loads(scene_path.read_text(encoding="utf-8")), saved_before)
         engine.stop()
+
+
+class _SmokePygame:
+    QUIT = 1
+    KEYDOWN = 2
+    KEYUP = 3
+    K_LEFT = 10
+    K_RIGHT = 11
+    K_UP = 12
+    K_DOWN = 13
+    K_r = 14
+
+    class _Display:
+        def set_mode(self, size: tuple[int, int]) -> object:
+            return object()
+
+        def flip(self) -> None:
+            pass
+
+    class _Clock:
+        def tick(self, frame_rate: int) -> int:
+            return 16
+
+    class _Draw:
+        def rect(self, surface: object, color: tuple[int, int, int], rectangle: object) -> None:
+            pass
+
+        def line(self, surface: object, color: tuple[int, int, int], start: object, end: object) -> None:
+            pass
+
+        def circle(self, surface: object, color: tuple[int, int, int], center: object, radius: int) -> None:
+            pass
+
+    def __init__(self) -> None:
+        self.display = self._Display()
+        self.event = SimpleNamespace(get=lambda: [])
+        self.time = SimpleNamespace(Clock=self._Clock)
+        self.draw = self._Draw()
+
+    def init(self) -> None:
+        pass
+
+    def quit(self) -> None:
+        pass
 
 
 if __name__ == "__main__":

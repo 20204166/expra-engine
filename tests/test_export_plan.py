@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from expra_engine.export.plan import ExportPlan, ExportTarget, PythonArch
+from expra_engine.export.plan import ExportPlan, ExportTarget, PythonArch, RuntimeProfile
 from expra_engine.filesystem import ResourceId
 
 
@@ -49,6 +49,10 @@ class TestExportPlanValidation(unittest.TestCase):
     def test_linux_target(self) -> None:
         plan = self._plan(target=ExportTarget.LINUX)
         self.assertEqual(plan.target.value, "linux")
+
+    def test_runtime_profile_is_explicit(self) -> None:
+        plan = self._plan(runtime_profile=RuntimeProfile.PYGAME)
+        self.assertEqual(plan.runtime_profile, RuntimeProfile.PYGAME)
 
     def test_frozen(self) -> None:
         plan = self._plan()

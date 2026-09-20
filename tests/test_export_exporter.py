@@ -21,6 +21,7 @@ class _NoopPackager(TargetPackager):
 
     def __init__(self, target: ExportTarget) -> None:
         self._target = target
+        self.packages: list[str] = []
 
     def install_runtime(
         self, python_version, arch, dest, *, cache_dir, cancel, progress, downloader=None
@@ -31,6 +32,7 @@ class _NoopPackager(TargetPackager):
     def install_packages(
         self, packages, python_version, arch, site_packages, *, cache_dir, cancel, progress
     ):
+        self.packages = packages
         site_packages.mkdir(parents=True, exist_ok=True)
 
     def make_launcher(self, build_dir, game_name, entry_point, source_subdir, *, is_pyc, debug):
@@ -94,6 +96,37 @@ class TestGameExporter(unittest.TestCase):
         self.assertEqual(data["game_name"], "Test Game")
         self.assertEqual(data["game_version"], "1.0.0")
         self.assertEqual(data["target"], "windows")
+
+    def test_runtime_profile_stages_runtime_only_engine(self) -> None:
+        from expra_engine.export.plan import RuntimeProfile
+
+        plan = self._plan(runtime_profile=RuntimeProfile.PYGAME)
+        packager = _NoopPackager(plan.target)
+        out = GameExporter(packager=packager).export(plan, cancel=threading.Event())
+
+        runtime_package = out / "runtime" / "python" / "Lib" / "site-packages" / "expra_engine"
+        self.assertTrue((runtime_package / "core" / "engine.py").exists())
+        self.assertTrue((runtime_package / "runtime" / "pygame_runtime.py").exists())
+        self.assertFalse((runtime_package / "editor").exists())
+        self.assertEqual(packager.packages, ["pygame>=2.6"])
+
+        manifest = json.loads((out / "build_manifest.json").read_text())
+        self.assertEqual(manifest["runtime_profile"], "pygame")
+
+    def test_linux_runtime_profile_uses_python_specific_site_packages(self) -> None:
+        from expra_engine.export.plan import RuntimeProfile
+
+        plan = self._plan(
+            target=ExportTarget.LINUX,
+            runtime_profile=RuntimeProfile.PYGAME,
+        )
+        packager = _NoopPackager(plan.target)
+        out = GameExporter(packager=packager).export(plan, cancel=threading.Event())
+
+        runtime_package = (
+            out / "runtime" / "lib" / "python3.12" / "site-packages" / "expra_engine"
+        )
+        self.assertTrue((runtime_package / "runtime" / "pygame_runtime.py").exists())
 
     def test_asset_manifest_written(self) -> None:
         plan = self._plan()

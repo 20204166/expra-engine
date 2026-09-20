@@ -6,7 +6,7 @@ It can be imported from CI, CLI, and production game runtime packaging tools.
 
 from expra_engine.export.events import ExportPhase, ExportProgressEvent
 from expra_engine.export.exporter import ExportError, GameExporter
-from expra_engine.export.plan import ExportPlan, ExportTarget, PythonArch
+from expra_engine.export.plan import ExportPlan, ExportTarget, PythonArch, RuntimeProfile
 from expra_engine.export.verify import ExportVerificationError, verify_export
 
 __all__ = [
@@ -18,5 +18,6 @@ __all__ = [
     "ExportVerificationError",
     "GameExporter",
     "PythonArch",
+    "RuntimeProfile",
     "verify_export",
 ]

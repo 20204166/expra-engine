@@ -14,7 +14,7 @@ from pathlib import Path
 
 from expra_engine.export.events import ExportProgressEvent
 from expra_engine.export.exporter import ExportError, GameExporter
-from expra_engine.export.plan import ExportPlan, ExportTarget, PythonArch
+from expra_engine.export.plan import ExportPlan, ExportTarget, PythonArch, RuntimeProfile
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -39,6 +39,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--game-version", default="1.0.0", metavar="VERSION")
     parser.add_argument("--python-version", default="3.12.4", metavar="X.Y.Z")
     parser.add_argument("--arch", choices=["amd64", "arm64"], default="amd64")
+    parser.add_argument(
+        "--runtime-profile",
+        choices=[profile.value for profile in RuntimeProfile],
+        default=RuntimeProfile.NONE.value,
+        help="Explicit runtime profile (pygame stages the runtime-only engine)",
+    )
     parser.add_argument(
         "--entry-point",
         default="__main__.py",
@@ -77,6 +83,7 @@ def cli_main(argv: list[str] | None = None) -> int:
             arch=PythonArch(args.arch),
             compile_bytecode=not args.no_bytecode,
             debug_launcher=not args.no_debug_launcher,
+            runtime_profile=RuntimeProfile(args.runtime_profile),
         )
     except ValueError as e:
         print(f"Error: {e}", file=sys.stderr)

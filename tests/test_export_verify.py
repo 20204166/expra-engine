@@ -21,6 +21,7 @@ def _write_valid_manifests(build_dir: Path) -> None:
         "compile_bytecode": True,
         "entry_point": "__main__.py",
         "build_timestamp": "2026-09-20T00:00:00+00:00",
+        "runtime_profile": "none",
     }
     (build_dir / "build_manifest.json").write_text(json.dumps(build_manifest))
     (build_dir / "asset_manifest.json").write_text(json.dumps({"entries": []}))
@@ -103,6 +104,15 @@ class TestVerifyExport(unittest.TestCase):
         (self._build / "main.py").write_text("import tkinter\n")
 
         with self.assertRaisesRegex(ExportVerificationError, "forbidden"):
+            verify_export(self._build)
+
+    def test_export_containing_3d_editor_imports_is_rejected(self) -> None:
+        _write_valid_manifests(self._build)
+        (self._build / "main.py").write_text(
+            "import ursina\nimport panda3d.core\n"
+        )
+
+        with self.assertRaisesRegex(ExportVerificationError, "ursina.*panda3d|panda3d.*ursina"):
             verify_export(self._build)
 
     def test_clean_export_passes_with_python_file(self) -> None:

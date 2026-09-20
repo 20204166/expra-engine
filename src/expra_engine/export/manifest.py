@@ -177,6 +177,7 @@ class BuildManifest:
     compile_bytecode: bool
     entry_point: str
     build_timestamp: str  # ISO 8601 UTC
+    runtime_profile: str = "none"
 
     def to_json(self) -> str:
         return json.dumps(
@@ -190,6 +191,7 @@ class BuildManifest:
                 "compile_bytecode": self.compile_bytecode,
                 "entry_point": self.entry_point,
                 "build_timestamp": self.build_timestamp,
+                "runtime_profile": self.runtime_profile,
             },
             indent=2,
         )

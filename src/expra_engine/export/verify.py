@@ -12,6 +12,8 @@ _FORBIDDEN_IMPORTS: tuple[str, ...] = (
     "expra_engine.editor",
     "expra_engine.ui",
     "expra_engine.design",
+    "ursina",
+    "panda3d",
 )
 
 _REQUIRED_MANIFEST_KEYS: frozenset[str] = frozenset(
@@ -25,6 +27,7 @@ _REQUIRED_MANIFEST_KEYS: frozenset[str] = frozenset(
         "compile_bytecode",
         "entry_point",
         "build_timestamp",
+        "runtime_profile",
     }
 )
 

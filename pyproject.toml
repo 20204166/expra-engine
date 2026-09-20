@@ -12,6 +12,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+runtime-pygame = [
+    "pygame>=2.6",
+]
 dev = [
     "ruff>=0.6",
     "pyright>=1.1",

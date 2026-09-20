@@ -29,11 +29,11 @@ import time
 from enum import Enum
 from typing import TYPE_CHECKING
 
-from expra_engine.core.project import Project
 from expra_engine.core.scene import Scene
 from expra_engine.core.utils import get_time
 
 if TYPE_CHECKING:
+    from expra_engine.core.project import Project
     from expra_engine.runtime.clock import RuntimeClock
     from expra_engine.runtime.event_queue import EventQueue
     from expra_engine.runtime.system import RuntimeSystem
