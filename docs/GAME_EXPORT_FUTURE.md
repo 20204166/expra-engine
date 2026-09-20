@@ -1,6 +1,6 @@
 # Game Export — Design and Status
 
-## What has been implemented (Phase 14)
+## What Has Been Implemented
 
 `expra_engine.export` is now a real subsystem, separate from `_release.py` and
 the editor. It takes a user's game project and packages it for standalone
@@ -19,6 +19,8 @@ distribution.
 | `export/verify.py` | `verify_export()` — fails closed; checks manifests |
 | `export/cli.py` | CLI: `expra export <project> --target windows\|linux` |
 | `editor/export_dialog.py` | Tkinter dialog wired via ButtonCoordinator → AppCoordinator |
+| `runtime/pygame_runtime.py` | Non-Tk SDL/Pygame window, input, timing, and loop |
+| `runtime/pygame_renderer.py` | Primitive 2D renderer and score/status HUD |
 
 ### Runtime boundary enforced
 
@@ -27,6 +29,13 @@ Exported games do NOT include:
 - `expra_engine.ui`
 - `tkinter`
 - `ttkbootstrap`
+- Ursina
+- Panda3D
+
+The `pygame` runtime profile stages only the engine core/runtime modules needed
+by a game and installs Pygame into the target runtime. The editor-facing engine
+wheel remains a separate distribution artifact and is not copied wholesale into
+the game bundle.
 
 ### Atomic build contract
 
@@ -60,20 +69,18 @@ closed, full exporter end-to-end with mock packager, CLI argument parsing.
 
 ### Renderer seam
 
-`ViewportPanel` (in `ui/viewport.py`) renders game objects onto a Tk canvas for
-editor preview only. The `Engine` itself is renderer-agnostic. A future
-`GameRenderer` protocol will allow swapping in a real renderer for both
-in-editor preview and exported games.
-
-Until a renderer backend exists, the exported game cannot actually display
-anything — the export pipeline packages and verifies structure but the game
-itself will need its own renderer wiring.
+`ViewportPanel` (in `ui/viewport.py`) remains editor-preview-only. The
+`Engine` is renderer-agnostic, while exported games can explicitly install the
+Pygame/SDL adapter and `PygameRenderer`. The current renderer intentionally
+supports primitive player/target shapes and HUD text; sprites, materials,
+audio, and a general renderer protocol remain future work.
 
 ### Dependency resolution from pyproject.toml
 
-`GameExporter._resolve_packages()` currently uses only `plan.extra_packages`.
-A complete implementation would call `uv pip compile pyproject.toml` to
-auto-resolve the full dependency graph for the target platform.
+The explicit `RuntimeProfile.PYGAME` currently resolves the Pygame dependency
+and stages the runtime-only engine modules. General dependency resolution from
+an arbitrary game `pyproject.toml` remains deferred; `plan.extra_packages`
+continues to support additional packages.
 
 ### macOS target
 
@@ -100,4 +107,3 @@ global scene state mutation from exported games.
 - Security model, firewall configuration, HMAC secrets, fencing tokens — none
   of these are touched by the export pipeline.
 - Exported games must have no Panda / Ursina / Tk game runtime dependency.
-

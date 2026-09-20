@@ -42,7 +42,7 @@ through `expra_engine.design`. The Tk-specific adapter remains under
 `expra_engine.ui`; shipped games must not depend on Tk. See
 `docs/GAME_UI_FUTURE.md` for the future renderer-backed game UI boundary.
 
-## Running
+## Running The Editor
 
 ```bash
 pip install -e .
@@ -50,6 +50,44 @@ expra-editor
 # or
 python -m expra_engine
 ```
+
+The editor uses Tk through `expra_engine.ui`. It is not the game runtime.
+
+## Running The Neon Arena Sample
+
+The repository includes a real Pygame/SDL game at `examples/neon_arena`. Install
+the optional game runtime dependency for source runs:
+
+```bash
+pip install -e ".[runtime-pygame]"
+SDL_VIDEODRIVER=x11 python examples/neon_arena
+```
+
+To export a standalone Linux build with no Tk or editor runtime:
+
+```bash
+python -m expra_engine.export.cli examples/neon_arena \
+  --target linux \
+  --output "$PWD/builds" \
+  --game-name Neon_Arena \
+  --runtime-profile pygame \
+  --no-bytecode
+cd builds/Neon_Arena_linux
+./Neon_Arena_debug.sh
+```
+
+The normal launcher is `Neon_Arena.sh`. The debug launcher writes `log.txt` and
+returns the game's failure status. For deterministic headless validation, use
+the opt-in smoke mode:
+
+```bash
+SDL_VIDEODRIVER=dummy EXPRA_SMOKE_FRAMES=60 \
+  EXPRA_SMOKE_REPORT=smoke-report.json ./Neon_Arena_debug.sh
+```
+
+The smoke report confirms the bundled runtime started and rendered the exact
+requested number of frames. Use `xvfb-run` instead of `SDL_VIDEODRIVER=dummy`
+to exercise a real SDL window in CI or on a desktop without changing the game.
 
 ## Development
 
@@ -122,6 +160,8 @@ Results from background tasks cross from worker threads through the
 No worker ever calls `widget.configure()` directly.
 
 See `docs/THREADING.md` for details.
+
+See `docs/GAME_EXPORT_FUTURE.md` for the runtime profile and export boundary.
 
 See `docs/FILESYSTEM.md` for the logical-ID, mount, resource-service, package,
 and user-data APIs.
