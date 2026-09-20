@@ -12,7 +12,13 @@ from unittest.mock import patch
 
 from expra_engine._version import __version__
 from expra_engine.export.events import ExportPhase, ExportProgressEvent
-from expra_engine.export.exporter import ExportError, GameExporter, _engine_version
+from expra_engine.export.exporter import (
+    ExportError,
+    GameExporter,
+    _engine_version,
+    _merge_manifests,
+)
+from expra_engine.export.manifest import AssetEntry, AssetManifest
 from expra_engine.export.packager import TargetPackager
 from expra_engine.export.plan import ExportPlan, ExportTarget, PythonArch, RuntimeProfile
 from expra_engine.export.verify import verify_export
@@ -53,7 +59,6 @@ def _make_project(tmp: Path) -> tuple[Path, Path]:
     output = tmp / "builds"
     output.mkdir()
     return project, output
-
 
 class TestGameExporter(unittest.TestCase):
     def setUp(self) -> None:
@@ -197,6 +202,30 @@ class TestGameExporter(unittest.TestCase):
 
         # Sentinel from first export must still be there (atomic temp -> promote)
         self.assertTrue(sentinel.exists())
+
+    def test_promotion_failure_preserves_previous_build(self) -> None:
+        plan = self._plan()
+        first_out = self._export(plan)
+        sentinel = first_out / "sentinel.txt"
+        sentinel.write_text("was here")
+
+        with patch(
+            "expra_engine.export.exporter.shutil.copytree",
+            side_effect=OSError("copy failed"),
+        ), self.assertRaises(ExportError):
+            self._export(plan)
+
+        self.assertEqual(sentinel.read_text(), "was here")
+
+    def test_duplicate_manifest_destinations_are_rejected(self) -> None:
+        manifest = AssetManifest(
+            entries=[
+                AssetEntry("one.txt", 1, "a", destination="same.txt"),
+                AssetEntry("two.txt", 1, "b", destination="same.txt"),
+            ]
+        )
+        with self.assertRaises(ValueError):
+            _merge_manifests(manifest)
 
     def test_progress_events_emitted(self) -> None:
         plan = self._plan()

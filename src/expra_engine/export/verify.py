@@ -50,8 +50,10 @@ def _scan_for_forbidden_imports(export_dir: Path) -> list[str]:
         try:
             source = py_file.read_text(encoding="utf-8", errors="replace")
             tree = ast.parse(source, filename=str(py_file))
-        except (OSError, SyntaxError):
-            continue
+        except (OSError, SyntaxError) as error:
+            raise ExportVerificationError(
+                f"Cannot inspect exported source {py_file}: {error}"
+            ) from error
 
         imported_modules: list[str] = []
         for node in ast.walk(tree):
@@ -71,8 +73,10 @@ def _scan_for_forbidden_imports(export_dir: Path) -> list[str]:
             with pyc_file.open("rb") as stream:
                 stream.read(16)
                 code = marshal.load(stream)
-        except (OSError, EOFError, ValueError, TypeError):
-            continue
+        except (OSError, EOFError, ValueError, TypeError) as error:
+            raise ExportVerificationError(
+                f"Cannot inspect exported bytecode {pyc_file}: {error}"
+            ) from error
         for module in _iter_imports(code):
             for forbidden in _FORBIDDEN_IMPORTS:
                 if _is_forbidden_import(module, forbidden):
@@ -131,8 +135,33 @@ def verify_export(build_dir: Path) -> None:
 
     if "entries" not in asset_data:
         raise ExportVerificationError("asset_manifest.json missing 'entries' key")
+    _validate_asset_entries(asset_data["entries"])
 
     forbidden_imports = _scan_for_forbidden_imports(build_dir)
     if forbidden_imports:
         details = "; ".join(forbidden_imports)
         raise ExportVerificationError(f"Forbidden imports in export: {details}")
+
+
+def _validate_asset_entries(entries: object) -> None:
+    if not isinstance(entries, list):
+        raise ExportVerificationError("asset_manifest.json 'entries' must be a list")
+    required = {"path", "size", "sha256"}
+    for entry in entries:
+        if not isinstance(entry, dict) or not required.issubset(entry):
+            raise ExportVerificationError("asset_manifest.json contains an invalid entry")
+        path = entry["path"]
+        size = entry["size"]
+        sha256 = entry["sha256"]
+        if (
+            not isinstance(path, str)
+            or Path(path).is_absolute()
+            or ".." in Path(path).parts
+            or not isinstance(size, int)
+            or isinstance(size, bool)
+            or size < 0
+            or not isinstance(sha256, str)
+            or len(sha256) != 64
+            or any(char not in "0123456789abcdef" for char in sha256.lower())
+        ):
+            raise ExportVerificationError("asset_manifest.json contains an invalid entry")

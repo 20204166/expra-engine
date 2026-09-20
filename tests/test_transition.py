@@ -94,6 +94,18 @@ class TestPendingTransition(unittest.TestCase):
         t.start(50, lambda: None)
         self.assertIsNotNone(t.pending_id)
 
+    def test_synchronous_scheduler_does_not_leave_stale_pending_id(self) -> None:
+        applied: list[str] = []
+
+        def schedule(_delay: int, callback: Any) -> int:
+            callback()
+            return 1
+
+        t = PendingTransition(schedule, lambda _identifier: True)
+        t.start(0, lambda: applied.append("applied"))
+        self.assertEqual(applied, ["applied"])
+        self.assertIsNone(t.pending_id)
+
 
 if __name__ == "__main__":
     unittest.main()

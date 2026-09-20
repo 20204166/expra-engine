@@ -10,6 +10,7 @@ Both accept a `downloader` kwarg for unit-testing without network access.
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 import threading
@@ -62,11 +63,15 @@ _BLOCKED_PACKAGES: frozenset[str] = frozenset(
         "expra-engine-editor",
     }
 )
+_BLOCKED_PACKAGE_NAMES: frozenset[str] = frozenset(
+    item.lower().replace("-", "_").replace(".", "_") for item in _BLOCKED_PACKAGES
+)
 
 
 def _is_blocked(pkg: str) -> bool:
-    name = pkg.split("==")[0].split("@")[0].strip().lower().replace("-", "_")
-    return any(name.startswith(b.replace("-", "_")) for b in _BLOCKED_PACKAGES)
+    name = re.split(r"[<>=!~;@\[\s]", pkg, maxsplit=1)[0]
+    normalized = name.strip().lower().replace("-", "_").replace(".", "_")
+    return normalized in _BLOCKED_PACKAGE_NAMES
 
 
 class TargetPackager(ABC):

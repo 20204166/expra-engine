@@ -86,12 +86,18 @@ class GameExporter:
                 raise ExportError("Export cancelled")
 
             emit(ExportPhase.VERIFYING, "Verifying build integrity", 90)
-            verify_export(tmp_build)
+            try:
+                verify_export(tmp_build)
+            except Exception as exc:
+                emit(ExportPhase.FAILED, str(exc), 0)
+                raise ExportError(str(exc)) from exc
 
             emit(ExportPhase.PROMOTING, "Promoting to output directory", 95)
-            if final_dir.exists():
-                shutil.rmtree(final_dir)
-            shutil.copytree(tmp_build, final_dir)
+            try:
+                _promote_build(tmp_build, final_dir)
+            except Exception as exc:
+                emit(ExportPhase.FAILED, str(exc), 0)
+                raise ExportError(str(exc)) from exc
 
         emit(ExportPhase.DONE, f"Export complete: {final_dir}", 100)
         return final_dir
@@ -309,10 +315,43 @@ def _runtime_packages(plan: ExportPlan) -> list[str]:
 
 
 def _merge_manifests(*manifests: AssetManifest) -> AssetManifest:
-    entries: list[AssetEntry] = []
+    entries_by_destination: dict[str, AssetEntry] = {}
     for manifest in manifests:
-        entries.extend(manifest.entries)
-    return AssetManifest(entries=sorted(entries, key=lambda entry: entry.path))
+        for entry in manifest.entries:
+            destination = entry.destination or entry.path
+            previous = entries_by_destination.get(destination)
+            if previous is not None:
+                raise ValueError(f"Duplicate asset destination: {destination}")
+            entries_by_destination[destination] = entry
+    return AssetManifest(
+        entries=sorted(entries_by_destination.values(), key=lambda entry: entry.path)
+    )
+
+
+def _promote_build(source: Path, destination: Path) -> None:
+    """Copy a verified build without deleting a previous successful export."""
+    staging = destination.with_name(f".{destination.name}.promoting")
+    backup = destination.with_name(f".{destination.name}.previous")
+    for path in (staging, backup):
+        if path.exists():
+            shutil.rmtree(path)
+
+    try:
+        shutil.copytree(source, staging)
+        if destination.exists():
+            destination.rename(backup)
+        staging.rename(destination)
+    except Exception:
+        if backup.exists():
+            if destination.exists():
+                shutil.rmtree(destination)
+            backup.rename(destination)
+        raise
+    finally:
+        if staging.exists():
+            shutil.rmtree(staging)
+        if backup.exists():
+            shutil.rmtree(backup)
 
 
 def _select_packager(target: ExportTarget) -> TargetPackager:

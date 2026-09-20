@@ -49,6 +49,9 @@ class TestIsBlocked(unittest.TestCase):
     def test_pillow_not_blocked(self) -> None:
         self.assertFalse(_is_blocked("Pillow==10.0.0"))
 
+    def test_similarly_named_package_is_not_blocked(self) -> None:
+        self.assertFalse(_is_blocked("tkinter-extra"))
+
 
 class TestWindowsPackagerRuntime(unittest.TestCase):
     def setUp(self) -> None:

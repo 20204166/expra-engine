@@ -59,7 +59,12 @@ class ExportPlan:
     def __post_init__(self) -> None:
         if not self.project_dir.is_dir():
             raise ValueError(f"project_dir does not exist: {self.project_dir}")
-        entry = self.project_dir / self.entry_point
+        project_root = self.project_dir.resolve()
+        entry = (project_root / self.entry_point).resolve()
+        try:
+            entry.relative_to(project_root)
+        except ValueError as error:
+            raise ValueError("entry_point must remain inside project_dir") from error
         if not entry.exists():
             raise ValueError(f"entry_point not found: {entry}")
         if not _GAME_NAME_RE.match(self.game_name):

@@ -69,6 +69,12 @@ class TestExportPlanValidation(unittest.TestCase):
         with self.assertRaises(ValueError):
             self._plan(entry_point="missing.py")
 
+    def test_entry_point_must_stay_inside_project(self) -> None:
+        outside = Path(self._tmp) / "outside.py"
+        outside.write_text("print('outside')")
+        with self.assertRaises(ValueError):
+            self._plan(entry_point="../outside.py")
+
     def test_invalid_game_name_empty(self) -> None:
         with self.assertRaises(ValueError):
             self._plan(game_name="")

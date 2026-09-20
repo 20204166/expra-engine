@@ -39,7 +39,17 @@ class PendingTransition:
         if self._id is not None:
             self._cancel(self._id)
             self._id = None
-        self._id = self._schedule(delay, self._run(apply, generation))
+        fired = False
+        callback = self._run(apply, generation)
+
+        def run() -> None:
+            nonlocal fired
+            fired = True
+            callback()
+
+        identifier = self._schedule(delay, run)
+        if not fired:
+            self._id = identifier
 
     def cancel(self) -> None:
         if self._id is not None:

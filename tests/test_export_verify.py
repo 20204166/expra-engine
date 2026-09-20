@@ -76,6 +76,20 @@ class TestVerifyExport(unittest.TestCase):
         with self.assertRaises(ExportVerificationError):
             verify_export(self._build)
 
+    def test_asset_manifest_entry_requires_schema(self) -> None:
+        _write_valid_manifests(self._build)
+        (self._build / "asset_manifest.json").write_text(
+            json.dumps({"entries": [{"path": "../outside.txt"}]})
+        )
+        with self.assertRaises(ExportVerificationError):
+            verify_export(self._build)
+
+    def test_unreadable_python_source_fails_closed(self) -> None:
+        _write_valid_manifests(self._build)
+        (self._build / "broken.py").write_text("if True print('broken')\n")
+        with self.assertRaises(ExportVerificationError):
+            verify_export(self._build)
+
     def test_fails_closed_not_open(self) -> None:
         # verify_export must never silently succeed on a broken build
         (self._build / "build_manifest.json").write_text("{}")
