@@ -1,8 +1,14 @@
 """Tests for Entity and Component."""
 
 import unittest
+from dataclasses import dataclass
 
-from expra_engine.core.component import TransformComponent
+from expra_engine.core.component import (
+    Component,
+    TransformComponent,
+    component_from_dict,
+    register_component_type,
+)
 from expra_engine.core.entity import Entity
 
 
@@ -118,6 +124,37 @@ class TestTransformComponent(unittest.TestCase):
     def test_component_type(self) -> None:
         t = TransformComponent()
         self.assertEqual(t.component_type, "transform")
+
+
+class ComponentRegistryTests(unittest.TestCase):
+    def test_component_from_dict_known_type(self) -> None:
+        component = component_from_dict({"type": "transform", "x": 1.0, "y": 2.0, "rotation": 0.0})
+
+        self.assertIsInstance(component, TransformComponent)
+        self.assertAlmostEqual(component.x, 1.0)
+
+    def test_component_from_dict_unknown_type_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            component_from_dict({"type": "__nonexistent__"})
+
+    def test_register_custom_type(self) -> None:
+        @dataclass
+        class TagComponent(Component):
+            tag: str = ""
+
+            def to_dict(self) -> dict[str, str]:
+                return {"type": "test_tag", "tag": self.tag}
+
+            @classmethod
+            def from_dict(cls, data: dict[str, object]) -> "TagComponent":
+                return cls(tag=str(data.get("tag", "")))
+
+        register_component_type("test_tag", TagComponent)
+
+        component = component_from_dict({"type": "test_tag", "tag": "player"})
+
+        self.assertIsInstance(component, TagComponent)
+        self.assertEqual(component.tag, "player")
 
 
 if __name__ == "__main__":
