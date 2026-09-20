@@ -18,6 +18,7 @@ __all__ = (
     "CommandStack",
     "DeleteEntityCommand",
     "RenameEntityCommand",
+    "SetExposedValueCommand",
 )
 
 
@@ -157,3 +158,57 @@ class DeleteEntityCommand(Command):
     @property
     def description(self) -> str:
         return f"Delete '{self._entity.name}'"
+
+
+class SetExposedValueCommand(Command):
+    """Set one serialized script value by stable scene/entity/component IDs."""
+
+    def __init__(
+        self, scene: Any, entity_id: str, component_index: int, field: str, value: Any
+    ) -> None:
+        self._scene = scene
+        self._entity_id = entity_id
+        self._component_index = component_index
+        entity = scene.find_entity(entity_id)
+        self._component_ref = (
+            entity.components[component_index]
+            if entity is not None and 0 <= component_index < len(entity.components)
+            else None
+        )
+        self._field = field
+        self._new = value
+        self._old: Any = None
+        self._captured = False
+
+    def _component(self) -> Any | None:
+        entity = self._scene.find_entity(self._entity_id)
+        if entity is None:
+            return None
+        if self._component_ref in entity.components:
+            return self._component_ref
+        if self._component_index < len(entity.components):
+            return entity.components[self._component_index]
+        return None
+
+    def execute(self) -> None:
+        component = self._component()
+        if component is None or not hasattr(component, "exposed_values"):
+            return
+        if not self._captured:
+            self._old = component.exposed_values.get(self._field)
+            self._had_old = self._field in component.exposed_values
+            self._captured = True
+        component.exposed_values[self._field] = self._new
+
+    def undo(self) -> None:
+        component = self._component()
+        if component is None or not hasattr(component, "exposed_values"):
+            return
+        if not self._had_old:
+            component.exposed_values.pop(self._field, None)
+        else:
+            component.exposed_values[self._field] = self._old
+
+    @property
+    def description(self) -> str:
+        return f"Set {self._field}"

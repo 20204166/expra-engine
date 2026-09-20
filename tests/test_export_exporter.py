@@ -125,9 +125,7 @@ class TestGameExporter(unittest.TestCase):
         packager = _NoopPackager(plan.target)
         out = GameExporter(packager=packager).export(plan, cancel=threading.Event())
 
-        runtime_package = (
-            out / "runtime" / "lib" / "python3.12" / "site-packages" / "expra_engine"
-        )
+        runtime_package = out / "runtime" / "lib" / "python3.12" / "site-packages" / "expra_engine"
         self.assertTrue((runtime_package / "runtime" / "pygame_runtime.py").exists())
 
     def test_asset_manifest_written(self) -> None:
@@ -149,6 +147,19 @@ class TestGameExporter(unittest.TestCase):
         game_dir = out / "Test_Game"
         self.assertTrue(game_dir.is_dir())
         self.assertTrue((game_dir / "assets" / "sprite.png").exists())
+
+    def test_project_behaviour_script_is_packaged_without_editor_modules(self) -> None:
+        scripts = self._project / "scripts"
+        scripts.mkdir()
+        (scripts / "player.py").write_text(
+            "from expra_engine.runtime.behaviour import Behaviour\n"
+            "class PlayerBehaviour(Behaviour):\n"
+            "    pass\n"
+        )
+        out = self._export(self._plan())
+        game_dir = out / "Test_Game"
+        self.assertTrue((game_dir / "scripts" / "player.py").exists())
+        self.assertFalse((game_dir / "editor").exists())
 
     def test_cancellation_raises(self) -> None:
         plan = self._plan()

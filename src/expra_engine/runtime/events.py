@@ -31,6 +31,13 @@ class Update:
 
 
 @dataclass
+class FrameUpdate:
+    """A variable-duration frame update emitted by :meth:`Engine.tick`."""
+
+    time_delta: float
+
+
+@dataclass
 class Idle:
     """One full iteration of the runtime main loop.
 

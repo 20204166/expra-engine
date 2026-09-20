@@ -72,7 +72,11 @@ class Project:
             self.assets_dir,
             MountSpec(name="project-assets", scheme="assets", read_only=False),
         )
-        return ResourceService(ResourceResolver([mount]))
+        project_mount = DirectoryMount(
+            self.path,
+            MountSpec(name="project-files", scheme="project", read_only=True),
+        )
+        return ResourceService(ResourceResolver([mount, project_mount]))
 
     @property
     def project_file(self) -> Path:

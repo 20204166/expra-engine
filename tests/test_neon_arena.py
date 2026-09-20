@@ -112,8 +112,9 @@ class TestNeonArena(unittest.TestCase):
         self.assertEqual(config.frame_limit, 3)
         self.assertEqual(config.report_path, PROJECT_DIR / "smoke_report.json")
 
-        with patch.dict(os.environ, {"EXPRA_SMOKE_FRAMES": "0"}, clear=False), self.assertRaises(
-            ValueError
+        with (
+            patch.dict(os.environ, {"EXPRA_SMOKE_FRAMES": "0"}, clear=False),
+            self.assertRaises(ValueError),
         ):
             entrypoint.smoke_config_from_environment(PROJECT_DIR)
 
@@ -157,7 +158,9 @@ class TestNeonArena(unittest.TestCase):
                 },
                 clear=False,
             ),
-            patch.object(entrypoint.importlib, "import_module", side_effect=RuntimeError("pygame missing")),
+            patch.object(
+                entrypoint.importlib, "import_module", side_effect=RuntimeError("pygame missing")
+            ),
         ):
             try:
                 with self.assertRaisesRegex(RuntimeError, "pygame missing"):
@@ -259,10 +262,14 @@ class _SmokePygame:
         def rect(self, surface: object, color: tuple[int, int, int], rectangle: object) -> None:
             pass
 
-        def line(self, surface: object, color: tuple[int, int, int], start: object, end: object) -> None:
+        def line(
+            self, surface: object, color: tuple[int, int, int], start: object, end: object
+        ) -> None:
             pass
 
-        def circle(self, surface: object, color: tuple[int, int, int], center: object, radius: int) -> None:
+        def circle(
+            self, surface: object, color: tuple[int, int, int], center: object, radius: int
+        ) -> None:
             pass
 
     def __init__(self, frames: list[list[Any]] | None = None) -> None:

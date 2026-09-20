@@ -233,7 +233,12 @@ class RenderItem:
         if not context.camera.near <= depth <= context.camera.far:
             return False
         left, top, right, bottom = self._projected_bounds(context)
-        return right >= context.viewport.x and left <= context.viewport.right and bottom >= context.viewport.y and top <= context.viewport.bottom
+        return (
+            right >= context.viewport.x
+            and left <= context.viewport.right
+            and bottom >= context.viewport.y
+            and top <= context.viewport.bottom
+        )
 
 
 @dataclass(frozen=True)

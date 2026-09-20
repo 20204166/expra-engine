@@ -21,7 +21,7 @@ import tkinter as tk
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, simpledialog
 from tkinter import ttk as tkttk
 from typing import Any
 
@@ -34,7 +34,12 @@ from expra_engine.core.component import TransformComponent
 from expra_engine.core.engine import Engine, EngineRunState
 from expra_engine.core.scene import Scene
 from expra_engine.editor.builtin_features import build_builtin_features
-from expra_engine.editor.commands import CommandStack, DeleteEntityCommand, RenameEntityCommand
+from expra_engine.editor.commands import (
+    CommandStack,
+    DeleteEntityCommand,
+    RenameEntityCommand,
+    SetExposedValueCommand,
+)
 from expra_engine.editor.contributions import (
     ContributionRegistry,
     EditorContext,
@@ -45,7 +50,9 @@ from expra_engine.editor.contributions import (
 from expra_engine.editor.delivery import TkDeliveryQueue
 from expra_engine.editor.export_dialog import ExportDialog
 from expra_engine.editor.preferences import PreferencesStore
+from expra_engine.editor.script_tools import attach_script, create_behaviour_script
 from expra_engine.editor.window_placement import WindowGeometry
+from expra_engine.runtime.script_component import ScriptComponent
 from expra_engine.ui.asset_browser import AssetBrowserPanel
 from expra_engine.ui.console import ConsolePanel
 from expra_engine.ui.hierarchy import HierarchyPanel
@@ -230,6 +237,7 @@ class EditorWindow:
             on_transform_change=self._on_transform_change,
             on_rename=self._on_entity_rename,
             on_toggle_enabled=self._on_entity_toggle,
+            on_script_value_change=self._on_script_value_change,
         )
         self._inspector.pack(fill="both", expand=True)
         self._inspector_host = insp_frame
@@ -458,6 +466,65 @@ class EditorWindow:
         if self._engine.run_state == EngineRunState.EDIT and self._selected_id:
             self._on_hierarchy_delete(self._selected_id)
 
+    def _act_new_script(self) -> None:
+        project = self._engine.project
+        if project is None:
+            messagebox.showwarning("New Script", "Open a project before creating scripts.")
+            return
+        relative_path = simpledialog.askstring(
+            "New Script", "Path under scripts/", parent=self._root
+        )
+        class_name = simpledialog.askstring("New Script", "Behaviour class name", parent=self._root)
+        if not relative_path or not class_name:
+            return
+        try:
+            resource = create_behaviour_script(project.path, f"scripts/{relative_path}", class_name)
+        except (ValueError, FileExistsError) as exc:
+            messagebox.showerror("New Script", str(exc), parent=self._root)
+            return
+        self._console.log(f"[Editor] Created script: {resource}")
+        self._assets.refresh()
+
+    def _act_attach_script(self) -> None:
+        if self._selected_id is None:
+            return
+        scene = self._engine.edit_scene
+        entity = scene.find_entity(self._selected_id) if scene else None
+        if entity is None:
+            return
+        script_id = simpledialog.askstring(
+            "Attach Script", "project://scripts/example.py", parent=self._root
+        )
+        class_name = simpledialog.askstring(
+            "Attach Script", "Behaviour class name", parent=self._root
+        )
+        if not script_id or not class_name:
+            return
+        try:
+            attach_script(entity, script_id, class_name)
+        except (ValueError, TypeError) as exc:
+            messagebox.showerror("Attach Script", str(exc), parent=self._root)
+            return
+        self._console.log(f"[Editor] Attached {class_name} to {entity.name}")
+        self._on_hierarchy_select(entity.entity_id)
+        self._present_all()
+
+    def _act_remove_script(self) -> None:
+        if self._selected_id is None:
+            return
+        scene = self._engine.edit_scene
+        entity = scene.find_entity(self._selected_id) if scene else None
+        if entity is None:
+            return
+        scripts = [
+            component for component in entity.components if isinstance(component, ScriptComponent)
+        ]
+        if scripts:
+            entity.remove_component(scripts[-1])
+            self._console.log(f"[Editor] Removed script from {entity.name}")
+            self._on_hierarchy_select(entity.entity_id)
+            self._present_all()
+
     # ------------------------------------------------------------------
     # Hierarchy callbacks
     # ------------------------------------------------------------------
@@ -467,6 +534,12 @@ class EditorWindow:
         self._actions.set_enabled("delete_entity", entity_id is not None)
         scene = self._engine.active_scene
         entity = scene.find_entity(entity_id) if scene and entity_id else None
+        has_script = bool(
+            entity is not None
+            and any(isinstance(component, ScriptComponent) for component in entity.components)
+        )
+        self._actions.set_enabled("attach_script", entity_id is not None and not has_script)
+        self._actions.set_enabled("remove_script", has_script)
         self._present_selection(scene, entity)
 
     def _on_hierarchy_create(self) -> None:
@@ -548,6 +621,20 @@ class EditorWindow:
         if entity is None:
             return
         entity.enabled = enabled
+        self._present_all()
+
+    def _on_script_value_change(
+        self, entity_id: str, component_index: int, field: str, value: Any
+    ) -> None:
+        if self._engine.run_state != EngineRunState.EDIT:
+            return
+        scene = self._engine.edit_scene
+        if scene is None or scene.find_entity(entity_id) is None:
+            return
+        self._command_stack.push(
+            SetExposedValueCommand(scene, entity_id, component_index, field, value)
+        )
+        self._update_undo_redo_state()
         self._present_all()
 
     # ------------------------------------------------------------------

@@ -271,12 +271,12 @@ def _stage_pygame_runtime(site_packages: Path) -> None:
     core_root = package_root / "core"
     core_root.mkdir()
     (core_root / "__init__.py").write_text(
-        "\"\"\"Runtime-only core exports.\"\"\"\n"
+        '"""Runtime-only core exports."""\n'
         "from expra_engine.core.component import Component, TransformComponent\n"
         "from expra_engine.core.engine import Engine, EngineRunState\n"
         "from expra_engine.core.entity import Entity\n"
         "from expra_engine.core.scene import Scene\n"
-        "\n__all__ = [\"Component\", \"Engine\", \"EngineRunState\", \"Entity\", \"Scene\", \"TransformComponent\"]\n",
+        '\n__all__ = ["Component", "Engine", "EngineRunState", "Entity", "Scene", "TransformComponent"]\n',
         encoding="utf-8",
     )
     for module in _RUNTIME_CORE_MODULES:

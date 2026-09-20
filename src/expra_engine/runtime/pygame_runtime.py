@@ -42,7 +42,9 @@ class PygameRuntime:
             raise ValueError("frame_rate must be positive")
         self.engine = engine
         self.renderer = renderer
-        self.pygame = pygame_module if pygame_module is not None else importlib.import_module("pygame")
+        self.pygame = (
+            pygame_module if pygame_module is not None else importlib.import_module("pygame")
+        )
         self.clock = clock or self.pygame.time.Clock()
         self._surface_factory = surface_factory or self.pygame.display.set_mode
         self.size = size

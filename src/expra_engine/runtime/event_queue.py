@@ -29,6 +29,7 @@ from typing import Any
 
 from expra_engine.core.errors import BadEventHandlerException
 from expra_engine.core.utils import camel_to_snake
+from expra_engine.runtime.events import FrameUpdate, Update
 from expra_engine.runtime.input import ActionEvent
 
 __all__ = ("EventQueue", "walk")
@@ -130,21 +131,46 @@ class EventQueue:
         handler_name = _handler_name(type(event).__name__)
         for obj in targets:
             method = getattr(obj, handler_name, None)
-            if method is None or not callable(method):
+            if method is not None and callable(method):
+                try:
+                    handled = method(event, self.signal)
+                except TypeError as exc:
+                    from inspect import signature
+
+                    sig = signature(method)
+                    try:
+                        sig.bind(event, self.signal)
+                    except TypeError:
+                        raise BadEventHandlerException(obj, handler_name, event) from exc
+                    raise
+                if isinstance(event, ActionEvent) and handled:
+                    break
+            elif isinstance(event, (ActionEvent, FrameUpdate, Update)):
                 continue
-            try:
-                handled = method(event, self.signal)
-            except TypeError as exc:
+            if isinstance(event, (ActionEvent, FrameUpdate, Update)):
+                continue
+            behaviours = getattr(obj, "behaviours", ())
+            for behaviour in tuple(behaviours):
+                if not getattr(obj, "enabled", True) or not getattr(behaviour, "enabled", True):
+                    continue
+                callback = getattr(behaviour, handler_name, None)
+                if callback is None or not callable(callback):
+                    continue
                 from inspect import signature
 
-                sig = signature(method)
+                callback_signature = signature(callback)
                 try:
-                    sig.bind(event, self.signal)
+                    callback_signature.bind(event, self.signal)
                 except TypeError:
-                    raise BadEventHandlerException(obj, handler_name, event) from exc
-                raise
-            if isinstance(event, ActionEvent) and handled:
-                break
+                    try:
+                        callback_signature.bind(event)
+                    except TypeError as invalid_signature:
+                        raise BadEventHandlerException(
+                            behaviour, handler_name, event
+                        ) from invalid_signature
+                    callback(event)
+                else:
+                    callback(event, self.signal)
 
     def flush(self) -> None:
         """Discard all pending events.

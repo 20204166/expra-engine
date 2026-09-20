@@ -315,9 +315,7 @@ class TestEngineBehaviourRuntimeLifecycle(unittest.TestCase):
         runtime_scene = engine.active_scene
         self.assertIsNotNone(runtime_scene)
         assert runtime_scene is not None
-        runtime_behaviours = tuple(
-            entity.behaviours for entity in runtime_scene.entities
-        )
+        runtime_behaviours = tuple(entity.behaviours for entity in runtime_scene.entities)
         self.assertEqual(
             [entity.entity_id for entity in runtime_scene.entities],
             ["entity-1", "entity-2"],

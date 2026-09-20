@@ -100,7 +100,9 @@ class TestPygameRuntime(unittest.TestCase):
 
         runtime.run()
 
-        self.assertEqual([name for name, _ in renderer.calls], ["start", "render", "render", "stop"])
+        self.assertEqual(
+            [name for name, _ in renderer.calls], ["start", "render", "render", "stop"]
+        )
         self.assertIsInstance(renderer.calls[0][1], RenderContext)
         self.assertEqual(renderer.calls[0][1].viewport, Viewport(0, 0, 320, 240))
 
@@ -114,7 +116,9 @@ class TestPygameRuntime(unittest.TestCase):
             pygame_module=pygame,
             clock=_FakeClock([16, 16]),
             surface_factory=pygame.display.set_mode,
-            frame_factory=lambda engine, elapsed: RenderContractFrame(elapsed=elapsed, payload=payload),
+            frame_factory=lambda engine, elapsed: RenderContractFrame(
+                elapsed=elapsed, payload=payload
+            ),
         )
 
         runtime.run()
@@ -156,8 +160,11 @@ class TestPygameRuntime(unittest.TestCase):
         pygame.VIDEORESIZE = 4
         renderer = _RecordingRenderer()
         runtime = PygameRuntime(
-            _FakeEngine(), renderer=renderer, pygame_module=pygame,
-            clock=_FakeClock([16, 16]), surface_factory=pygame.display.set_mode,
+            _FakeEngine(),
+            renderer=renderer,
+            pygame_module=pygame,
+            clock=_FakeClock([16, 16]),
+            surface_factory=pygame.display.set_mode,
         )
 
         runtime.run()
@@ -167,14 +174,18 @@ class TestPygameRuntime(unittest.TestCase):
     def test_renderer_stops_and_pygame_quits_when_render_raises(self) -> None:
         pygame = _FakePygame([[]])
         renderer = _RecordingRenderer()
+
         def broken_render(frame: object) -> None:
             renderer.calls.append(("render", frame))
             raise RuntimeError("render unavailable")
 
         renderer.render = broken_render
         runtime = PygameRuntime(
-            _FakeEngine(), renderer=renderer, pygame_module=pygame,
-            clock=_FakeClock([16]), surface_factory=pygame.display.set_mode,
+            _FakeEngine(),
+            renderer=renderer,
+            pygame_module=pygame,
+            clock=_FakeClock([16]),
+            surface_factory=pygame.display.set_mode,
         )
 
         with self.assertRaisesRegex(RuntimeError, "render unavailable"):
@@ -187,14 +198,18 @@ class TestPygameRuntime(unittest.TestCase):
         pygame = _FakePygame([[SimpleNamespace(type=_FakePygame.QUIT)]])
         renderer = _FailingStopRenderer()
         runtime = PygameRuntime(
-            _FakeEngine(), renderer=renderer, pygame_module=pygame,
-            clock=_FakeClock([16]), surface_factory=pygame.display.set_mode,
+            _FakeEngine(),
+            renderer=renderer,
+            pygame_module=pygame,
+            clock=_FakeClock([16]),
+            surface_factory=pygame.display.set_mode,
         )
 
         with self.assertRaisesRegex(RuntimeError, "stop unavailable"):
             runtime.run()
 
         self.assertEqual(pygame.quit_calls, 1)
+
     def test_exports_runtime_and_tracks_keyboard_state(self) -> None:
         pygame = _FakePygame(
             [
@@ -298,10 +313,12 @@ class TestPygameRuntime(unittest.TestCase):
 
     def test_quit_in_an_event_batch_prevents_later_key_events(self) -> None:
         pygame = _FakePygame(
-            [[
-                SimpleNamespace(type=_FakePygame.QUIT),
-                SimpleNamespace(type=_FakePygame.KEYDOWN, key=97),
-            ]]
+            [
+                [
+                    SimpleNamespace(type=_FakePygame.QUIT),
+                    SimpleNamespace(type=_FakePygame.KEYDOWN, key=97),
+                ]
+            ]
         )
         runtime = PygameRuntime(
             _FakeEngine(),

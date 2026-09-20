@@ -17,7 +17,7 @@ and editor presentation (`ui`) into distinct layers.
 │  ComponentRefreshScheduler · PendingTransition          │
 ├─────────────────────────────────────────────────────────┤
 │  Runtime Layer  (pure Python, no Tk)                     │
-│  EventQueue · RuntimeClock · RuntimeSystem · scene stack │
+│  EventQueue · RuntimeClock · BehaviourSystem · scene stack│
 ├─────────────────────────────────────────────────────────┤
 │  Engine Core  (pure Python, no Tk)                      │
 │  Engine · Project · Scene · Entity · Component · Camera2D│
@@ -44,6 +44,9 @@ and editor presentation (`ui`) into distinct layers.
 | Runtime event dispatch            | EventQueue                     | `runtime/event_queue.py`            |
 | Fixed-step runtime clock          | RuntimeClock                   | `runtime/clock.py`                  |
 | Runtime subsystem lifecycle       | RuntimeSystem                  | `runtime/system.py`                 |
+| Serialized script configuration   | ScriptComponent               | `runtime/script_component.py`       |
+| Script resource validation        | ScriptRegistry                | `runtime/script_registry.py`        |
+| Live gameplay script lifecycle    | BehaviourSystem               | `runtime/behaviour_system.py`       |
 | Runtime scene stack               | Engine                         | `core/engine.py`                    |
 | Camera coordinate transforms      | Camera2D                       | `core/camera.py`                    |
 | Entity hierarchy, tags, queries   | Scene / Entity                 | `core/scene.py`, `core/entity.py`   |
@@ -155,9 +158,11 @@ It tracks pending timer IDs and safely cancels them on shutdown.
 The runtime layer is headless and is driven by the caller through
 `Engine.tick()` or `Engine.loop_once()`. `EventQueue` provides FIFO signal and
 publish dispatch. `RuntimeClock` converts `Idle` events into fixed-step
-`Update` events, and `RuntimeSystem` is the lifecycle seam for pluggable
-subsystems. The runtime scene stack lives on `Engine`; it is separate from the
-editor scene and dispatches scene lifecycle events on push, pop, and replace.
+`Update` events, while `FrameUpdate` carries variable frame time. `RuntimeSystem`
+is the lifecycle seam for pluggable subsystems; `BehaviourSystem` is the one
+canonical owner for serialized gameplay scripts, not one system per script.
+The runtime scene stack lives on `Engine`; it is separate from the editor scene
+and dispatches scene lifecycle events on push, pop, and replace.
 
 `StartScene`, `StopScene`, `ReplaceScene`, and `Quit` are actionable queued
 requests. `Engine` handles them through the event queue and applies the

@@ -109,9 +109,10 @@ class InputMap:
         """Return the currently held semantic actions."""
         return frozenset(binding.action for binding in self._held)
 
-    def is_held(self, action: ActionId) -> bool:
+    def is_held(self, action: ActionId | str) -> bool:
         """Return whether any binding for *action* is held."""
-        return action in self.held_actions
+        value = action.value if isinstance(action, ActionId) else action
+        return any(item.value == value for item in self.held_actions)
 
     def focus_lost(self) -> tuple[ActionEvent, ...]:
         """Release every held binding in deterministic order."""

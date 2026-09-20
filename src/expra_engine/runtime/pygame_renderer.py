@@ -74,15 +74,26 @@ class PygameRenderer:
             self.font = None
         self._engine: Any = None
         self.context: RenderContext | None = None
-        self.capabilities = RendererCapabilities(primitive=True, text=True, resize=True, headless=True)
+        self.capabilities = RendererCapabilities(
+            primitive=True, text=True, resize=True, headless=True
+        )
 
     def start(self, context: RenderContext) -> None:
         self.context = context
 
     def resize(self, viewport: Any) -> None:
-        self.context = RenderContext(viewport, self.context.camera) if self.context else RenderContext(viewport)
+        self.context = (
+            RenderContext(viewport, self.context.camera)
+            if self.context
+            else RenderContext(viewport)
+        )
         self.screen_size = (viewport.width, viewport.height)
-        self.arena_bounds = (self.arena_bounds[0], self.arena_bounds[1], viewport.width, viewport.height)
+        self.arena_bounds = (
+            self.arena_bounds[0],
+            self.arena_bounds[1],
+            viewport.width,
+            viewport.height,
+        )
 
     def set_surface(self, surface: Any) -> None:
         self.surface = surface
@@ -108,12 +119,33 @@ class PygameRenderer:
             color = self._color(item.material.color, item.material.opacity)
             try:
                 if item.primitive.kind in ("rectangle", "rect"):
-                    width = round(abs(item.primitive.size[0] * transform.scale[0] / context.camera.width * context.viewport.width))
-                    height = round(abs(item.primitive.size[1] * transform.scale[1] / context.camera.height * context.viewport.height))
+                    width = round(
+                        abs(
+                            item.primitive.size[0]
+                            * transform.scale[0]
+                            / context.camera.width
+                            * context.viewport.width
+                        )
+                    )
+                    height = round(
+                        abs(
+                            item.primitive.size[1]
+                            * transform.scale[1]
+                            / context.camera.height
+                            * context.viewport.height
+                        )
+                    )
                     draw.rect(self.surface, color, self._rect_from_center(position, width, height))
                 elif item.primitive.kind == "circle":
                     radius = item.primitive.radius or item.primitive.size[0] / 2
-                    pixels = round(abs(radius * max(transform.scale[0], transform.scale[1]) / context.camera.width * context.viewport.width))
+                    pixels = round(
+                        abs(
+                            radius
+                            * max(transform.scale[0], transform.scale[1])
+                            / context.camera.width
+                            * context.viewport.width
+                        )
+                    )
                     draw.circle(self.surface, color, position, pixels)
                 elif item.primitive.kind == "point":
                     draw.circle(self.surface, color, position, 1)
@@ -145,7 +177,10 @@ class PygameRenderer:
                     position = self._to_screen(transform.x, transform.y)
                 except (OverflowError, ValueError, TypeError):
                     continue
-                if not all(math.isfinite(value) for value in (*position, transform.scale_x, transform.scale_y)):
+                if not all(
+                    math.isfinite(value)
+                    for value in (*position, transform.scale_x, transform.scale_y)
+                ):
                     continue
                 if transform.scale_x == 0 or transform.scale_y == 0:
                     continue

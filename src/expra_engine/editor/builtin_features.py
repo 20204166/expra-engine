@@ -52,6 +52,23 @@ def build_builtin_features(window: Any) -> tuple[EditorFeatureSpec, ...]:
             ),
         ),
         EditorFeatureSpec(
+            "scripting",
+            actions=(
+                EditorActionSpec("new_script", window._act_new_script),
+                EditorActionSpec("attach_script", window._act_attach_script, enabled=False),
+                EditorActionSpec("remove_script", window._act_remove_script, enabled=False),
+            ),
+            menus=(
+                MenuContribution("File", "New Behaviour Script...", "new_script", group="scene"),
+                MenuContribution(
+                    "Edit", "Attach Behaviour Script...", "attach_script", group="entity"
+                ),
+                MenuContribution(
+                    "Edit", "Remove Behaviour Script", "remove_script", group="entity"
+                ),
+            ),
+        ),
+        EditorFeatureSpec(
             "history",
             actions=(
                 EditorActionSpec("undo", window._act_undo, enabled=False),

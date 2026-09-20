@@ -108,9 +108,7 @@ class TestVerifyExport(unittest.TestCase):
 
     def test_export_containing_3d_editor_imports_is_rejected(self) -> None:
         _write_valid_manifests(self._build)
-        (self._build / "main.py").write_text(
-            "import ursina\nimport panda3d.core\n"
-        )
+        (self._build / "main.py").write_text("import ursina\nimport panda3d.core\n")
 
         with self.assertRaisesRegex(ExportVerificationError, "ursina.*panda3d|panda3d.*ursina"):
             verify_export(self._build)

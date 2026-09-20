@@ -207,7 +207,15 @@ class BuildManifest:
 
 
 def _walk(root: Path) -> Iterator[Path]:
+    resolved_root = root.resolve()
     for child in sorted(root.rglob("*")):
+        if not child.is_file():
+            continue
+        try:
+            child.resolve().relative_to(resolved_root)
+        except ValueError:
+            # Do not package a project symlink that escapes its root.
+            continue
         if child.is_file():
             yield child
 

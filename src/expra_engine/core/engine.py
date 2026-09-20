@@ -27,14 +27,17 @@ import contextlib
 import json
 import time
 from enum import Enum
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from expra_engine.core.scene import Scene
 from expra_engine.core.utils import get_time
 from expra_engine.runtime.behaviour import Behaviour, BehaviourFactory
+from expra_engine.runtime.input import InputMap
 
 if TYPE_CHECKING:
     from expra_engine.core.project import Project
+    from expra_engine.runtime.behaviour_system import BehaviourSystem
     from expra_engine.runtime.clock import RuntimeClock
     from expra_engine.runtime.event_queue import EventQueue
     from expra_engine.runtime.system import RuntimeSystem
@@ -89,6 +92,8 @@ class Engine:
 
         # Pluggable runtime systems
         self._systems: list[RuntimeSystem] = []
+        self._behaviour_system: BehaviourSystem | None = None
+        self._input_map = InputMap()
         self._quit_requested = False
 
     # ------------------------------------------------------------------
@@ -117,12 +122,48 @@ class Engine:
     def edit_scene(self) -> Scene | None:
         return self._edit_scene
 
+    @property
+    def input_map(self) -> InputMap:
+        return self._input_map
+
+    @property
+    def behaviour_system(self) -> BehaviourSystem:
+        if self._behaviour_system is None:
+            from expra_engine.runtime.behaviour_system import BehaviourSystem
+            from expra_engine.runtime.script_registry import ScriptRegistry
+
+            self._behaviour_system = BehaviourSystem(
+                ScriptRegistry(self._project.path if self._project else Path.cwd())
+            )
+            self.add_system(self._behaviour_system)
+        return self._behaviour_system
+
     # ------------------------------------------------------------------
     # Configuration
     # ------------------------------------------------------------------
 
     def set_project(self, project: Project | None) -> None:
         self._project = project
+        if self._behaviour_system is not None and hasattr(
+            self._behaviour_system.registry, "project_root"
+        ):
+            self._behaviour_system.registry.project_root = (
+                project.path.resolve() if project is not None else Path.cwd()
+            )
+
+    def set_script_registry(self, registry: object) -> None:
+        from expra_engine.runtime.behaviour_system import BehaviourSystem
+
+        if not hasattr(registry, "resolve"):
+            raise TypeError("registry must provide resolve()")
+        if self._behaviour_system is not None:
+            if self._state in (EngineRunState.PLAY, EngineRunState.PAUSED):
+                self._behaviour_system.stop()
+            self.remove_system(self._behaviour_system)  # type: ignore[arg-type]
+        self._behaviour_system = BehaviourSystem(registry)  # type: ignore[arg-type]
+        self.add_system(self._behaviour_system)
+        if self._state in (EngineRunState.PLAY, EngineRunState.PAUSED):
+            self._behaviour_system.start(self)
 
     def set_scene(self, scene: Scene | None) -> None:
         """Set the scene for editing. Resets any running play state first."""
@@ -155,7 +196,16 @@ class Engine:
             self._state = EngineRunState.PLAY
             self._quit_requested = False
             self._last_update = time.monotonic()
-            self._start_runtime()
+            try:
+                self._start_runtime()
+            except Exception:
+                with contextlib.suppress(Exception):
+                    self._stop_runtime()
+                self._runtime_scene = None
+                self._scene_stack.clear()
+                self._state = EngineRunState.EDIT
+                self._last_update = None
+                raise
             return True
         if self._state == EngineRunState.PAUSED:
             self._state = EngineRunState.PLAY
@@ -233,8 +283,9 @@ class Engine:
         self._last_update = now
 
         if self._eq is not None:
-            from expra_engine.runtime.events import Idle
+            from expra_engine.runtime.events import FrameUpdate, Idle
 
+            self._eq.signal(FrameUpdate(dt))
             self._eq.signal(Idle(dt))
             self._eq.drain()
 
@@ -309,7 +360,12 @@ class Engine:
         if self._eq:
             self._eq.set_root(self._build_dispatch_root())
             self._eq.signal(SceneStarted())
-            self._eq.drain()
+            try:
+                self._eq.drain()
+            except Exception:
+                self._scene_stack.pop()
+                self._eq.set_root(self._build_dispatch_root())
+                raise
 
     def pop_scene(self) -> Scene | None:
         """Pop the topmost runtime scene; resume the one beneath.
@@ -457,9 +513,7 @@ class Engine:
         for entity_id, pairs in captured.items():
             entity = runtime_scene.find_entity(entity_id)
             if entity is None:
-                raise ValueError(
-                    f"runtime scene is missing entity {entity_id!r} for behaviours"
-                )
+                raise ValueError(f"runtime scene is missing entity {entity_id!r} for behaviours")
             for _, factory in pairs:
                 try:
                     behaviour = factory()
@@ -485,6 +539,7 @@ class Engine:
             return
         for entity in self._runtime_scene.entities:
             for behaviour in entity.behaviours:
+                behaviour._set_started(True)
                 behaviour.on_start()
 
     def _stop_behaviours(self) -> None:
@@ -492,9 +547,16 @@ class Engine:
         if self._runtime_scene is None:
             return
         for entity in self._runtime_scene.entities:
-            for behaviour in entity.behaviours:
-                behaviour.on_stop()
-            for behaviour in entity.behaviours:
+            behaviours = tuple(entity.behaviours)
+            for behaviour in behaviours:
+                try:
+                    behaviour.on_stop()
+                finally:
+                    if not behaviour._destroyed:
+                        behaviour.on_destroy()
+                        behaviour._destroyed = True
+                behaviour._set_started(False)
+            for behaviour in behaviours:
                 entity.remove_behaviour(behaviour)
 
     def _build_dispatch_root(self) -> object:

@@ -9,6 +9,7 @@ from typing import Any
 
 from expra_engine.core.component import Component, TransformComponent
 from expra_engine.core.entity import Entity
+from expra_engine.runtime.script_component import ScriptComponent
 from expra_engine.ui.layout import make_scrollable_frame
 from expra_engine.ui.styles import (
     COLORS,
@@ -30,6 +31,7 @@ class InspectorPanel(tk.Frame):
         on_transform_change: Callable[[str, str, float], None] | None = None,
         on_rename: Callable[[str, str], None] | None = None,
         on_toggle_enabled: Callable[[str, bool], None] | None = None,
+        on_script_value_change: Callable[[str, int, str, Any], None] | None = None,
     ) -> None:
         c = colors or COLORS
         super().__init__(parent, bg=c["panel_bg"])
@@ -37,6 +39,7 @@ class InspectorPanel(tk.Frame):
         self._on_transform_change = on_transform_change
         self._on_rename = on_rename
         self._on_toggle_enabled = on_toggle_enabled
+        self._on_script_value_change = on_script_value_change
         self._current_entity_id: str | None = None
         self._name_value = ""
         self._transform_vars: dict[str, tk.StringVar] = {}
@@ -91,9 +94,11 @@ class InspectorPanel(tk.Frame):
             return
 
         self._entity_section(entity)
-        for component in entity.components:
+        for index, component in enumerate(entity.components):
             if isinstance(component, TransformComponent):
                 self._transform_section(component)
+            elif isinstance(component, ScriptComponent):
+                self._script_section(entity, index, component)
             else:
                 self._component_section(component)
 
@@ -206,6 +211,61 @@ class InspectorPanel(tk.Frame):
             wraplength=220,
             justify="left",
         ).pack(anchor="w", padx=4)
+
+    def _script_section(self, entity: Entity, index: int, component: ScriptComponent) -> None:
+        self._section_header(f"Script — {component.behaviour_class}")
+        form = self._form()
+        for row, (field, value) in enumerate(component.exposed_values.items()):
+            self._label(form, field.replace("_", " ").title(), row)
+            if isinstance(value, bool):
+                variable: Any = tk.BooleanVar(value=value)
+                ttk.Checkbutton(
+                    form,
+                    variable=variable,
+                    command=self._script_bool_handler(entity.entity_id, index, field, variable),
+                    style=STYLE_CHECKBUTTON,
+                ).grid(row=row, column=1, sticky="w", pady=3)
+            else:
+                variable = tk.StringVar(value=str(value))
+                entry = ttk.Entry(form, textvariable=variable, style=STYLE_ENTRY)
+                entry.grid(row=row, column=1, sticky="ew", pady=3)
+                entry.bind(
+                    "<Return>",
+                    self._script_text_handler(entity.entity_id, index, field, variable, value),
+                )
+                entry.bind(
+                    "<FocusOut>",
+                    self._script_text_handler(entity.entity_id, index, field, variable, value),
+                )
+
+    def _script_bool_handler(
+        self, entity_id: str, index: int, field: str, variable: Any
+    ) -> Callable[[], None]:
+        def handle() -> None:
+            self._emit_script_value(entity_id, index, field, variable.get())
+
+        return handle
+
+    def _script_text_handler(
+        self, entity_id: str, index: int, field: str, variable: Any, old: Any
+    ) -> Callable[[Any], None]:
+        def handle(_event: Any) -> None:
+            self._emit_script_text(entity_id, index, field, variable.get(), old)
+
+        return handle
+
+    def _emit_script_text(
+        self, entity_id: str, index: int, field: str, text: str, old: Any
+    ) -> None:
+        try:
+            value: Any = type(old)(text) if not isinstance(old, str) else text
+        except (TypeError, ValueError):
+            return
+        self._emit_script_value(entity_id, index, field, value)
+
+    def _emit_script_value(self, entity_id: str, index: int, field: str, value: Any) -> None:
+        if self._on_script_value_change is not None:
+            self._on_script_value_change(entity_id, index, field, value)
 
     def _handle_rename(self, _event: Any = None) -> None:
         if self._current_entity_id is None or self._on_rename is None:

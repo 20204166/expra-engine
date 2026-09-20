@@ -8,8 +8,8 @@ from expra_engine.core.scene import Scene
 from expra_engine.runtime import (
     OrthographicCamera,
     PrimitiveDescriptor,
-    PygameRenderFrame,
     PygameRenderer,
+    PygameRenderFrame,
     RenderContext,
     RenderContractFrame,
     RenderFrame,
@@ -83,11 +83,18 @@ class TestPygameRenderer(unittest.TestCase):
     def test_contract_frame_draws_visible_items_in_phase_layer_depth_order(self) -> None:
         pygame = _FakePygame(_FakeFont())
         renderer = PygameRenderer(pygame, _FakeSurface())
-        renderer.start(RenderContext(Viewport(0, 0, 100, 100), OrthographicCamera(width=10, height=10)))
+        renderer.start(
+            RenderContext(Viewport(0, 0, 100, 100), OrthographicCamera(width=10, height=10))
+        )
         primitive = PrimitiveDescriptor("rectangle", size=(2, 2))
         frame = RenderContractFrame(
             (
-                RenderItem("transparent", primitive, Transform(position=(3, 0, 0)), phase=RenderPhase.TRANSPARENT),
+                RenderItem(
+                    "transparent",
+                    primitive,
+                    Transform(position=(3, 0, 0)),
+                    phase=RenderPhase.TRANSPARENT,
+                ),
                 RenderItem("front", primitive, Transform(position=(2, 0, 1)), layer=1),
                 RenderItem("back", primitive, Transform(position=(1, 0, -1)), layer=1),
                 RenderItem("hidden", primitive, Transform(position=(100, 100, 0))),
@@ -97,7 +104,9 @@ class TestPygameRenderer(unittest.TestCase):
         renderer.render(frame)
 
         drawn_rects = [entry[2] for entry in pygame.draw.rects[1:]]
-        self.assertEqual([rectangle.center for rectangle in drawn_rects], [(60, 50), (70, 50), (80, 50)])
+        self.assertEqual(
+            [rectangle.center for rectangle in drawn_rects], [(60, 50), (70, 50), (80, 50)]
+        )
 
     def test_contract_frame_supports_headless_dummy_surface(self) -> None:
         pygame = SimpleNamespace(draw=SimpleNamespace(), font=SimpleNamespace(Font=lambda *_: None))

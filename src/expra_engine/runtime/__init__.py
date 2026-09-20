@@ -1,11 +1,21 @@
 """Expra game runtime subsystem."""
 
 from expra_engine.runtime.animator import AnimatorStateMachine
-from expra_engine.runtime.behaviour import Behaviour, BehaviourFactory
+from expra_engine.runtime.behaviour import (
+    HANDLED,
+    PASS,
+    Behaviour,
+    BehaviourContext,
+    BehaviourFactory,
+    ExposedField,
+    exposed,
+)
+from expra_engine.runtime.behaviour_system import BehaviourSystem
 from expra_engine.runtime.clock import RuntimeClock
 from expra_engine.runtime.easing import CubicBezier
 from expra_engine.runtime.event_queue import EventQueue, walk
 from expra_engine.runtime.events import (
+    FrameUpdate,
     Idle,
     Quit,
     ReplaceScene,
@@ -37,6 +47,8 @@ from expra_engine.runtime.rendering import (
 from expra_engine.runtime.rendering import (
     RenderFrame as RenderContractFrame,
 )
+from expra_engine.runtime.script_component import ScriptComponent, UnresolvedScriptComponent
+from expra_engine.runtime.script_registry import ScriptLoadError, ScriptRegistry
 from expra_engine.runtime.sequence import Func, Sequence, Wait
 from expra_engine.runtime.smooth_follow import SmoothFollow
 from expra_engine.runtime.system import RuntimeSystem
@@ -44,12 +56,18 @@ from expra_engine.runtime.trail import TrailPoint, TrailRenderer
 from expra_engine.runtime.tween import Tween
 
 __all__ = [
+    "HANDLED",
+    "PASS",
     "AnimatorStateMachine",
     "Behaviour",
+    "BehaviourContext",
     "BehaviourFactory",
+    "BehaviourSystem",
     "Color",
     "CubicBezier",
     "EventQueue",
+    "ExposedField",
+    "FrameUpdate",
     "Func",
     "Idle",
     "MaterialDescriptor",
@@ -76,6 +94,9 @@ __all__ = [
     "ScenePaused",
     "SceneStarted",
     "SceneStopped",
+    "ScriptComponent",
+    "ScriptLoadError",
+    "ScriptRegistry",
     "Sequence",
     "SmoothFollow",
     "StartScene",
@@ -84,11 +105,13 @@ __all__ = [
     "TrailRenderer",
     "Transform",
     "Tween",
+    "UnresolvedScriptComponent",
     "Update",
     "Viewport",
     "Wait",
     "after",
     "every",
+    "exposed",
     "invoke",
     "walk",
 ]

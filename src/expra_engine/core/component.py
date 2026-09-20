@@ -95,6 +95,17 @@ _COMPONENT_REGISTRY: dict[str, type[Component]] = {
 def component_from_dict(data: dict[str, Any]) -> Component:
     """Deserialize a component from its dict representation."""
     component_type = data.get("type", "")
+    if component_type == "script":
+        from expra_engine.runtime.script_component import (
+            ScriptComponent,
+            UnresolvedScriptComponent,
+        )
+
+        _COMPONENT_REGISTRY[component_type] = ScriptComponent
+        try:
+            return ScriptComponent.from_dict(data)
+        except (TypeError, ValueError, KeyError):
+            return UnresolvedScriptComponent(data)
     cls = _COMPONENT_REGISTRY.get(component_type)
     if cls is None:
         raise ValueError(f"Unknown component type: {component_type!r}")

@@ -110,6 +110,15 @@ class DispatchBehaviour(Behaviour):
         return self.consume_input
 
 
+class EventBehaviour(Behaviour):
+    def __init__(self, log: list[str]) -> None:
+        super().__init__()
+        self.log = log
+
+    def on_player_damaged(self, event: object) -> None:
+        self.log.append("damaged")
+
+
 def dispatch_factory(
     label: str,
     log: list[str],
@@ -181,6 +190,19 @@ class TestRuntimeBehaviour(unittest.TestCase):
 
 
 class TestRuntimeBehaviourDispatch(unittest.TestCase):
+    def test_named_runtime_events_route_to_behaviour_without_second_queue(self) -> None:
+        class PlayerDamaged:
+            pass
+
+        log: list[str] = []
+        scene = Scene("Events")
+        entity = scene.create_entity("Actor")
+        entity.add_behaviour(EventBehaviour(log), runtime_factory=lambda: EventBehaviour(log))
+        engine = _runtime_engine(scene)
+        engine._eq.signal(PlayerDamaged())  # type: ignore[union-attr]
+        engine._eq.drain()  # type: ignore[union-attr]
+        self.assertEqual(log, ["damaged"])
+
     def test_input_dispatches_phases_until_consumed(self) -> None:
         log: list[str] = []
         scene = Scene("Input")

@@ -7,6 +7,7 @@ components. Hierarchy (parent/child) is supported via optional parent_id.
 from __future__ import annotations
 
 import contextlib
+import inspect
 import uuid
 from typing import TYPE_CHECKING, Any, TypeVar
 
@@ -111,16 +112,58 @@ class Entity:
     def on_update(self, event: Update, signal: Any) -> None:
         """Dispatch an update to the currently eligible behaviours."""
         for behaviour in tuple(self._behaviours):
-            if not self.enabled or behaviour.entity is not self or not behaviour.enabled:
+            if (
+                not self.enabled
+                or behaviour.entity is not self
+                or not behaviour.enabled
+                or getattr(behaviour, "_system_owned", False)
+            ):
                 continue
-            behaviour.on_update(event, signal)
+            method = behaviour.on_update
+            try:
+                inspect.signature(method).bind(event, signal)
+            except TypeError:
+                fixed = getattr(behaviour, "on_fixed_update", None)
+                if fixed is not None:
+                    fixed(event.time_delta)
+            else:
+                method(event, signal)
+
+    def on_frame_update(self, event: Any, signal: Any) -> None:
+        """Dispatch a variable frame update to modern behaviours."""
+        for behaviour in tuple(self._behaviours):
+            if (
+                not self.enabled
+                or behaviour.entity is not self
+                or not behaviour.enabled
+                or getattr(behaviour, "_system_owned", False)
+            ):
+                continue
+            method = behaviour.on_update
+            try:
+                inspect.signature(method).bind(event.time_delta)
+            except TypeError:
+                continue
+            method(event.time_delta)
 
     def on_action_event(self, event: ActionEvent, signal: Any) -> bool:
         """Dispatch input until an eligible behaviour consumes it."""
         for behaviour in tuple(self._behaviours):
-            if not self.enabled or behaviour.entity is not self or not behaviour.enabled:
+            if (
+                not self.enabled
+                or behaviour.entity is not self
+                or not behaviour.enabled
+                or getattr(behaviour, "_system_owned", False)
+            ):
                 continue
-            if behaviour.on_input(event, signal):
+            method = behaviour.on_input
+            try:
+                inspect.signature(method).bind(event)
+            except TypeError:
+                handled = method(event, signal)
+            else:
+                handled = method(event)
+            if handled:
                 return True
         return False
 

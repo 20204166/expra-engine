@@ -9,7 +9,7 @@ from pathlib import Path
 
 from .errors import InvalidResourceIdError
 
-_SCHEMES = frozenset({"assets", "engine", "package", "user"})
+_SCHEMES = frozenset({"assets", "engine", "package", "project", "user"})
 _SCHEME_RE = re.compile(r"^[a-z][a-z0-9+.-]*$")
 _DRIVE_RE = re.compile(r"^[a-zA-Z]:([/\\]|$)")
 
@@ -69,7 +69,7 @@ class ResourceId:
         raw_path = str(path).replace("\\", "/")
         if Path(raw_path).is_absolute() or _DRIVE_RE.match(raw_path):
             raise InvalidResourceIdError("from_project_path", logical_id=raw_path)
-        if scheme != "assets":
+        if scheme not in {"assets", "project"}:
             raise InvalidResourceIdError("from_project_path", logical_id=raw_path)
         try:
             return cls(scheme, None, raw_path)

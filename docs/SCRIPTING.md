@@ -1,64 +1,102 @@
-# Runtime Behaviours
+# Expra Gameplay Scripting
 
-`Behaviour` is the small, runtime-only contract for owner-bound gameplay code.
-Subclass it and attach an instance to an `Entity` with an explicit factory:
+Project scripts are trusted developer Python. Scene files, saves, dialogue, and
+exposed values are data and never become executable expressions.
+
+## Public API
 
 ```python
-from expra_engine.runtime import Behaviour
+from expra_engine.core.component import TransformComponent
+from expra_engine.runtime.behaviour import Behaviour, exposed
 
 
 class PlayerBehaviour(Behaviour):
-    def on_update(self, event, signal):
-        pass
+    speed = exposed(160.0, min=0.0, max=500.0)
+    health = exposed(100, min=0, max=100)
 
-
-player.add_behaviour(
-    PlayerBehaviour(),
-    runtime_factory=PlayerBehaviour,
-)
+    def on_update(self, dt: float) -> None:
+        transform = self.require_component(TransformComponent)
+        if self.input.is_held("move_right"):
+            transform.x += self.speed * dt
 ```
 
-The factory must be callable and must return a fresh, unowned `Behaviour`. On
-`Engine.play()`, Expra captures factories before cloning the edit scene through
-JSON, then creates and attaches new behaviour instances to matching runtime
-entities. The edit-scene instances are not run.
+`Behaviour` provides explicit access to its entity, scene, engine, semantic
+`InputMap`, components, and the existing EventQueue through `emit()`. Use
+`get_component`, `has_component`, and `require_component`; arbitrary attribute
+magic is not part of the API.
 
-## Lifecycle
+Scripting is additive. Entities without a `ScriptComponent` continue through
+their existing Expra components and runtime systems. A script can extend a
+default operation, pass through when it has no decision, or explicitly claim a
+customizable operation; only an explicit claim suppresses that operation's
+default path. Scripts never replace the clock, queue, scene ownership,
+physics, resource security, serialization, or renderer ownership. Removing or
+disabling a script restores the documented default/fallback path.
 
-For a runtime behaviour, callbacks occur in this order:
+## Lifecycle and timing
 
-1. `on_attach(entity)` when the behaviour is attached.
-2. `on_start()` when play begins, after runtime systems start and before the
-   initial `SceneStarted` event.
-3. `on_update(event, signal)` and `on_input(event, signal)` during dispatch.
-4. `on_stop()` when play stops, after `SceneStopped` has been delivered.
-5. `on_detach()` after `on_stop()`, before the runtime scene is discarded.
+The canonical owner is one `BehaviourSystem`, not one runtime system per
+script. A serialized `ScriptComponent` is resolved and instantiated when its
+runtime scene starts. `on_start` runs once, `on_update(dt)` runs from the
+variable `FrameUpdate`, `on_fixed_update(dt)` runs from the existing fixed
+`RuntimeClock`, and `on_destroy` runs once before detachment. `on_enabled` and
+`on_disabled` run only for transitions after start.
 
-Behaviours are visited in entity order, then attachment order. Update and input
-dispatch use a snapshot, so removing a behaviour during a callback does not
-skip unrelated behaviours and the removed behaviour is not called later in the
-same dispatch.
+Entity and Behaviour enabled state both filter callbacks. Dispatch uses stable
+snapshots. Mutations during callbacks are deferred by the owning scene/system,
+so adding, removing, disabling, destroying, signalling, or requesting a scene
+change cannot corrupt iteration or deliver stale scene events.
 
-## Input
+Play startup is atomic. If construction or `on_start` fails, already-started
+instances are destroyed, runtime state is torn down, and the edit scene remains
+active. Callback failures retain their cause and include script/resource,
+class, entity, and callback context at the system boundary.
 
-`on_input` receives the existing `ActionEvent`, including both `pressed` and
-`released` phases. Return `True` to consume the event and stop delivery to
-later eligible objects; return `False` to continue propagation. There is no
-second input queue or input loop.
+## Serialized scripts
 
-An entity must be enabled and a behaviour must be enabled for either update or
-input delivery. Disabled entities and behaviours are skipped.
+`ScriptComponent` stores:
 
-## Errors and Boundaries
+- `project://scripts/player.py` ResourceId
+- Behaviour class name
+- enabled state
+- deterministic component order
+- JSON-compatible exposed values
 
-Behaviour setup is fail-fast. Invalid or missing factories, factory failures,
-non-`Behaviour` results, missing runtime entities, and reused instances raise
-errors during `play()` before the engine leaves `EDIT`. Exceptions raised by
-behaviour callbacks propagate unchanged.
+It never stores live instances, modules, callbacks, services, closures, or
+timeline handles. Unknown exposed values are retained in scene data but ignored
+by a newer class, so adding a default field is non-destructive. Incompatible
+values fail validation rather than being silently coerced.
 
-Behaviours and their factories are runtime-only. They are not included in
-`Entity.to_dict()`, scene JSON, or serialized component data. This slice does
-not execute source code, load script files, discover scripts from serialized
-data, or provide hot reload. Use normal Python imports and explicit factories
-in the host application; safe serialization or reload would require a separate
-contract.
+`ScriptRegistry` accepts only normalized `project://scripts/*.py` resources
+inside the project root. It uses Python import machinery and validates the
+requested class is a `Behaviour`. Absolute paths, traversal, symlink escapes,
+arbitrary module names, `eval`, and serialized `exec` are rejected.
+
+## Input, events, and existing runtime services
+
+Scripts consume semantic actions such as `move_right`, not platform key names.
+Input callbacks may return `PASS` to continue or `HANDLED`/`True` to consume
+propagation. `emit()` delegates to
+the existing FIFO `EventQueue`; Expra does not add a signal bus. Timelines,
+tweens, sequences, repeaters, physics events, and the RuntimeClock remain
+owned by their existing runtime services and must be cancelled or detached when
+their Behaviour/entity/scene is destroyed.
+
+## Editor and export
+
+Exposed fields are metadata, not Tk widgets. The generic Inspector renders
+stored script values and routes edits through stable-ID `CommandStack` commands,
+so undo/redo is safe across selection changes and deleted entities. Script
+creation and attachment use declarative editor tools and never overwrite files.
+
+Project script files are included by the existing source/bytecode exporter. The
+packaged runtime contains gameplay runtime modules only; editor, coordinator,
+Tk, and delivery-queue modules are not runtime dependencies.
+
+## Reload
+
+Reload stages import and class validation before replacing live instances.
+Compatible exposed values are transferred; private runtime state is not.
+Syntax, import, class, dependency, stale-generation, and destroyed-entity
+failures leave the last known-good instance active. The Ursina text-rewrite and
+`exec` hot-reload design is intentionally not used.
