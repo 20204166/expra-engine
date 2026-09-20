@@ -55,9 +55,13 @@ class _FakePygame:
 class _FakeEngine:
     def __init__(self) -> None:
         self.dts: list[float] = []
+        self.run_state = SimpleNamespace(value="play")
+        self.stop_after_tick = False
 
     def tick(self, dt: float) -> None:
         self.dts.append(dt)
+        if self.stop_after_tick:
+            self.run_state.value = "edit"
 
 
 class _RecordingRenderer:
@@ -86,6 +90,21 @@ class _FailingStopRenderer(_RecordingRenderer):
 
 
 class TestPygameRuntime(unittest.TestCase):
+    def test_runtime_stops_when_engine_returns_to_edit(self) -> None:
+        pygame = _FakePygame([[], []])
+        engine = _FakeEngine()
+        engine.stop_after_tick = True
+        runtime = PygameRuntime(
+            engine,
+            pygame_module=pygame,
+            clock=_FakeClock([16]),
+            surface_factory=pygame.display.set_mode,
+        )
+
+        runtime.run()
+
+        self.assertEqual(pygame.quit_calls, 1)
+
     def test_starts_renderer_renders_contract_frames_and_stops_in_order(self) -> None:
         pygame = _FakePygame([[], [SimpleNamespace(type=_FakePygame.QUIT)]])
         renderer = _RecordingRenderer()

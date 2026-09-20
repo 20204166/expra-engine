@@ -89,6 +89,8 @@ class PygameRuntime:
             while self._running:
                 self._poll_events()
                 self.engine.tick(dt)
+                if getattr(getattr(self.engine, "run_state", None), "value", None) == "edit":
+                    self.stop()
                 if self.renderer is not None:
                     frame = (
                         self.frame_factory(self.engine, dt)
