@@ -72,6 +72,8 @@ class EditorWindow:
         self._is_closing = False
         self._pending_timer_ids: set[str] = set()
         self._sash_after_id: str | None = None
+        self._autosave_after_id: str | None = None
+        self._last_save_path: Path | None = None
         self._preferences_path = _PREFERENCES_PATH
         self._preferences_store = PreferencesStore()
         self._preferences = self._preferences_store.load(self._preferences_path)
@@ -115,6 +117,7 @@ class EditorWindow:
         self._register_actions()
         self._build_layout()
         self._create_default_scene()
+        self._start_autosave()
 
     # ------------------------------------------------------------------
     # Layout
@@ -245,6 +248,9 @@ class EditorWindow:
             command=lambda: self._actions.dispatch("save_scene"),
             accelerator="",
         )
+        self._recent_menu = tk.Menu(file_menu, tearoff=0)
+        file_menu.add_cascade(label="Open Recent", menu=self._recent_menu)
+        self._populate_recent_projects()
         file_menu.add_separator()
         file_menu.add_command(
             label="Export Game...", command=lambda: self._actions.dispatch("editor.export_game")
@@ -350,8 +356,48 @@ class EditorWindow:
         )
         if not path:
             return
-        Path(path).write_text(json.dumps(scene.to_dict(), indent=2), encoding="utf-8")
+        self._last_save_path = Path(path)
+        self._act_save_scene_silent()
         self._console.log(f"[Editor] Scene saved: {path}")
+
+    def _act_save_scene_silent(self) -> None:
+        """Save to the last selected path without opening a dialog."""
+        if self._last_save_path is None:
+            return
+        scene = self._engine.edit_scene
+        if scene is None:
+            return
+        self._last_save_path.write_text(json.dumps(scene.to_dict(), indent=2), encoding="utf-8")
+
+    def _start_autosave(self) -> None:
+        """Schedule recurring silent saves using the configured preference."""
+        interval_ms = max(1, int(self._preferences.autosave_interval_ms))
+
+        def autosave() -> None:
+            self._autosave_after_id = None
+            self._act_save_scene_silent()
+            if not self._is_closing:
+                self._autosave_after_id = self._root.after(interval_ms, autosave)
+
+        if self._autosave_after_id is not None:
+            with contextlib.suppress(tk.TclError):
+                self._root.after_cancel(self._autosave_after_id)
+        self._autosave_after_id = self._root.after(interval_ms, autosave)
+
+    def _populate_recent_projects(self) -> None:
+        self._recent_menu.delete(0, "end")
+        recent_projects = tuple(self._preferences.recent_projects)
+        if not recent_projects:
+            self._recent_menu.add_command(label="(none)", state="disabled")
+            return
+        for project in recent_projects:
+            self._recent_menu.add_command(
+                label=project,
+                command=lambda path=project: self._act_open_recent(path),
+            )
+
+    def _act_open_recent(self, project: str) -> None:
+        self._console.log(f"[Editor] Recent project selected: {project}")
 
     def _act_add_entity(self) -> None:
         if self._engine.run_state != EngineRunState.EDIT:
@@ -577,6 +623,10 @@ class EditorWindow:
 
     def _on_close(self) -> None:
         self._is_closing = True
+        if self._autosave_after_id is not None:
+            with contextlib.suppress(tk.TclError):
+                self._root.after_cancel(self._autosave_after_id)
+            self._autosave_after_id = None
         geometry = WindowGeometry.from_tk_geometry(self._root.geometry())
         if geometry is not None:
             self._preferences = replace(
