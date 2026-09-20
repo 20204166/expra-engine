@@ -173,7 +173,9 @@ class SelectionGroup:
             raise ValueError("selection constraints are invalid")
         if self.mode == "radio" and maximum > 1:
             raise ValueError("radio groups can select at most one member")
-        if len(set(self.selected)) != len(self.selected) or not set(self.selected) <= set(self.members):
+        if len(set(self.selected)) != len(self.selected) or not set(self.selected) <= set(
+            self.members
+        ):
             raise ValueError("selected members must be unique members")
         if not len(self.selected) >= self.minimum or len(self.selected) > maximum:
             raise ValueError("initial selection violates selection constraints")

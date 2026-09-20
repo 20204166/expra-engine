@@ -119,6 +119,7 @@ class TestEngineUpdate(unittest.TestCase):
         engine.set_scene(Scene("Test"))
         engine.play()
         import time
+
         time.sleep(0.01)
         dt = engine.update()
         self.assertGreater(dt, 0.0)
@@ -136,6 +137,7 @@ class TestEngineProject(unittest.TestCase):
         from pathlib import Path
 
         from expra_engine.core.project import Project
+
         engine = Engine()
         project = Project("Test Project", Path("/tmp/test_project"))
         engine.set_project(project)

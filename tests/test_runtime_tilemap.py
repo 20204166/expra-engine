@@ -96,3 +96,68 @@ class TestTileMapGeneration(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TileMapEdgeTests(unittest.TestCase):
+    def test_empty_layer_produces_no_tile_data(self) -> None:
+        from expra_engine.runtime.tilemap import TileMap
+
+        m = TileMap(5, 5, {"ground": []})
+        result = m.generate("ground")
+        self.assertEqual(result, ())
+
+    def test_single_tile_isolated_has_zero_neighbor_mask(self) -> None:
+        from expra_engine.runtime.tilemap import TileCoordinate, TileMap
+
+        m = TileMap(5, 5, {"ground": [(2, 2)]})
+        self.assertEqual(m.neighbor_mask("ground", TileCoordinate(2, 2)), 0)
+
+    def test_fully_surrounded_tile_has_full_mask(self) -> None:
+        from expra_engine.runtime.tilemap import TileCoordinate, TileMap
+
+        coords = [(x, y) for x in range(3) for y in range(3)]
+        m = TileMap(3, 3, {"g": coords})
+        mask = m.neighbor_mask("g", TileCoordinate(1, 1))
+        self.assertEqual(mask, 0xFF)
+
+    def test_map_boundary_does_not_count_as_neighbor(self) -> None:
+        from expra_engine.runtime.tilemap import TileCoordinate, TileMap
+
+        m = TileMap(3, 3, {"g": [(0, 0), (1, 0), (0, 1)]})
+        # Corner tile (0,0): neighbors outside bounds are not counted
+        mask = m.neighbor_mask("g", TileCoordinate(0, 0))
+        # Only (1,0) and (0,1) can be neighbors; (-1,-1) etc. are out of bounds
+        self.assertLess(bin(mask).count("1"), 8)
+
+    def test_generate_is_deterministic_with_same_seed(self) -> None:
+        from expra_engine.runtime.tilemap import TileMap
+
+        coords = [(x, y) for x in range(3) for y in range(3)]
+        m = TileMap(5, 5, {"g": coords})
+        r1 = m.generate("g", seed=42, variation_count=4)
+        r2 = m.generate("g", seed=42, variation_count=4)
+        self.assertEqual([t.variation for t in r1], [t.variation for t in r2])
+
+    def test_different_seeds_produce_different_variations(self) -> None:
+        from expra_engine.runtime.tilemap import TileMap
+
+        coords = [(x, y) for x in range(4) for y in range(4)]
+        m = TileMap(5, 5, {"g": coords})
+        r1 = m.generate("g", seed=1, variation_count=100)
+        r2 = m.generate("g", seed=2, variation_count=100)
+        variations_differ = any(a.variation != b.variation for a, b in zip(r1, r2, strict=False))
+        self.assertTrue(variations_differ)
+
+    def test_negative_variation_count_rejected(self) -> None:
+        from expra_engine.runtime.tilemap import TileMap
+
+        m = TileMap(3, 3, {"g": [(0, 0)]})
+        with self.assertRaises(ValueError):
+            m.generate("g", variation_count=0)
+
+    def test_out_of_bounds_neighbor_mask_raises(self) -> None:
+        from expra_engine.runtime.tilemap import TileCoordinate, TileMap
+
+        m = TileMap(3, 3, {"g": [(1, 1)]})
+        with self.assertRaises(ValueError):
+            m.neighbor_mask("g", TileCoordinate(5, 5))

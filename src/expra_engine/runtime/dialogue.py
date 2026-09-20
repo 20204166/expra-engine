@@ -204,7 +204,11 @@ def parse_dialogue(source: str) -> DialogueGraph:
             parent = nodes[parent_id]
             choice = DialogueChoice(text, node_id, condition, action)
             nodes[parent_id] = DialogueNode(
-                parent.node_id, parent.pages, (*parent.choices, choice), parent.condition, parent.action
+                parent.node_id,
+                parent.pages,
+                (*parent.choices, choice),
+                parent.condition,
+                parent.action,
             )
         if len(parents) > level:
             parents[level] = node_id
@@ -214,7 +218,9 @@ def parse_dialogue(source: str) -> DialogueGraph:
     return DialogueGraph(nodes, "node-0")
 
 
-def _parse_line(text: str, line_number: int) -> tuple[str, DialogueCondition | None, DialogueAction | None]:
+def _parse_line(
+    text: str, line_number: int
+) -> tuple[str, DialogueCondition | None, DialogueAction | None]:
     condition = None
     action = None
     if text.endswith(")") and " (" in text:

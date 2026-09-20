@@ -60,7 +60,6 @@ class Entity:
     def get_components(self, cls: type[C]) -> list[C]:
         return [c for c in self._components if isinstance(c, cls)]
 
-
     @property
     def tags(self) -> frozenset[str]:
         """The set of tags on this entity (immutable view)."""

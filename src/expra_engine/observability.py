@@ -159,11 +159,7 @@ class ObservabilityWatcher:
         duration_seconds: float | None = None,
         detail: str | None = None,
     ) -> None:
-        duration = (
-            self._clock() - token.started
-            if duration_seconds is None
-            else duration_seconds
-        )
+        duration = self._clock() - token.started if duration_seconds is None else duration_seconds
         with self._lock:
             if token.identifier not in self._active_tokens:
                 raise ValueError("observation token was already finished")
@@ -211,9 +207,7 @@ class ObservabilityWatcher:
 
     def event_count(self, target: str, event: str) -> int:
         with self._lock:
-            return self._metrics.get(target, _Metric(deque(maxlen=1))).events.get(
-                event, 0
-            )
+            return self._metrics.get(target, _Metric(deque(maxlen=1))).events.get(event, 0)
 
     def event_total(self, prefix: str, event: str) -> int:
         with self._lock:
@@ -244,9 +238,7 @@ class ObservabilityWatcher:
             self._session_started_at = self._wall_clock()
 
     def _metric(self, target: str) -> _Metric:
-        return self._metrics.setdefault(
-            target, _Metric(deque(maxlen=self._sample_limit))
-        )
+        return self._metrics.setdefault(target, _Metric(deque(maxlen=self._sample_limit)))
 
     @staticmethod
     def _validate_target(target: str) -> None:

@@ -10,7 +10,9 @@ from expra_engine.coordinators.refresh_scheduler import ComponentRefreshSchedule
 from tests.support.scheduling import FakeClock
 
 
-def make_scheduler(intervals: dict[str, int] | None = None) -> tuple[ComponentRefreshScheduler, FakeClock]:
+def make_scheduler(
+    intervals: dict[str, int] | None = None,
+) -> tuple[ComponentRefreshScheduler, FakeClock]:
     clock = FakeClock(0.0)
     sched = ComponentRefreshScheduler(
         intervals or {"hierarchy": 1000, "inspector": 500},

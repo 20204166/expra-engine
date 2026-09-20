@@ -105,9 +105,7 @@ class ComponentRefreshScheduler:
     def record_error(self, key: str, category: str, detail: str) -> None:
         self._entry(key).last_error = (category, detail[:160])
 
-    def diagnostic_state(
-        self, key: str
-    ) -> tuple[bool, bool, float | None, tuple[str, str] | None]:
+    def diagnostic_state(self, key: str) -> tuple[bool, bool, float | None, tuple[str, str] | None]:
         entry = self._entry(key)
         return entry.in_flight, entry.paused, entry.last_success, entry.last_error
 
@@ -122,9 +120,7 @@ class ComponentRefreshScheduler:
             entry.refresh_requested = False
 
     def due_keys(self, now: float) -> tuple[str, ...]:
-        return tuple(
-            key for key, entry in self._records.items() if self._is_due(entry, now)
-        )
+        return tuple(key for key, entry in self._records.items() if self._is_due(entry, now))
 
     def collect_due(self, now: float | None = None) -> tuple[str, ...]:
         resolved_now = self._clock() if now is None else now
@@ -143,10 +139,7 @@ class ComponentRefreshScheduler:
         return self._entry(key).in_flight
 
     def has_pending_work(self) -> bool:
-        return any(
-            entry.in_flight or entry.refresh_requested
-            for entry in self._records.values()
-        )
+        return any(entry.in_flight or entry.refresh_requested for entry in self._records.values())
 
     def set_interval(self, key: str, milliseconds: int, now: float) -> None:
         entry = self._configured_entry(key)

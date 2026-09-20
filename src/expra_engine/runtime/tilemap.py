@@ -77,7 +77,9 @@ class TileMap:
                 mask |= 1 << bit
         return mask
 
-    def generate(self, layer: str, *, seed: int = 0, variation_count: int = 1) -> tuple[TileData, ...]:
+    def generate(
+        self, layer: str, *, seed: int = 0, variation_count: int = 1
+    ) -> tuple[TileData, ...]:
         """Generate stable tile data using a local random stream."""
         if variation_count <= 0:
             raise ValueError("variation_count must be positive")

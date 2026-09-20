@@ -14,7 +14,9 @@ from expra_engine.ui_model.controls import (
 
 
 class TestButton(unittest.TestCase):
-    def test_visual_state_transitions_cover_normal_hover_pressed_disabled_and_selected(self) -> None:
+    def test_visual_state_transitions_cover_normal_hover_pressed_disabled_and_selected(
+        self,
+    ) -> None:
         button = Button()
         self.assertEqual(button.visual_state, ButtonVisualState.NORMAL)
         button.update(hovered=True)
@@ -28,7 +30,9 @@ class TestButton(unittest.TestCase):
 
     def test_button_update_returns_explicit_change_record(self) -> None:
         change = Button().update(hovered=True)
-        self.assertEqual((change.old, change.new), (ButtonVisualState.NORMAL, ButtonVisualState.HOVER))
+        self.assertEqual(
+            (change.old, change.new), (ButtonVisualState.NORMAL, ButtonVisualState.HOVER)
+        )
 
 
 class TestToggle(unittest.TestCase):
@@ -116,6 +120,96 @@ class TestProgress(unittest.TestCase):
             Progress(10.0, 0.0)
         with self.assertRaises(ValueError):
             Progress(0.0, 10.0, segments=(ProgressSegment("bad", 8.0, 2.0),))
+
+
+class ButtonEdgeTests(unittest.TestCase):
+    """Regressions: press → pointer-leaves → release and disabled-while-pressed."""
+
+    def test_press_leave_release_does_not_stay_pressed(self) -> None:
+        btn = Button()
+        btn.update(pressed=True)
+        btn.update(hovered=False)  # pointer left
+        btn.update(pressed=False)
+        self.assertEqual(btn.visual_state, ButtonVisualState.NORMAL)
+
+    def test_disabled_while_pressed_shows_disabled(self) -> None:
+        btn = Button()
+        btn.update(pressed=True)
+        btn.update(enabled=False)
+        self.assertEqual(btn.visual_state, ButtonVisualState.DISABLED)
+
+    def test_disabled_hover_does_not_show_hover(self) -> None:
+        btn = Button(enabled=False)
+        btn.update(hovered=True)
+        self.assertEqual(btn.visual_state, ButtonVisualState.DISABLED)
+
+    def test_state_change_reports_old_and_new(self) -> None:
+        btn = Button()
+        change = btn.update(hovered=True)
+        self.assertEqual(change.old, ButtonVisualState.NORMAL)
+        self.assertEqual(change.new, ButtonVisualState.HOVER)
+
+    def test_no_change_change_is_false(self) -> None:
+        btn = Button()
+        change = btn.update()
+        self.assertFalse(change.changed)
+
+
+class ToggleEdgeTests(unittest.TestCase):
+    def test_disabled_toggle_cannot_mutate(self) -> None:
+        t = Toggle(value=False, enabled=False)
+        result = t.toggle()
+        self.assertFalse(t.value)
+        self.assertFalse(result.changed)
+
+    def test_repeated_toggle(self) -> None:
+        t = Toggle(value=False)
+        values = [t.toggle().new for _ in range(4)]
+        self.assertEqual(values, [True, False, True, False])
+
+    def test_programmatic_value_change(self) -> None:
+        t = Toggle(value=False)
+        t.value = True
+        self.assertTrue(t.value)
+
+
+class SliderEdgeTests(unittest.TestCase):
+    def test_min_equals_max(self) -> None:
+        s = Slider(minimum=5.0, maximum=5.0)
+        self.assertEqual(s.value, 5.0)
+
+    def test_value_outside_bounds_is_clamped(self) -> None:
+        s = Slider(minimum=0.0, maximum=10.0)
+        s.live_change(20.0)
+        self.assertEqual(s.value, 10.0)
+        s.live_change(-5.0)
+        self.assertEqual(s.value, 0.0)
+
+    def test_fractional_step(self) -> None:
+        s = Slider(minimum=0.0, maximum=1.0, step=0.1, default=0.0)
+        s.live_change(0.26)
+        # 0.26 / 0.1 = 2.6 → rounds to 3 → 0.3
+        self.assertAlmostEqual(s.value, 0.3, places=5)
+
+    def test_negative_range(self) -> None:
+        s = Slider(minimum=-10.0, maximum=-1.0, default=-5.0)
+        s.live_change(-3.0)
+        self.assertAlmostEqual(s.value, -3.0)
+
+    def test_commit_fires_exactly_once_separate_from_live(self) -> None:
+        s = Slider(minimum=0.0, maximum=10.0, default=0.0)
+        s.live_change(5.0)
+        self.assertNotEqual(s.value, s.committed_value)
+        s.commit(5.0)
+        self.assertEqual(s.value, s.committed_value)
+
+    def test_release_callback_separate_from_live(self) -> None:
+        s = Slider(minimum=0.0, maximum=10.0, default=0.0)
+        live_calls = []
+        s.live_change(3.0)
+        live_calls.append(s.value)
+        committed = s.commit(7.0)
+        self.assertEqual(committed.new, 7.0)
 
 
 if __name__ == "__main__":

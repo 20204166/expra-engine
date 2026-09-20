@@ -13,8 +13,8 @@ class TestExponentialFollow(unittest.TestCase):
 
         updated = exponential_follow(current, target, delta=0.5, speed=2.0)
 
-        self.assertAlmostEqual(updated[0], 10.0 * (1.0 - 2.718281828459045 ** -1.0))
-        self.assertAlmostEqual(updated[1], -4.0 * (1.0 - 2.718281828459045 ** -1.0))
+        self.assertAlmostEqual(updated[0], 10.0 * (1.0 - 2.718281828459045**-1.0))
+        self.assertAlmostEqual(updated[1], -4.0 * (1.0 - 2.718281828459045**-1.0))
 
     def test_zero_speed_and_zero_delta_preserve_position(self) -> None:
         self.assertEqual(exponential_follow((2.0, 3.0), (9.0, 9.0), 1.0, 0.0), (2.0, 3.0))

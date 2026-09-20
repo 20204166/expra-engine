@@ -38,10 +38,13 @@ class SafeExpressionTests(unittest.TestCase):
             evaluate("1" + "+1" * 100)
 
     def test_rejects_unbounded_exponentiation_before_computing_it(self) -> None:
-        with patch.dict(
-            core_safe_expression._BINARY_OPERATORS,
-            {ast.Pow: Mock(side_effect=AssertionError)},
-        ), self.assertRaises(ExpressionError):
+        with (
+            patch.dict(
+                core_safe_expression._BINARY_OPERATORS,
+                {ast.Pow: Mock(side_effect=AssertionError)},
+            ),
+            self.assertRaises(ExpressionError),
+        ):
             evaluate("10**1000000")
 
 

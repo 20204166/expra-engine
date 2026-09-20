@@ -28,13 +28,17 @@ class TestAppCoordinatorCoalescing(unittest.TestCase):
         results: list[Any] = []
         runner = DeferredRunner()
         coord = AppCoordinator(runner=runner)
-        coord.run("op", lambda _cancel, _progress: "first",
-                  on_result=lambda _k, v: results.append(v))
-        coord.run("op", lambda _cancel, _progress: "second",
-                  on_result=lambda _k, v: results.append(v))
+        coord.run(
+            "op", lambda _cancel, _progress: "first", on_result=lambda _k, v: results.append(v)
+        )
+        coord.run(
+            "op", lambda _cancel, _progress: "second", on_result=lambda _k, v: results.append(v)
+        )
         self.assertEqual(len(runner.workers), 1, "coalesced trigger must not start a second worker")
         runner.run_next()
-        self.assertEqual(len(runner.workers), 1, "coalesced trigger must replay after first completes")
+        self.assertEqual(
+            len(runner.workers), 1, "coalesced trigger must replay after first completes"
+        )
         runner.run_next()
         self.assertEqual(results, ["first", "second"])
         self.assertEqual(coord.last_result("op"), "second")
@@ -165,8 +169,7 @@ class TestAppCoordinatorCancellation(unittest.TestCase):
         delivery = RecordingDelivery()
         results: list[Any] = []
         coord = AppCoordinator(runner=FakeRunner(), deliver=delivery)
-        coord.run("op", lambda _c, _p: "result",
-                  on_result=lambda k, v: results.append(v))
+        coord.run("op", lambda _c, _p: "result", on_result=lambda k, v: results.append(v))
         coord.cancel("op")
         delivery.flush()
         # cancelled run's result should not appear

@@ -200,8 +200,9 @@ class EditorWindow:
             if max_first < _HIERARCHY_MIN_WIDTH:
                 return
             first = min(max(_HIERARCHY_MIN_WIDTH, self._content_paned.sashpos(0)), max_first)
-            second = min(max(first + 260, self._content_paned.sashpos(1)),
-                         width - _INSPECTOR_MIN_WIDTH)
+            second = min(
+                max(first + 260, self._content_paned.sashpos(1)), width - _INSPECTOR_MIN_WIDTH
+            )
             self._content_paned.sashpos(0, first)
             self._content_paned.sashpos(1, second)
         except tk.TclError:
@@ -402,7 +403,9 @@ class EditorWindow:
         self._actions.set_enabled("pause", state == EngineRunState.PLAY)
         self._actions.set_enabled("stop", state != EngineRunState.EDIT)
         self._actions.set_enabled("add_entity", state == EngineRunState.EDIT)
-        self._actions.set_enabled("delete_entity", state == EngineRunState.EDIT and self._selected_id is not None)
+        self._actions.set_enabled(
+            "delete_entity", state == EngineRunState.EDIT and self._selected_id is not None
+        )
 
     # ------------------------------------------------------------------
     # Default scene

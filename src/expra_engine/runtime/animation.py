@@ -54,12 +54,7 @@ class SpriteSheet:
     rows: int
 
     def __post_init__(self) -> None:
-        if (
-            self.tile_width <= 0
-            or self.tile_height <= 0
-            or self.columns <= 0
-            or self.rows <= 0
-        ):
+        if self.tile_width <= 0 or self.tile_height <= 0 or self.columns <= 0 or self.rows <= 0:
             raise ValueError("sprite-sheet dimensions must be positive")
 
     def region(self, column: int, row: int) -> SpriteRegion:

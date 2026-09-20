@@ -46,13 +46,77 @@ class Scene:
         """Register an already-constructed entity."""
         self._entities.append(entity)
 
-    def remove_entity(self, entity_id: str) -> bool:
-        """Remove entity by ID. Returns True if found and removed."""
+    def remove_entity(self, entity_id: str, *, recursive: bool = False) -> bool:
+        """Remove entity by ID. Returns True if found and removed.
+
+        When *recursive* is True all descendant entities are removed first
+        (depth-first), so no dangling parent_id references remain.
+        """
+        if recursive:
+            subtree = self.walk_hierarchy(entity_id)
+            if not subtree:
+                return False
+            ids_to_remove = {e.entity_id for e in subtree}
+            self._entities = [e for e in self._entities if e.entity_id not in ids_to_remove]
+            return True
         for i, entity in enumerate(self._entities):
             if entity.entity_id == entity_id:
                 self._entities.pop(i)
                 return True
         return False
+
+    def clone_entity(self, entity_id: str, *, recursive: bool = True) -> Entity | None:
+        """Clone an entity (and optionally its descendants) into this scene.
+
+        All cloned entities receive new UUIDs.  Source entities are never
+        mutated.  Parent-child relationships within the cloned subtree are
+        remapped to the new IDs; children of the cloned root are re-parented
+        to the new root ID.
+
+        Returns the new root entity, or None when *entity_id* is not found.
+        """
+        import copy as _copy
+
+        root = self.find_entity(entity_id)
+        if root is None:
+            return None
+
+        if not recursive:
+            new_root = Entity(
+                root.name,
+                enabled=root.enabled,
+                parent_id=root.parent_id,
+            )
+            for comp in root.components:
+                new_root.add_component(_copy.deepcopy(comp))
+            for tag in root.tags:
+                new_root.add_tag(tag)
+            self.add_entity(new_root)
+            return new_root
+
+        subtree = self.walk_hierarchy(entity_id)
+        id_map: dict[str, str] = {}
+        for original in subtree:
+            id_map[original.entity_id] = str(uuid.uuid4())
+
+        for original in subtree:
+            new_id = id_map[original.entity_id]
+            new_parent_id = (
+                id_map.get(original.parent_id) if original.parent_id else original.parent_id
+            )
+            cloned = Entity(
+                original.name,
+                entity_id=new_id,
+                enabled=original.enabled,
+                parent_id=new_parent_id,
+            )
+            for comp in original.components:
+                cloned.add_component(_copy.deepcopy(comp))
+            for tag in original.tags:
+                cloned.add_tag(tag)
+            self.add_entity(cloned)
+
+        return self.find_entity(id_map[entity_id])
 
     def find_entity(self, entity_id: str) -> Entity | None:
         """Return entity by ID, or None."""
@@ -176,7 +240,9 @@ class Scene:
         """Return all entities that have at least one component of type ``cls``."""
         return tuple(e for e in self._entities if e.get_component(cls) is not None)
 
-    def get_entities(self, *, tag: str | None = None, component: type | None = None) -> tuple[Entity, ...]:
+    def get_entities(
+        self, *, tag: str | None = None, component: type | None = None
+    ) -> tuple[Entity, ...]:
         """Flexible query combining tag and/or component filter.
 
         Analogous to PPB Children.get(kind=..., tag=...) but using Expra's
@@ -185,7 +251,9 @@ class Scene:
         Passing neither ``tag`` nor ``component`` raises TypeError.
         """
         if tag is None and component is None:
-            raise TypeError("get_entities() requires at least 'tag' or 'component' keyword argument")
+            raise TypeError(
+                "get_entities() requires at least 'tag' or 'component' keyword argument"
+            )
         candidates: set[Entity] | None = None
         if tag is not None:
             candidates = {e for e in self._entities if e.has_tag(tag)}

@@ -17,7 +17,9 @@ from expra_engine.runtime.dialogue import (
 class RuntimeDialogueTests(unittest.TestCase):
     def test_runtime_dialogue_does_not_import_editor_modules(self) -> None:
         for module_name in tuple(sys.modules):
-            if module_name == "expra_engine.editor" or module_name.startswith("expra_engine.editor."):
+            if module_name == "expra_engine.editor" or module_name.startswith(
+                "expra_engine.editor."
+            ):
                 del sys.modules[module_name]
         sys.modules.pop("expra_engine.runtime.dialogue", None)
 
@@ -37,14 +39,16 @@ class RuntimeDialogueTests(unittest.TestCase):
         self.assertEqual(editor_safe_expression.evaluate("2 + 2"), 4)
 
     def test_parses_typed_nodes_choices_conditions_and_actions(self) -> None:
-        graph = parse_dialogue(dedent(
-            """
+        graph = parse_dialogue(
+            dedent(
+                """
             Welcome
                 * Open the door (if has_key)
                     The door opens. (gold += 2)
                 * Leave (gold -= 1)
             """
-        ))
+            )
+        )
 
         root = graph.start
         self.assertEqual(root.pages, ("Welcome",))

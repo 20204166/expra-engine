@@ -72,9 +72,7 @@ class Project:
         self.path.mkdir(parents=True, exist_ok=True)
         self.scenes_dir.mkdir(exist_ok=True)
         self.assets_dir.mkdir(exist_ok=True)
-        self.project_file.write_text(
-            json.dumps(self.to_dict(), indent=2), encoding="utf-8"
-        )
+        self.project_file.write_text(json.dumps(self.to_dict(), indent=2), encoding="utf-8")
 
     @classmethod
     def load(cls, path: Path) -> Project:

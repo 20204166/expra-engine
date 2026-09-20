@@ -8,9 +8,12 @@ __all__ = (
     "ActionEvent",
     "ActionId",
     "Binding",
+    "GamepadAxis",
     "InputMap",
     "PhysicalInput",
 )
+
+from math import isfinite as _isfinite
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,6 +125,38 @@ class InputMap:
             ),
         )
         self._held.clear()
-        return tuple(
-            ActionEvent(binding.action, "released", binding.physical) for binding in held
-        )
+        return tuple(ActionEvent(binding.action, "released", binding.physical) for binding in held)
+
+
+@dataclass(frozen=True, slots=True)
+class GamepadAxis:
+    """A single gamepad stick axis with configurable deadzone.
+
+    ``value`` is the raw hardware value in [-1, 1].
+    ``apply_deadzone()`` returns 0.0 when the value is inside the deadzone
+    and rescales the remainder to the full [-1, 1] range (linear rescale
+    deadzone, not simple zero-out).
+
+    ``deadzone`` must be in [0, 1).  A deadzone of 0.0 never suppresses.
+    """
+
+    value: float
+    deadzone: float = 0.1
+
+    def __post_init__(self) -> None:
+        v = float(self.value)
+        d = float(self.deadzone)
+        if not _isfinite(v) or not -1.0 <= v <= 1.0:
+            raise ValueError(f"axis value must be in [-1, 1], got {v!r}")
+        if not _isfinite(d) or not 0.0 <= d < 1.0:
+            raise ValueError(f"deadzone must be in [0, 1), got {d!r}")
+        object.__setattr__(self, "value", v)
+        object.__setattr__(self, "deadzone", d)
+
+    def apply_deadzone(self) -> float:
+        """Return value after deadzone application, rescaled to [-1, 1]."""
+        magnitude = abs(self.value)
+        if magnitude <= self.deadzone:
+            return 0.0
+        sign = 1.0 if self.value >= 0.0 else -1.0
+        return sign * (magnitude - self.deadzone) / (1.0 - self.deadzone)

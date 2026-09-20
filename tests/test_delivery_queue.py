@@ -135,6 +135,7 @@ class TkDeliveryQueueTests(unittest.TestCase):
         def enqueue() -> None:
             try:
                 for i in range(50):
+
                     def callback(i: int = i) -> None:
                         results.append(i)
 

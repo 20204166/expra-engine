@@ -99,7 +99,9 @@ def normalize_entries(
         for entry in entries
         if entry.is_folder or not needle or needle in entry.name.casefold()
     )
-    return tuple(sorted(visible, key=lambda entry: (not entry.is_folder, entry.name.casefold(), entry.name)))
+    return tuple(
+        sorted(visible, key=lambda entry: (not entry.is_folder, entry.name.casefold(), entry.name))
+    )
 
 
 def scan_directory(

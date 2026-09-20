@@ -144,9 +144,7 @@ class UICoordinator:
         current = self._generations.get(target, 0)
         previous_owner = self._target_nodes.get(target)
         owner_changed = (
-            owner_id is not None
-            and previous_owner is not None
-            and previous_owner != owner_id
+            owner_id is not None and previous_owner is not None and previous_owner != owner_id
         )
         next_generation = (
             generation
@@ -190,9 +188,7 @@ class UICoordinator:
             transition.cancel()
         self._transitions.clear()
 
-    def schedule_transition(
-        self, name: str, delay: int, apply: Callable[[], None]
-    ) -> None:
+    def schedule_transition(self, name: str, delay: int, apply: Callable[[], None]) -> None:
         if name not in self._transitions:
             self._transitions[name] = PendingTransition(self._schedule, self._cancel)
         self._transitions[name].start(delay, apply)
@@ -247,11 +243,7 @@ class UICoordinator:
         self._record_event(intent.target, "request")
         self.pending_peak = max(self.pending_peak, len(self._pending))
 
-        if (
-            self._batch_depth == 0
-            and not self._flushing
-            and self._visible.get(intent.target, True)
-        ):
+        if self._batch_depth == 0 and not self._flushing and self._visible.get(intent.target, True):
             self._apply_target(intent.target)
         return True
 
@@ -304,11 +296,7 @@ class UICoordinator:
             return False
 
         del self._pending[target]
-        token = (
-            self._observer.begin(f"ui:render:{target}")
-            if self._observer is not None
-            else None
-        )
+        token = self._observer.begin(f"ui:render:{target}") if self._observer is not None else None
         started = time.perf_counter()
         outcome: Outcome = "success"
         detail: str | None = None

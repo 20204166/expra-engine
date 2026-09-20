@@ -1,0 +1,222 @@
+"""Tests for GameExporter with a mock packager (no network, no real Python download)."""
+
+from __future__ import annotations
+
+import json
+import tempfile
+import threading
+import unittest
+import zipfile
+from pathlib import Path
+
+from expra_engine.export.events import ExportPhase, ExportProgressEvent
+from expra_engine.export.exporter import ExportError, GameExporter
+from expra_engine.export.manifest import BuildManifest
+from expra_engine.export.packager import TargetPackager
+from expra_engine.export.plan import ExportPlan, ExportTarget, PythonArch
+from expra_engine.export.verify import verify_export
+
+
+class _NoopPackager(TargetPackager):
+    """Mock packager: does nothing except write a placeholder python.exe."""
+
+    def __init__(self, target: ExportTarget) -> None:
+        self._target = target
+
+    def install_runtime(self, python_version, arch, dest, *, cache_dir, cancel, progress, downloader=None):
+        dest.mkdir(parents=True, exist_ok=True)
+        (dest / "python.exe").write_bytes(b"stub")
+
+    def install_packages(self, packages, python_version, arch, site_packages, *, cache_dir, cancel, progress):
+        site_packages.mkdir(parents=True, exist_ok=True)
+
+    def make_launcher(self, build_dir, game_name, entry_point, source_subdir, *, is_pyc, debug):
+        suffix = "_debug" if debug else ""
+        ext = ".bat" if self._target == ExportTarget.WINDOWS else ".sh"
+        (build_dir / f"{game_name.replace(' ', '_')}{suffix}{ext}").write_text("stub")
+
+
+def _make_project(tmp: Path) -> tuple[Path, Path]:
+    project = tmp / "my_game"
+    project.mkdir()
+    (project / "__main__.py").write_text("print('hello')")
+    (project / "assets").mkdir()
+    (project / "assets" / "sprite.png").write_bytes(b"\x89PNG")
+    output = (tmp / "builds")
+    output.mkdir()
+    return project, output
+
+
+class TestGameExporter(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = Path(tempfile.mkdtemp())
+        self._project, self._output = _make_project(self._tmp)
+
+    def _plan(self, **overrides: object) -> ExportPlan:
+        defaults: dict = dict(
+            project_dir=self._project,
+            entry_point="__main__.py",
+            output_dir=self._output,
+            target=ExportTarget.WINDOWS,
+            game_name="Test Game",
+            game_version="1.0.0",
+            python_version="3.12.4",
+            arch=PythonArch.AMD64,
+            compile_bytecode=False,
+        )
+        defaults.update(overrides)
+        return ExportPlan(**defaults)  # type: ignore[arg-type]
+
+    def _export(self, plan: ExportPlan) -> Path:
+        cancel = threading.Event()
+        packager = _NoopPackager(plan.target)
+        return GameExporter(packager=packager).export(plan, cancel=cancel)
+
+    def test_export_creates_output_dir(self) -> None:
+        plan = self._plan()
+        out = self._export(plan)
+        self.assertTrue(out.is_dir())
+
+    def test_output_dir_name_contains_target(self) -> None:
+        plan = self._plan()
+        out = self._export(plan)
+        self.assertIn("windows", out.name)
+
+    def test_build_manifest_written(self) -> None:
+        plan = self._plan()
+        out = self._export(plan)
+        manifest_path = out / "build_manifest.json"
+        self.assertTrue(manifest_path.exists())
+        data = json.loads(manifest_path.read_text())
+        self.assertEqual(data["game_name"], "Test Game")
+        self.assertEqual(data["game_version"], "1.0.0")
+        self.assertEqual(data["target"], "windows")
+
+    def test_asset_manifest_written(self) -> None:
+        plan = self._plan()
+        out = self._export(plan)
+        asset_path = out / "asset_manifest.json"
+        self.assertTrue(asset_path.exists())
+        data = json.loads(asset_path.read_text())
+        self.assertIn("entries", data)
+
+    def test_verify_passes_after_export(self) -> None:
+        plan = self._plan()
+        out = self._export(plan)
+        verify_export(out)  # must not raise
+
+    def test_assets_copied(self) -> None:
+        plan = self._plan()
+        out = self._export(plan)
+        game_dir = out / "Test_Game"
+        self.assertTrue(game_dir.is_dir())
+        self.assertTrue((game_dir / "assets" / "sprite.png").exists())
+
+    def test_cancellation_raises(self) -> None:
+        plan = self._plan()
+        cancel = threading.Event()
+        cancel.set()
+        packager = _NoopPackager(plan.target)
+        with self.assertRaises(ExportError):
+            GameExporter(packager=packager).export(plan, cancel=cancel)
+
+    def test_previous_build_intact_on_failure(self) -> None:
+        # Do a successful export first
+        plan = self._plan()
+        first_out = self._export(plan)
+        sentinel = first_out / "sentinel.txt"
+        sentinel.write_text("was here")
+
+        # Attempt to create a plan with a bad entry point — validation raises before export
+        with self.assertRaises(ValueError):
+            ExportPlan(
+                project_dir=self._project,
+                entry_point="nonexistent.py",
+                output_dir=self._output,
+                target=ExportTarget.WINDOWS,
+                game_name="Test Game",
+                game_version="1.0.0",
+                python_version="3.12.4",
+                arch=PythonArch.AMD64,
+                compile_bytecode=False,
+            )
+
+        # Sentinel from first export must still be there (atomic temp -> promote)
+        self.assertTrue(sentinel.exists())
+
+    def test_progress_events_emitted(self) -> None:
+        plan = self._plan()
+        cancel = threading.Event()
+        packager = _NoopPackager(plan.target)
+        events: list[ExportProgressEvent] = []
+        GameExporter(packager=packager).export(plan, cancel=cancel, progress=events.append)
+        phases = {e.phase for e in events}
+        self.assertIn(ExportPhase.PLANNING, phases)
+        self.assertIn(ExportPhase.DONE, phases)
+
+    def test_progress_percent_monotone(self) -> None:
+        plan = self._plan()
+        cancel = threading.Event()
+        packager = _NoopPackager(plan.target)
+        events: list[ExportProgressEvent] = []
+        GameExporter(packager=packager).export(plan, cancel=cancel, progress=events.append)
+        percents = [e.percent for e in events]
+        self.assertEqual(percents, sorted(percents))
+
+    def test_linux_target(self) -> None:
+        plan = self._plan(target=ExportTarget.LINUX)
+        out = self._export(plan)
+        self.assertIn("linux", out.name)
+
+    def test_game_name_with_spaces(self) -> None:
+        plan = self._plan(game_name="Space Adventure")
+        out = self._export(plan)
+        self.assertIn("Space_Adventure", out.name)
+
+    def test_no_progress_callback(self) -> None:
+        plan = self._plan()
+        cancel = threading.Event()
+        packager = _NoopPackager(plan.target)
+        # Must not raise even without progress callback
+        GameExporter(packager=packager).export(plan, cancel=cancel, progress=None)
+
+    def test_build_manifest_has_engine_version(self) -> None:
+        plan = self._plan()
+        out = self._export(plan)
+        data = json.loads((out / "build_manifest.json").read_text())
+        self.assertIn("engine_version", data)
+        self.assertIsInstance(data["engine_version"], str)
+
+    def test_build_manifest_has_timestamp(self) -> None:
+        plan = self._plan()
+        out = self._export(plan)
+        data = json.loads((out / "build_manifest.json").read_text())
+        ts = data.get("build_timestamp", "")
+        self.assertTrue(ts.startswith("202"))  # ISO timestamp
+
+
+class TestGameExporterBytecode(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = Path(tempfile.mkdtemp())
+        self._project, self._output = _make_project(self._tmp)
+
+    def test_compile_bytecode_removes_py(self) -> None:
+        plan = ExportPlan(
+            project_dir=self._project,
+            entry_point="__main__.py",
+            output_dir=self._output,
+            target=ExportTarget.WINDOWS,
+            game_name="BytecodeGame",
+            game_version="1.0.0",
+            python_version="3.12.4",
+            arch=PythonArch.AMD64,
+            compile_bytecode=True,
+        )
+        cancel = threading.Event()
+        packager = _NoopPackager(ExportTarget.WINDOWS)
+        out = GameExporter(packager=packager).export(plan, cancel=cancel)
+        game_dir = out / "BytecodeGame"
+        py_files = list(game_dir.rglob("*.py"))
+        self.assertEqual(py_files, [], f"Expected no .py files, found: {py_files}")
+        pyc_files = list(game_dir.rglob("*.pyc"))
+        self.assertTrue(len(pyc_files) > 0, "Expected .pyc files after compilation")

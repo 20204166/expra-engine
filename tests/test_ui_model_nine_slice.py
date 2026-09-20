@@ -51,7 +51,9 @@ class TestNineSliceGeometry(unittest.TestCase):
         patches = NineSlice(Insets(2.0, 3.0, 4.0, 5.0)).resolve(Rect(7.0, 9.0, 0.0, 0.0))
 
         self.assertEqual(len(patches), 9)
-        self.assertTrue(all(patch.rect.width == 0.0 or patch.rect.height == 0.0 for patch in patches))
+        self.assertTrue(
+            all(patch.rect.width == 0.0 or patch.rect.height == 0.0 for patch in patches)
+        )
 
     def test_negative_dimensions_are_rejected(self) -> None:
         with self.assertRaises(ValueError):
@@ -85,3 +87,54 @@ class TestNineSliceGeometry(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NineSliceEdgeTests(unittest.TestCase):
+    def test_extremely_wide_panel_no_negative_center(self) -> None:
+        from expra_engine.ui_model.geometry import Insets, Rect
+        from expra_engine.ui_model.nine_slice import NineSlice
+
+        patches = NineSlice(Insets(10.0, 5.0, 10.0, 5.0)).resolve(Rect(0.0, 0.0, 10000.0, 20.0))
+        center = next(p for p in patches if p.name == "center")
+        self.assertGreaterEqual(center.rect.width, 0.0)
+        self.assertGreaterEqual(center.rect.height, 0.0)
+
+    def test_extremely_tall_panel_no_negative_center(self) -> None:
+        from expra_engine.ui_model.geometry import Insets, Rect
+        from expra_engine.ui_model.nine_slice import NineSlice
+
+        patches = NineSlice(Insets(5.0, 10.0, 5.0, 10.0)).resolve(Rect(0.0, 0.0, 20.0, 10000.0))
+        center = next(p for p in patches if p.name == "center")
+        self.assertGreaterEqual(center.rect.height, 0.0)
+
+    def test_fractional_dimensions(self) -> None:
+        from expra_engine.ui_model.geometry import Insets, Rect
+        from expra_engine.ui_model.nine_slice import NineSlice
+
+        patches = NineSlice(Insets(2.5, 1.5, 2.5, 1.5)).resolve(Rect(0.0, 0.0, 7.5, 5.5))
+        for p in patches:
+            self.assertGreaterEqual(p.rect.width, 0.0)
+            self.assertGreaterEqual(p.rect.height, 0.0)
+
+    def test_corners_never_inverted_when_panel_smaller_than_combined_borders(self) -> None:
+        from expra_engine.ui_model.geometry import Insets, Rect
+        from expra_engine.ui_model.nine_slice import NineSlice
+
+        patches = NineSlice(Insets(20.0, 20.0, 20.0, 20.0)).resolve(Rect(0.0, 0.0, 10.0, 10.0))
+        for p in patches:
+            self.assertGreaterEqual(p.rect.width, 0.0, f"Negative width in {p.name}")
+            self.assertGreaterEqual(p.rect.height, 0.0, f"Negative height in {p.name}")
+        corners = [
+            p
+            for p in patches
+            if "_" in p.name and p.name not in ("bottom", "top", "left", "right", "center")
+        ]
+        self.assertEqual(len(corners), 4)
+
+    def test_nine_patches_always_returned(self) -> None:
+        from expra_engine.ui_model.geometry import Insets, Rect
+        from expra_engine.ui_model.nine_slice import NineSlice
+
+        for size in (0.0, 1.0, 100.0):
+            patches = NineSlice(Insets(5.0, 5.0, 5.0, 5.0)).resolve(Rect(0.0, 0.0, size, size))
+            self.assertEqual(len(patches), 9)

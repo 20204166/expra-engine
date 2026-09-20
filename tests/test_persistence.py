@@ -69,8 +69,11 @@ class AtomicWriteTextTests(unittest.TestCase):
 
             # Simulate fsync failure — should still atomically replace
             # (fsync failure is best-effort and should not prevent the write)
-            with patch("os.fsync", side_effect=OSError("fsync failed")), contextlib.suppress(OSError):
-                    atomic_write_text(p, "updated")
+            with (
+                patch("os.fsync", side_effect=OSError("fsync failed")),
+                contextlib.suppress(OSError),
+            ):
+                atomic_write_text(p, "updated")
 
             # Either the write succeeded (updated) or original is preserved — never corrupted
             content = p.read_text(encoding="utf-8")

@@ -85,9 +85,7 @@ class AppCoordinator:
     ) -> None:
         if max_workers <= 0:
             raise ValueError("max_workers must be positive")
-        self._executor = (
-            None if runner is not None else ThreadPoolExecutor(max_workers=max_workers)
-        )
+        self._executor = None if runner is not None else ThreadPoolExecutor(max_workers=max_workers)
         self._runner = runner or self._submit_default
         self._deliver = deliver or (lambda callback: callback())
         self._on_activity = on_activity
@@ -182,9 +180,7 @@ class AppCoordinator:
         observer = self._observer
 
         def emit_progress(message: str) -> None:
-            self._deliver_progress(
-                key, lambda: self._invoke_progress(key, generation, message)
-            )
+            self._deliver_progress(key, lambda: self._invoke_progress(key, generation, message))
 
         def worker() -> None:
             try:
@@ -350,9 +346,7 @@ class AppCoordinator:
             state.future = None
             if cancelled_before_start:
                 self._deliver(
-                    lambda: self._complete_run(
-                        key, state.generation, error=cancellation_message
-                    )
+                    lambda: self._complete_run(key, state.generation, error=cancellation_message)
                 )
         if not already_cancelled:
             self._notify_subscribers(state, key, None)

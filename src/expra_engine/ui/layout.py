@@ -107,6 +107,7 @@ def make_scrollable_frame(
 
     scrollbar.pack(side="right", fill="y")
     canvas.pack(side="left", fill="both", expand=True)
+
     def _fit_initial_width() -> None:
         width = canvas.winfo_width()
         if width > 1:

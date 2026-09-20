@@ -63,7 +63,7 @@ class TestRuntimeClockFixed(unittest.TestCase):
     def test_fractional_carries_over(self) -> None:
         clock = self._make()
         half = self.STEP * 0.6
-        self._idle(clock, half)       # 0.6 step — no update
+        self._idle(clock, half)  # 0.6 step — no update
         c2 = self._idle(clock, half)  # 1.2 steps — 1 update
         updates = [e for e in c2.events if isinstance(e, Update)]
         self.assertEqual(len(updates), 1)

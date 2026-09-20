@@ -34,10 +34,7 @@ class BadChildException(Exception):
 
     def __init__(self, child: type) -> None:
         type_name = child.__name__
-        message = (
-            f"child must be an instance, not the type {type_name!r}. "
-            f"Try: {type_name}()"
-        )
+        message = f"child must be an instance, not the type {type_name!r}. Try: {type_name}()"
         super().__init__(message)
 
 

@@ -171,8 +171,13 @@ class InspectorPanel(tk.Frame):
     def _transform_section(self, transform: TransformComponent) -> None:
         self._section_header("Transform")
         form = self._form()
-        fields = (("x", "Position X"), ("y", "Position Y"), ("rotation", "Rotation"),
-                  ("scale_x", "Scale X"), ("scale_y", "Scale Y"))
+        fields = (
+            ("x", "Position X"),
+            ("y", "Position Y"),
+            ("rotation", "Rotation"),
+            ("scale_x", "Scale X"),
+            ("scale_y", "Scale Y"),
+        )
         for row, (field_name, label) in enumerate(fields):
             self._label(form, label, row)
             variable = tk.StringVar(value=f"{getattr(transform, field_name):g}")

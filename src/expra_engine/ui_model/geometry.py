@@ -86,7 +86,11 @@ class RectTransform:
         anchor_min = _vec2(self.anchor_min, "anchor_min")
         anchor_max = _vec2(self.anchor_max, "anchor_max")
         pivot = _vec2(self.pivot, "pivot")
-        for name, value in (("anchor_min", anchor_min), ("anchor_max", anchor_max), ("pivot", pivot)):
+        for name, value in (
+            ("anchor_min", anchor_min),
+            ("anchor_max", anchor_max),
+            ("pivot", pivot),
+        ):
             if not all(0.0 <= component <= 1.0 for component in value):
                 raise ValueError(f"{name} must be normalized to [0, 1]")
         if anchor_min[0] > anchor_max[0] or anchor_min[1] > anchor_max[1]:
@@ -126,7 +130,9 @@ class RectTransform:
         dpi = float(dpi_scale)
         if not isfinite(dpi) or dpi <= 0.0:
             raise ValueError("dpi_scale must be positive and finite")
-        logical_parent = Rect(parent.x / dpi, parent.y / dpi, parent.width / dpi, parent.height / dpi)
+        logical_parent = Rect(
+            parent.x / dpi, parent.y / dpi, parent.width / dpi, parent.height / dpi
+        )
         safe_area = Insets() if safe_area is None else safe_area
         insets = Insets(
             safe_area.left / dpi,
@@ -134,7 +140,10 @@ class RectTransform:
             safe_area.right / dpi,
             safe_area.bottom / dpi,
         )
-        if insets.left + insets.right > logical_parent.width or insets.top + insets.bottom > logical_parent.height:
+        if (
+            insets.left + insets.right > logical_parent.width
+            or insets.top + insets.bottom > logical_parent.height
+        ):
             raise ValueError("safe-area insets invert the parent rectangle")
         available = Rect(
             logical_parent.x + insets.left,
@@ -153,7 +162,11 @@ class RectTransform:
         offset_min = (self.offset_min[0] * scale[0], self.offset_min[1] * scale[1])
         offset_max = (self.offset_max[0] * scale[0], self.offset_max[1] * scale[1])
         minimum = (self.min_size[0] * scale[0], self.min_size[1] * scale[1])
-        maximum = None if self.max_size is None else (self.max_size[0] * scale[0], self.max_size[1] * scale[1])
+        maximum = (
+            None
+            if self.max_size is None
+            else (self.max_size[0] * scale[0], self.max_size[1] * scale[1])
+        )
         if self.size is None:
             start = (
                 available.x + available.width * self.anchor_min[0] + offset_min[0],

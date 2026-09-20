@@ -80,9 +80,7 @@ def _format_version(parts: tuple[int, int, int, int]) -> str:
     return ".".join(str(part) for part in parts)
 
 
-def _bump_segment(
-    parts: tuple[int, int, int, int], index: int
-) -> tuple[int, int, int, int]:
+def _bump_segment(parts: tuple[int, int, int, int], index: int) -> tuple[int, int, int, int]:
     values = list(parts)
     values[index] += 1
     for position in range(index, 0, -1):
@@ -195,9 +193,7 @@ def _wheel_version(path: Path) -> str:
     return match.group(1)
 
 
-def diff_manifests(
-    previous: Mapping[str, str], current: Mapping[str, str]
-) -> DiffSummary:
+def diff_manifests(previous: Mapping[str, str], current: Mapping[str, str]) -> DiffSummary:
     before_keys = set(previous)
     after_keys = set(current)
     added = tuple(sorted(after_keys - before_keys))
@@ -281,11 +277,7 @@ def write_current_version(package_dir: Path, version: str) -> None:
 
 def rewrite_sha256sums(dist_dir: Path) -> None:
     wheel = _newest_wheel(dist_dir)
-    lines = (
-        [f"{_sha256_bytes(wheel.read_bytes())}  {wheel.name}"]
-        if wheel is not None
-        else []
-    )
+    lines = [f"{_sha256_bytes(wheel.read_bytes())}  {wheel.name}"] if wheel is not None else []
     (dist_dir / "SHA256SUMS").write_text(
         "\n".join(lines) + ("\n" if lines else ""), encoding="utf-8"
     )
@@ -297,9 +289,7 @@ def prepare_build(package_dir: Path, *, bump_override: str | None = None) -> str
     current_manifest = _collect_package_inputs(package_dir)
     dist_dir = package_dir / "dist"
     latest_wheel = _newest_wheel(dist_dir)
-    previous_manifest = (
-        _read_manifest_from_wheel(latest_wheel) if latest_wheel is not None else {}
-    )
+    previous_manifest = _read_manifest_from_wheel(latest_wheel) if latest_wheel is not None else {}
     diff = diff_manifests(previous_manifest, current_manifest)
     current_version = read_current_version(package_dir)
     latest_version = _wheel_version(latest_wheel) if latest_wheel is not None else None
@@ -342,8 +332,11 @@ def verify_wheel(wheel_path: Path) -> None:
             for name in names
             if any(marker in name.lower() for marker in _SYSTEM_ANALYZER_MARKERS)
         )
-        missing = [name for name in (*_REQUIRED_PACKAGE_MEMBERS, *_REQUIRED_PACKAGE_DATA)
-                   if name not in names]
+        missing = [
+            name
+            for name in (*_REQUIRED_PACKAGE_MEMBERS, *_REQUIRED_PACKAGE_DATA)
+            if name not in names
+        ]
         if bad:
             raise ValueError(f"forbidden wheel content: {bad}")
         if missing:

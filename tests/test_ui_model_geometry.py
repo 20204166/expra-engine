@@ -15,7 +15,9 @@ class TestRectTransformGeometry(unittest.TestCase):
             size=(100.0, 50.0),
         )
 
-        self.assertEqual(transform.resolve(Rect(0.0, 0.0, 800.0, 600.0)), Rect(350.0, 275.0, 100.0, 50.0))
+        self.assertEqual(
+            transform.resolve(Rect(0.0, 0.0, 800.0, 600.0)), Rect(350.0, 275.0, 100.0, 50.0)
+        )
 
     def test_fixed_size_uses_anchor_and_offset(self) -> None:
         transform = RectTransform(
@@ -26,7 +28,9 @@ class TestRectTransformGeometry(unittest.TestCase):
             size=(80.0, 40.0),
         )
 
-        self.assertEqual(transform.resolve(Rect(10.0, 20.0, 400.0, 300.0)), Rect(22.0, 38.0, 80.0, 40.0))
+        self.assertEqual(
+            transform.resolve(Rect(10.0, 20.0, 400.0, 300.0)), Rect(22.0, 38.0, 80.0, 40.0)
+        )
 
     def test_stretched_size_uses_both_anchors_and_offsets(self) -> None:
         transform = RectTransform(
@@ -36,7 +40,9 @@ class TestRectTransformGeometry(unittest.TestCase):
             offset_max=(30.0, 40.0),
         )
 
-        self.assertEqual(transform.resolve(Rect(0.0, 0.0, 800.0, 600.0)), Rect(10.0, 20.0, 760.0, 540.0))
+        self.assertEqual(
+            transform.resolve(Rect(0.0, 0.0, 800.0, 600.0)), Rect(10.0, 20.0, 760.0, 540.0)
+        )
 
     def test_minimum_and_maximum_size_clamp_stretched_result(self) -> None:
         transform = RectTransform(
@@ -47,7 +53,9 @@ class TestRectTransformGeometry(unittest.TestCase):
             max_size=(60.0, 50.0),
         )
 
-        self.assertEqual(transform.resolve(Rect(0.0, 0.0, 800.0, 600.0)), Rect(0.0, 0.0, 40.0, 30.0))
+        self.assertEqual(
+            transform.resolve(Rect(0.0, 0.0, 800.0, 600.0)), Rect(0.0, 0.0, 40.0, 30.0)
+        )
 
     def test_maximum_size_clamps_fixed_result(self) -> None:
         transform = RectTransform(
@@ -57,7 +65,9 @@ class TestRectTransformGeometry(unittest.TestCase):
             max_size=(60.0, 50.0),
         )
 
-        self.assertEqual(transform.resolve(Rect(0.0, 0.0, 800.0, 600.0)), Rect(0.0, 0.0, 60.0, 50.0))
+        self.assertEqual(
+            transform.resolve(Rect(0.0, 0.0, 800.0, 600.0)), Rect(0.0, 0.0, 60.0, 50.0)
+        )
 
     def test_maximum_size_clamp_repositions_fixed_centered_pivot(self) -> None:
         transform = RectTransform(
@@ -68,13 +78,17 @@ class TestRectTransformGeometry(unittest.TestCase):
             max_size=(60.0, 50.0),
         )
 
-        self.assertEqual(transform.resolve(Rect(0.0, 0.0, 800.0, 600.0)), Rect(370.0, 275.0, 60.0, 50.0))
+        self.assertEqual(
+            transform.resolve(Rect(0.0, 0.0, 800.0, 600.0)), Rect(370.0, 275.0, 60.0, 50.0)
+        )
 
     def test_safe_area_insets_are_the_parent_for_anchored_layout(self) -> None:
         transform = RectTransform(anchor_min=(0.0, 0.0), anchor_max=(1.0, 1.0))
 
         self.assertEqual(
-            transform.resolve(Rect(0.0, 0.0, 800.0, 600.0), safe_area=Insets(20.0, 10.0, 30.0, 40.0)),
+            transform.resolve(
+                Rect(0.0, 0.0, 800.0, 600.0), safe_area=Insets(20.0, 10.0, 30.0, 40.0)
+            ),
             Rect(20.0, 10.0, 750.0, 550.0),
         )
 
@@ -103,7 +117,9 @@ class TestRectTransformGeometry(unittest.TestCase):
     def test_arbitrary_aspect_ratio_keeps_normalized_anchor_position(self) -> None:
         transform = RectTransform(anchor_min=(0.25, 0.5), anchor_max=(0.25, 0.5), size=(20.0, 10.0))
 
-        self.assertEqual(transform.resolve(Rect(0.0, 0.0, 1000.0, 500.0)), Rect(250.0, 250.0, 20.0, 10.0))
+        self.assertEqual(
+            transform.resolve(Rect(0.0, 0.0, 1000.0, 500.0)), Rect(250.0, 250.0, 20.0, 10.0)
+        )
 
     def test_negative_sizes_and_invalid_scale_are_rejected(self) -> None:
         with self.assertRaises(ValueError):
@@ -131,3 +147,68 @@ class TestRectTransformGeometry(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RectTransformEdgeTests(unittest.TestCase):
+    def test_zero_size_parent_fixed_child(self) -> None:
+        from expra_engine.ui_model.geometry import Rect, RectTransform
+
+        t = RectTransform(anchor_min=(0.0, 0.0), anchor_max=(0.0, 0.0), size=(50.0, 30.0))
+        result = t.resolve(Rect(0.0, 0.0, 0.0, 0.0))
+        self.assertEqual(result.width, 50.0)
+        self.assertEqual(result.height, 30.0)
+
+    def test_tiny_parent_smaller_than_min_size(self) -> None:
+        from expra_engine.ui_model.geometry import Rect, RectTransform
+
+        t = RectTransform(anchor_min=(0.0, 0.0), anchor_max=(1.0, 1.0), min_size=(100.0, 80.0))
+        result = t.resolve(Rect(0.0, 0.0, 10.0, 5.0))
+        self.assertGreaterEqual(result.width, 100.0)
+        self.assertGreaterEqual(result.height, 80.0)
+
+    def test_non_centered_pivot_repositions_correctly(self) -> None:
+        from expra_engine.ui_model.geometry import Rect, RectTransform
+
+        t = RectTransform(
+            anchor_min=(0.0, 0.0), anchor_max=(0.0, 0.0), pivot=(0.0, 0.0), size=(60.0, 40.0)
+        )
+        result = t.resolve(Rect(0.0, 0.0, 200.0, 200.0))
+        self.assertEqual(result.x, 0.0)
+        self.assertEqual(result.y, 0.0)
+
+    def test_negative_offset_moves_element(self) -> None:
+        from expra_engine.ui_model.geometry import Rect, RectTransform
+
+        t = RectTransform(
+            anchor_min=(0.5, 0.5),
+            anchor_max=(0.5, 0.5),
+            pivot=(0.5, 0.5),
+            offset_min=(-20.0, -10.0),
+            size=(40.0, 20.0),
+        )
+        result = t.resolve(Rect(0.0, 0.0, 200.0, 200.0))
+        self.assertAlmostEqual(result.x, 60.0)
+        self.assertAlmostEqual(result.y, 80.0)
+
+    def test_stretched_anchors_fill_parent(self) -> None:
+        from expra_engine.ui_model.geometry import Rect, RectTransform
+
+        t = RectTransform(anchor_min=(0.0, 0.0), anchor_max=(1.0, 1.0))
+        result = t.resolve(Rect(0.0, 0.0, 300.0, 200.0))
+        self.assertAlmostEqual(result.width, 300.0)
+        self.assertAlmostEqual(result.height, 200.0)
+
+    def test_repeated_resize_produces_stable_result(self) -> None:
+        from expra_engine.ui_model.geometry import Rect, RectTransform
+
+        t = RectTransform(anchor_min=(0.25, 0.25), anchor_max=(0.75, 0.75))
+        sizes = [(400.0, 300.0), (800.0, 600.0), (400.0, 300.0)]
+        results = [t.resolve(Rect(0.0, 0.0, w, h)) for w, h in sizes]
+        self.assertEqual(results[0], results[2])
+
+    def test_safe_area_larger_than_parent_raises(self) -> None:
+        from expra_engine.ui_model.geometry import Insets, Rect, RectTransform
+
+        t = RectTransform(anchor_min=(0.0, 0.0), anchor_max=(1.0, 1.0))
+        with self.assertRaises(ValueError):
+            t.resolve(Rect(0.0, 0.0, 100.0, 100.0), safe_area=Insets(60.0, 0.0, 50.0, 0.0))

@@ -134,9 +134,18 @@ class EditorPanelTests(unittest.TestCase):
         generic = scene.create_entity("Enemy")
         panel.render(scene)
 
-        camera_types = {panel._canvas.type(item) for item in panel._canvas.find_withtag(f"entity:{camera.entity_id}")}
-        player_types = {panel._canvas.type(item) for item in panel._canvas.find_withtag(f"entity:{player.entity_id}")}
-        generic_types = {panel._canvas.type(item) for item in panel._canvas.find_withtag(f"entity:{generic.entity_id}")}
+        camera_types = {
+            panel._canvas.type(item)
+            for item in panel._canvas.find_withtag(f"entity:{camera.entity_id}")
+        }
+        player_types = {
+            panel._canvas.type(item)
+            for item in panel._canvas.find_withtag(f"entity:{player.entity_id}")
+        }
+        generic_types = {
+            panel._canvas.type(item)
+            for item in panel._canvas.find_withtag(f"entity:{generic.entity_id}")
+        }
         self.assertIn("rectangle", camera_types)
         self.assertIn("oval", camera_types)
         self.assertIn("polygon", player_types)
@@ -156,6 +165,7 @@ class EditorPanelTests(unittest.TestCase):
 
         panel.render(scene)
         self.root.update_idletasks()
+
         def item_types(entity_id: str) -> tuple[str, ...]:
             types: list[str] = []
             for item in panel._canvas.find_withtag(f"entity:{entity_id}"):
@@ -296,7 +306,9 @@ class EditorWindowLayoutTests(unittest.TestCase):
             self.assertGreaterEqual(window._inspector_host.winfo_width(), 260)
             self.assertGreaterEqual(window._hierarchy_host.winfo_width(), 190)
             self.assertGreaterEqual(window._console_host.winfo_height(), 96)
-            self.assertEqual(window._style.lookup("Editor.Treeview", "background"), COLORS["surface"])
+            self.assertEqual(
+                window._style.lookup("Editor.Treeview", "background"), COLORS["surface"]
+            )
         finally:
             window._on_close()
 

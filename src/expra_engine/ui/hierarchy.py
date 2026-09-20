@@ -124,9 +124,7 @@ class HierarchyPanel(tk.Frame):
         state = "disabled" if not entity.enabled else ""
         kind = editor_entity_kind(entity.name)
         label = (
-            f"[{EDITOR_ENTITY_MARKERS[kind]}] {entity.name}"
-            if kind is not None
-            else entity.name
+            f"[{EDITOR_ENTITY_MARKERS[kind]}] {entity.name}" if kind is not None else entity.name
         )
         incoming.append((entity.entity_id, parent, label, (state,) if state else ()))
         for child in scene.children_of(entity.entity_id):

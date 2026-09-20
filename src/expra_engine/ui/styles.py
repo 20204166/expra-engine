@@ -132,6 +132,7 @@ def editor_entity_kind(name: str) -> str | None:
         return "player"
     return None
 
+
 ACCENT_THEMES: dict[str, dict[str, str]] = {
     "cyan": {
         "accent": "#55C7D9",
@@ -186,8 +187,12 @@ def configure_app_styles(
     style.configure(STYLE_APP_FRAME, background=c["background"])
     style.configure(STYLE_PANEL_FRAME, background=c["panel_bg"])
     style.configure(STYLE_TITLE, background=c["background"], foreground=c["text"], font=f["title"])
-    style.configure(STYLE_SECTION, background=c["panel_bg"], foreground=c["text"], font=f["section"])
-    style.configure(STYLE_DESCRIPTION, background=c["background"], foreground=c["secondary"], font=f["body"])
+    style.configure(
+        STYLE_SECTION, background=c["panel_bg"], foreground=c["text"], font=f["section"]
+    )
+    style.configure(
+        STYLE_DESCRIPTION, background=c["background"], foreground=c["secondary"], font=f["body"]
+    )
     style.configure(
         STYLE_PRIMARY_BUTTON,
         background=c["accent"],

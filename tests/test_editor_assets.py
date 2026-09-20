@@ -30,7 +30,9 @@ class TestAssetNormalization(unittest.TestCase):
             ]
         )
 
-        self.assertEqual([entry.name for entry in entries], ["alpha", "Beta", "Alpha.png", "zeta.png"])
+        self.assertEqual(
+            [entry.name for entry in entries], ["alpha", "Beta", "Alpha.png", "zeta.png"]
+        )
 
     def test_filter_matches_names_and_keeps_folders_visible(self) -> None:
         entries = normalize_entries(
@@ -119,9 +121,7 @@ class TestAssetRequestsAndResults(unittest.TestCase):
         self.assertEqual(result.entries, ())
 
     def test_stale_generation_is_rejected(self) -> None:
-        result = AssetScanResult(
-            directory=Path("/project/assets"), generation=4, entries=()
-        )
+        result = AssetScanResult(directory=Path("/project/assets"), generation=4, entries=())
 
         self.assertFalse(accept_scan_result(result, current_generation=5))
         self.assertTrue(accept_scan_result(result, current_generation=4))

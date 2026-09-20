@@ -130,8 +130,7 @@ class TestUICoordinatorMetrics(unittest.TestCase):
     def test_metrics_track_requests_and_commits(self) -> None:
         coord = UICoordinator()
         for i in range(3):
-            coord.request(RenderIntent(target="toolbar", generation=i + 1),
-                          lambda intent: None)
+            coord.request(RenderIntent(target="toolbar", generation=i + 1), lambda intent: None)
         self.assertGreaterEqual(coord.render_requests, 3)
 
     def test_stale_rejection_increments_counter(self) -> None:

@@ -12,9 +12,7 @@ from expra_engine import _release
 def _make_package(root: Path, version: str) -> None:
     pkg = root / "src" / "expra_engine"
     pkg.mkdir(parents=True)
-    (pkg / "__init__.py").write_text(
-        "from expra_engine._version import __version__\n"
-    )
+    (pkg / "__init__.py").write_text("from expra_engine._version import __version__\n")
     (pkg / "_version.py").write_text(f'__version__ = "{version}"\n')
     (pkg / "main.py").write_text("def main():\n    return 0\n")
     (pkg / "py.typed").write_text("")
@@ -60,9 +58,7 @@ def _wheel_from_package(root: Path, version: str) -> Path:
 
 class VersionHelpersTests(unittest.TestCase):
     def test_parse_and_format_round_trip(self) -> None:
-        self.assertEqual(
-            _release._format_version(_release._parse_version("1.2.3.4")), "1.2.3.4"
-        )
+        self.assertEqual(_release._format_version(_release._parse_version("1.2.3.4")), "1.2.3.4")
 
     def test_parse_rejects_non_four_segment_versions(self) -> None:
         with self.assertRaises(ValueError):
@@ -114,7 +110,9 @@ class ManifestDiffTests(unittest.TestCase):
         feature_add = _release.DiffSummary(("expra_engine/runtime/event_queue.py",), (), ())
         self.assertEqual(_release.classify_bump(feature_add), "feature")
 
-        feature_change = _release.DiffSummary((), (), ("expra_engine/coordinators/app_coordinator.py",))
+        feature_change = _release.DiffSummary(
+            (), (), ("expra_engine/coordinators/app_coordinator.py",)
+        )
         self.assertEqual(_release.classify_bump(feature_change), "feature")
 
         design_change = _release.DiffSummary((), (), ("expra_engine/design/tokens.py",))
@@ -144,9 +142,7 @@ class VersionFileTests(unittest.TestCase):
             package = Path(directory)
             version_path = package / "src" / "expra_engine"
             version_path.mkdir(parents=True)
-            (version_path / "_version.py").write_text(
-                '__version__ = "1.0.0.0"\n', encoding="utf-8"
-            )
+            (version_path / "_version.py").write_text('__version__ = "1.0.0.0"\n', encoding="utf-8")
             self.assertEqual(_release.read_current_version(package), "1.0.0.0")
             _release.write_current_version(package, "1.1.0.0")
             self.assertEqual(_release.read_current_version(package), "1.1.0.0")
@@ -212,9 +208,7 @@ class WheelManifestTests(unittest.TestCase):
             lines = (root / "dist" / "SHA256SUMS").read_text().splitlines()
 
             self.assertEqual(len(lines), 1)
-            self.assertTrue(
-                lines[0].endswith("expra_engine-1.1.0.0-py3-none-any.whl"), lines[0]
-            )
+            self.assertTrue(lines[0].endswith("expra_engine-1.1.0.0-py3-none-any.whl"), lines[0])
             expected = hashlib.sha256(newer.read_bytes()).hexdigest()
             self.assertEqual(lines[0].split()[0], expected)
 
@@ -244,11 +238,7 @@ class WheelVerifyTests(unittest.TestCase):
             wheel = _wheel_from_package(root, "1.0.0.0")
             rebuild = root / "dist" / "stripped.whl"
             with zipfile.ZipFile(wheel) as source:
-                keep = [
-                    name
-                    for name in source.namelist()
-                    if name != "expra_engine/__init__.py"
-                ]
+                keep = [name for name in source.namelist() if name != "expra_engine/__init__.py"]
                 with zipfile.ZipFile(rebuild, "w") as archive:
                     for name in keep:
                         archive.writestr(name, source.read(name))

@@ -183,3 +183,66 @@ class TestTimelineUpdateContract(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TimelineLifecycleEdgeTests(unittest.TestCase):
+    def test_destroy_during_tween_does_not_call_callback(self) -> None:
+        from expra_engine.runtime.timeline import Timeline
+
+        calls = []
+        tl = Timeline()
+        handle = tl.schedule(duration=1.0, on_complete=lambda: calls.append("done"))
+        handle.cancel()
+        tl.advance(2.0)
+        self.assertEqual(calls, [])
+
+    def test_cancel_before_delay_expires(self) -> None:
+        from expra_engine.runtime.timeline import Timeline
+
+        calls = []
+        tl = Timeline()
+        handle = tl.schedule(delay=1.0, on_complete=lambda: calls.append("done"))
+        handle.cancel()
+        tl.advance(2.0)
+        self.assertEqual(calls, [])
+
+    def test_stop_cancels_all_pending(self) -> None:
+        from expra_engine.runtime.timeline import Timeline
+
+        calls = []
+        tl = Timeline()
+        tl.schedule(duration=0.5, on_complete=lambda: calls.append("1"))
+        tl.schedule(duration=1.0, on_complete=lambda: calls.append("2"))
+        tl.stop()
+        tl.advance(2.0)
+        self.assertEqual(calls, [])
+
+    def test_pause_and_resume_around_timeline(self) -> None:
+        from expra_engine.runtime.timeline import Timeline
+
+        progress = []
+        tl = Timeline()
+        tl.schedule(duration=1.0, on_update=progress.append)
+        tl.pause()
+        tl.advance(0.5)
+        self.assertEqual(progress, [])
+        tl.resume()
+        tl.advance(0.5)
+        self.assertGreater(len(progress), 0)
+
+    def test_repeated_cancel_is_idempotent(self) -> None:
+        from expra_engine.runtime.timeline import Timeline
+
+        tl = Timeline()
+        handle = tl.schedule(duration=1.0)
+        self.assertTrue(handle.cancel())
+        self.assertFalse(handle.cancel())
+
+    def test_unscaled_entry_not_affected_by_zero_scaled_delta(self) -> None:
+        from expra_engine.runtime.timeline import Timeline
+
+        calls = []
+        tl = Timeline(unscaled_delta=lambda _: 0.1)
+        tl.schedule(duration=0.5, clock="unscaled", on_complete=lambda: calls.append("done"))
+        tl.advance(0.0, unscaled_delta=0.6)
+        self.assertIn("done", calls)

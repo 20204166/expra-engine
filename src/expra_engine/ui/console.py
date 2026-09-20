@@ -30,10 +30,12 @@ class ConsolePanel(tk.Frame):
 
         header = tk.Frame(self, bg=c["panel_bg"])
         header.pack(fill="x", padx=SPACING["card_pad_x"], pady=(6, 4))
-        tk.Label(header, text="CONSOLE", font=FONTS["panel_header"],
-                 bg=c["panel_bg"], fg=c["ink"]).pack(side="left")
-        clear_btn = ttk.Button(header, text="Clear", style=STYLE_NEUTRAL_BUTTON,
-                               command=self._clear)
+        tk.Label(
+            header, text="CONSOLE", font=FONTS["panel_header"], bg=c["panel_bg"], fg=c["ink"]
+        ).pack(side="left")
+        clear_btn = ttk.Button(
+            header, text="Clear", style=STYLE_NEUTRAL_BUTTON, command=self._clear
+        )
         clear_btn.pack(side="right")
 
         ttk.Separator(self, orient="horizontal").pack(fill="x", padx=SPACING["card_pad_x"])

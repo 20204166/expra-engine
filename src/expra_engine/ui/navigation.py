@@ -38,9 +38,7 @@ class PanelRouter:
         self._host = host
         self._coordinator = coordinator
         self._panels: dict[str, Any] = {}
-        self._loaders: dict[
-            str, tuple[Callable[[], Any], Callable[[Any], None], CachePolicy]
-        ] = {}
+        self._loaders: dict[str, tuple[Callable[[], Any], Callable[[Any], None], CachePolicy]] = {}
         self._active_key: str | None = None
 
     @property

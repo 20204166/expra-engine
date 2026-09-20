@@ -98,11 +98,7 @@ class ButtonCoordinator:
                 )
             return False
         observer = self._observer
-        token = (
-            observer.begin(f"ui:action:{action_id}")
-            if observer is not None
-            else None
-        )
+        token = observer.begin(f"ui:action:{action_id}") if observer is not None else None
         try:
             record.callback()
         except Exception as error:
@@ -117,9 +113,7 @@ class ButtonCoordinator:
     def set_enabled(self, action_id: str, enabled: bool) -> None:
         record = self._actions[action_id]
         record.enabled = enabled
-        record.widgets = [
-            widget for widget in record.widgets if self._apply_state(widget, enabled)
-        ]
+        record.widgets = [widget for widget in record.widgets if self._apply_state(widget, enabled)]
 
     def is_enabled(self, action_id: str) -> bool:
         return self._actions[action_id].enabled
