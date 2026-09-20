@@ -33,6 +33,23 @@ A renderer system subscribes to existing runtime events. It draws the minimal
 The adapter is explicit in the game entry point and is not constructed by
 `Engine`.
 
+### Renderer Protocol
+
+The runtime exposes a backend-neutral renderer contract for 2D games. Its
+context contains immutable viewport/configuration data; its frame contains the
+active scene, elapsed time, and optional game-facing HUD payload. The lifecycle
+is explicit: `start(context)`, `render(frame)`, `resize(size)`, and `stop()`.
+Renderers report capabilities such as primitive drawing, text, resizing, and
+headless operation. The protocol contains no Pygame, Tk, SDL, Ursina, or
+Panda3D types. `PygameRenderer` remains the first adapter and translates this
+contract into Pygame draw calls.
+
+The runtime loop owns timing, input, and presentation boundaries; it invokes
+the renderer but never inspects its implementation. Renderer failures are
+reported to the runtime and always trigger cleanup. A recording renderer and
+dummy-SDL adapter provide deterministic tests for lifecycle ordering, repeated
+frames, resize, headless operation, and failure cleanup.
+
 ## Neon Arena Scope
 
 The sample game will contain:
