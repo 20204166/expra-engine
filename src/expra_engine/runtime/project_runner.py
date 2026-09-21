@@ -8,6 +8,7 @@ from expra_engine.core.engine import Engine
 from expra_engine.core.project import Project
 from expra_engine.runtime.pygame_renderer import PygameRenderer, PygameRenderFrame
 from expra_engine.runtime.pygame_runtime import PygameRuntime
+from expra_engine.runtime.render_extractor import extract_render_frame
 from expra_engine.runtime.rendering import RenderFrame
 from expra_engine.runtime.script_registry import ScriptRegistry
 
@@ -24,12 +25,23 @@ def run_project(project_dir: Path | str = ".") -> None:
     renderer = PygameRenderer(pygame, None, screen_size=(960, 640))
 
     def frame_factory(current_engine: Engine, dt: float) -> RenderFrame:
+        extracted = (
+            extract_render_frame(
+                current_engine.active_scene,
+                elapsed=dt,
+                interpolator=current_engine.transform_interpolator,
+                interpolation_fraction=current_engine.interpolation_fraction,
+            )
+            if current_engine.active_scene is not None
+            else RenderFrame(elapsed=dt)
+        )
         return RenderFrame(
             elapsed=dt,
             payload=PygameRenderFrame(
                 active_scene=current_engine.active_scene,
                 interpolator=current_engine.transform_interpolator,
                 interpolation_fraction=current_engine.interpolation_fraction,
+                modulation=extracted.modulation,
             ),
         )
 

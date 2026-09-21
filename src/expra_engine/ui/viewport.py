@@ -22,6 +22,7 @@ from expra_engine.core.camera import Camera2D
 from expra_engine.core.component import TransformComponent
 from expra_engine.core.scene import Scene
 from expra_engine.runtime.collider import ColliderComponent
+from expra_engine.runtime.canvas_effects import modulate_color
 from expra_engine.runtime.render_extractor import extract_render_frame
 from expra_engine.runtime.rendering import (
     OrthographicCamera,
@@ -467,8 +468,12 @@ class ViewportPanel(tk.Frame):
         sx = abs(item.primitive.size[0] * transform.scale[0]) * self._camera._camera.pixel_ratio / 2
         sy = abs(item.primitive.size[1] * transform.scale[1]) * self._camera._camera.pixel_ratio / 2
         tag = f"entity:{item.key}"
-        color = self._tk_color(item.material.color)
-        outline = self._tk_color(item.material.outline) if item.material.outline else color
+        color = self._tk_color(modulate_color(item.material.color, self._target.frame.modulation))
+        outline = (
+            self._tk_color(modulate_color(item.material.outline, self._target.frame.modulation))
+            if item.material.outline
+            else color
+        )
         if item.primitive.kind == "circle":
             self._canvas.create_oval(ex - sx, ey - sy, ex + sx, ey + sy, fill=color, outline=outline, tags=tag)
         elif item.primitive.kind == "text":

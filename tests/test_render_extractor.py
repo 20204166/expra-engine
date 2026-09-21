@@ -5,8 +5,9 @@ import pytest
 from expra_engine.core.component import TransformComponent, component_from_dict, registered_component_types
 from expra_engine.core.component_schema import component_type_spec
 from expra_engine.core.scene import Scene
+from expra_engine.runtime.canvas_effects import CanvasModulateComponent
 from expra_engine.runtime.render_extractor import extract_render_frame
-from expra_engine.runtime.rendering import Color, RenderPhase, Transform
+from expra_engine.runtime.rendering import Color, MaterialDescriptor, RenderFrame, RenderPhase, Transform
 from expra_engine.runtime.transform_interpolation import TransformInterpolator
 from expra_engine.runtime.visual_components import PrimitiveComponent, SpriteComponent, TextComponent
 
@@ -45,6 +46,39 @@ def test_visual_components_expose_registry_field_metadata() -> None:
     )
     assert tuple(field.name for field in component_type_spec("text").fields) == (
         "text", "font", "size", "color", "max_width", "align", "layer", "visible"
+    )
+
+
+def test_canvas_modulation_is_registered_with_editor_metadata() -> None:
+    assert tuple(field.name for field in component_type_spec("canvas_modulate").fields) == (
+        "color", "enabled"
+    )
+    component = component_from_dict(
+        {"type": "canvas_modulate", "color": [0.2, 0.3, 0.4, 0.5], "enabled": False}
+    )
+    assert component.to_dict() == {
+        "type": "canvas_modulate",
+        "color": [0.2, 0.3, 0.4, 0.5],
+        "enabled": False,
+    }
+
+
+def test_render_frame_defaults_to_neutral_white_modulation() -> None:
+    assert RenderFrame().modulation == Color(1.0, 1.0, 1.0, 1.0)
+
+
+def test_extractor_keeps_existing_materials_and_resolves_modulation_once() -> None:
+    scene = Scene("modulated")
+    entity = scene.create_entity("visual")
+    entity.add_component(PrimitiveComponent(fill=Color(0.8, 0.6, 0.4, 0.5)))
+    entity.add_component(CanvasModulateComponent((0.5, 0.5, 0.5, 0.5)))
+
+    frame = extract_render_frame(scene)
+
+    assert frame.modulation == Color(0.5, 0.5, 0.5, 0.5)
+    assert frame.items[0].material == MaterialDescriptor(
+        color=Color(0.8, 0.6, 0.4, 0.5),
+        tint=Color(0.8, 0.6, 0.4, 0.5),
     )
 
 

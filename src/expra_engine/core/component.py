@@ -163,6 +163,7 @@ def _register_visual_components() -> None:
         SpriteComponent,
         TextComponent,
     )
+    from expra_engine.runtime.canvas_effects import CanvasModulateComponent
 
     registrations = (
         (
@@ -204,6 +205,14 @@ def _register_visual_components() -> None:
                 PropertyDescriptor("align", "Align", str, "left", enum_values=("left", "center", "right")),
                 PropertyDescriptor("layer", "Layer", int, 0),
                 PropertyDescriptor("visible", "Visible", bool, True),
+            ),
+        ),
+        (
+            CanvasModulateComponent.component_type,
+            CanvasModulateComponent,
+            (
+                PropertyDescriptor("color", "Color", tuple, (1.0, 1.0, 1.0, 1.0)),
+                PropertyDescriptor("enabled", "Enabled", bool, True),
             ),
         ),
     )

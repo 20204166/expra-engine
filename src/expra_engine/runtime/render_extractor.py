@@ -16,6 +16,7 @@ from expra_engine.runtime.rendering import (
 )
 from expra_engine.runtime.transform_interpolation import TransformInterpolator
 from expra_engine.runtime.visual_components import PrimitiveComponent, SpriteComponent, TextComponent
+from expra_engine.runtime.canvas_effects import resolve_canvas_modulation
 
 __all__ = ("extract_render_frame",)
 
@@ -142,4 +143,8 @@ def extract_render_frame(
                         items.append(_item(entity, visual, transform))
                     except (TypeError, ValueError, OverflowError):
                         continue
-    return RenderFrame(tuple(items), elapsed=elapsed)
+    return RenderFrame(
+        tuple(items),
+        elapsed=elapsed,
+        modulation=resolve_canvas_modulation(scene).color,
+    )

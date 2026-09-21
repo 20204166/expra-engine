@@ -9,6 +9,7 @@ from typing import Any
 
 from expra_engine.core.component import TransformComponent
 from expra_engine.core.scene import Scene
+from expra_engine.runtime.canvas_effects import modulate_color
 from expra_engine.runtime.rendering import (
     Color,
     NineSliceDescriptor,
@@ -33,6 +34,7 @@ class RenderFrame:
     status: str = ""
     interpolator: TransformInterpolator | None = None
     interpolation_fraction: float = 0.0
+    modulation: Color = Color(1.0, 1.0, 1.0, 1.0)
 
 
 @dataclass(frozen=True)
@@ -134,7 +136,13 @@ class PygameRenderer:
             transform = item.world_transform
             center = context.camera.project(transform.position, context.viewport)
             position = (round(center[0]), round(center[1]))
-            color = self._color(self._tint(item.material.color, item.material.tint), item.material.opacity)
+            color = self._color(
+                modulate_color(
+                    self._tint(item.material.color, item.material.tint),
+                    frame.modulation,
+                ),
+                item.material.opacity,
+            )
             try:
                 if item.material.texture_id is not None:
                     if self._resource_provider is None:
@@ -159,10 +167,19 @@ class PygameRenderer:
                         )
                     )
                     angle = transform.rotation - math.degrees(context.camera.rotation)
-                    rendered_texture = texture
+                    rendered_texture = (
+                        texture
+                        if frame.modulation == Color(1.0, 1.0, 1.0, 1.0)
+                        else self._tinted_texture(
+                            texture,
+                            modulate_color(item.material.tint, frame.modulation),
+                        )
+                    )
+                    if rendered_texture is None:
+                        continue
                     transform_api = getattr(self.pygame, "transform", None)
                     if angle and transform_api is not None:
-                        rendered_texture = transform_api.rotate(texture, angle)
+                        rendered_texture = transform_api.rotate(rendered_texture, angle)
                     if transform_api is not None and hasattr(transform_api, "smoothscale"):
                         rendered_texture = transform_api.smoothscale(rendered_texture, (width, height))
                     texture_size = getattr(rendered_texture, "get_size", lambda: (width, height))()
@@ -172,10 +189,25 @@ class PygameRenderer:
                     )
                     continue
                 if item.text is not None:
-                    self.draw_text(item.text, position, item.material.opacity)
+                    self.draw_text(
+                        TextDescriptor(
+                            item.text.text,
+                            item.text.font,
+                            item.text.size,
+                            modulate_color(item.text.color, frame.modulation),
+                            item.text.max_width,
+                            item.text.align,
+                        ),
+                        position,
+                        item.material.opacity,
+                    )
                     continue
                 if item.nine_slice is not None:
-                    self.draw_nine_slice(item.nine_slice, item.material.tint)
+                    self.draw_nine_slice(
+                        item.nine_slice,
+                        modulate_color(item.material.tint, frame.modulation),
+                        apply_tint=frame.modulation != Color(1.0, 1.0, 1.0, 1.0),
+                    )
                     continue
                 if item.primitive.kind in ("rectangle", "rect"):
                     width = round(
@@ -198,7 +230,10 @@ class PygameRenderer:
                     if item.material.outline is not None and item.material.outline_width:
                         draw.rect(
                             self.surface,
-                            self._color(item.material.outline, item.material.opacity),
+                            self._color(
+                                modulate_color(item.material.outline, frame.modulation),
+                                item.material.opacity,
+                            ),
                             self._rect_from_center(position, width, height),
                             round(item.material.outline_width),
                         )
@@ -234,6 +269,21 @@ class PygameRenderer:
             color.blue * tint.blue,
             color.alpha * tint.alpha,
         )
+
+    def _tinted_texture(self, texture: Any, tint: Color) -> Any | None:
+        """Return a non-mutating tinted copy, or None when Pygame cannot provide one."""
+        if tint == Color(1.0, 1.0, 1.0, 1.0):
+            return texture
+        copy = getattr(texture, "copy", None)
+        blend = getattr(self.pygame, "BLEND_RGBA_MULT", None)
+        if not callable(copy) or blend is None:
+            return None
+        tinted = copy()
+        tinted_fill = getattr(tinted, "fill", None)
+        if not callable(tinted_fill):
+            return None
+        tinted_fill(self._color(tint, 1.0), special_flags=blend)
+        return tinted
 
     def _font(self, descriptor: TextDescriptor) -> Any:
         return self._font_provider(descriptor.font, round(descriptor.size))
@@ -298,12 +348,22 @@ class PygameRenderer:
             rendered = font.render(line, True, self._color(descriptor.color, opacity))
             self.surface.blit(rendered, (x, position[1] + index * line_height))
 
-    def draw_nine_slice(self, descriptor: NineSliceDescriptor, tint: Color) -> None:
+    def draw_nine_slice(
+        self,
+        descriptor: NineSliceDescriptor,
+        tint: Color,
+        *,
+        apply_tint: bool = False,
+    ) -> None:
         if self.surface is None or self._resource_provider is None:
             return
         texture = self._resource_provider(descriptor.texture_id)
         if texture is None:
             return
+        if apply_tint:
+            texture = self._tinted_texture(texture, tint)
+            if texture is None:
+                return
         destination = descriptor.geometry.resolve(descriptor.rect)
         source = None
         get_size = getattr(texture, "get_size", None)
@@ -440,7 +500,8 @@ class PygameRenderer:
                 if entity.has_tag("player") or entity.name.lower() == "player":
                     try:
                         self._draw_legacy_box(
-                            (48, 224, 255), sampled.position[0], sampled.position[1],
+                            self._legacy_color((48, 224, 255), frame.modulation),
+                            sampled.position[0], sampled.position[1],
                             20 * abs(sampled.scale[0]), 20 * abs(sampled.scale[1]),
                             sampled.rotation,
                         )
@@ -449,13 +510,19 @@ class PygameRenderer:
                             sampled.position[0] + math.cos(angle) * 16,
                             sampled.position[1] + math.sin(angle) * 16,
                         )
-                        draw.line(self.surface, (255, 255, 255), position, direction)
+                        draw.line(
+                            self.surface,
+                            self._legacy_color((255, 255, 255), frame.modulation),
+                            position,
+                            direction,
+                        )
                     except Exception:  # noqa: BLE001 - backend draw failures are frame-local
                         pass
                 elif entity.has_tag("enemy"):
                     with suppress(Exception):
                         self._draw_legacy_box(
-                            (255, 72, 178), sampled.position[0], sampled.position[1],
+                            self._legacy_color((255, 72, 178), frame.modulation),
+                            sampled.position[0], sampled.position[1],
                             20 * abs(sampled.scale[0]), 20 * abs(sampled.scale[1]),
                             sampled.rotation,
                         )
@@ -464,13 +531,23 @@ class PygameRenderer:
                         8 * (abs(sampled.scale[0]) + abs(sampled.scale[1])) / 2
                     )
                     with suppress(Exception):
-                        draw.circle(self.surface, (255, 72, 178), position, radius)
+                        draw.circle(
+                            self.surface,
+                            self._legacy_color((255, 72, 178), frame.modulation),
+                            position,
+                            radius,
+                        )
                 elif entity.has_tag("projectile"):
                     radius = self._legacy_radius(
                         8 * (abs(sampled.scale[0]) + abs(sampled.scale[1])) / 2
                     )
                     with suppress(Exception):
-                        draw.circle(self.surface, (245, 248, 255), position, radius)
+                        draw.circle(
+                            self.surface,
+                            self._legacy_color((245, 248, 255), frame.modulation),
+                            position,
+                            radius,
+                        )
 
         self._draw_text(f"Score: {frame.score}", (16, 12))
         if frame.status:
@@ -484,6 +561,13 @@ class PygameRenderer:
             self.surface.blit(rendered, position)
         except Exception:  # noqa: BLE001 - backend/font failures are frame-local
             pass
+
+    @staticmethod
+    def _legacy_color(rgb: tuple[int, int, int], modulation: Color) -> tuple[int, int, int]:
+        return tuple(
+            round(channel * factor)
+            for channel, factor in zip(rgb, (modulation.red, modulation.green, modulation.blue))
+        )
 
     @staticmethod
     def _validate_bounds(bounds: tuple[float, float, float, float], name: str) -> None:

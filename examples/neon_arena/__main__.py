@@ -19,6 +19,7 @@ from expra_engine.runtime import (
     ScriptRegistry,
 )
 from expra_engine.runtime.input import ActionId, PhysicalInput
+from expra_engine.runtime.render_extractor import extract_render_frame
 
 if __package__:
     from .game import NeonArenaGame, load_scene
@@ -148,6 +149,7 @@ def main() -> None:
                     status=game.status if game is not None else _scripted_state(current_engine)[1],
                     interpolator=current_engine.transform_interpolator,
                     interpolation_fraction=current_engine.interpolation_fraction,
+                    modulation=extract_render_frame(current_engine.active_scene).modulation,
                 ),
             )
 

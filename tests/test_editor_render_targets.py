@@ -10,6 +10,7 @@ from expra_engine.editor.contributions import RenderTargetRegistry
 from expra_engine.core.component import TransformComponent
 from expra_engine.core.scene import Scene
 from expra_engine.runtime.collider import ColliderComponent
+from expra_engine.runtime.canvas_effects import CanvasModulateComponent
 from expra_engine.runtime.rendering import Color
 from expra_engine.runtime.visual_components import (
     PrimitiveComponent,
@@ -77,6 +78,16 @@ class EditorRenderTargetTests(unittest.TestCase):
         self.assertEqual([item.key for item in target.items], ["sprite", "primitive", "text"])
         self.assertEqual(target.items[1].material.color, Color(1.0, 0.0, 0.0))
         self.assertEqual(target.items[2].text.text, "Hello")  # type: ignore[union-attr]
+
+    def test_target_reuses_frame_canvas_modulation(self) -> None:
+        scene = Scene("preview")
+        entity = scene.create_entity("visual")
+        entity.add_component(PrimitiveComponent(fill=Color(1.0, 0.5, 0.25)))
+        entity.add_component(CanvasModulateComponent((0.5, 0.4, 0.3, 1.0)))
+
+        target = build_editor_render_target(scene, viewport=(200, 100))
+
+        self.assertEqual(target.frame.modulation, Color(0.5, 0.4, 0.3, 1.0))
 
     def test_target_clips_offscreen_items_and_clears_removed_selection(self) -> None:
         scene = Scene("preview")

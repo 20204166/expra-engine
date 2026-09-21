@@ -20,6 +20,9 @@ from expra_engine.runtime import (
     Transform,
     Viewport,
 )
+from expra_engine.runtime.canvas_effects import CanvasModulateComponent
+from expra_engine.runtime.render_extractor import extract_render_frame
+from expra_engine.runtime.visual_components import PrimitiveComponent
 from expra_engine.runtime.rendering import MaterialDescriptor, NineSliceDescriptor, TextDescriptor
 from expra_engine.runtime.transform_interpolation import TransformInterpolator
 from expra_engine.ui_model.geometry import Insets, Rect
@@ -70,6 +73,19 @@ class _FakeFont:
 class _FakeTexture:
     def get_size(self) -> tuple[int, int]:
         return (32, 16)
+
+
+class _TintableTexture(_FakeTexture):
+    def __init__(self) -> None:
+        self.fill_calls: list[tuple[object, object]] = []
+        self.copy_count = 0
+
+    def copy(self) -> "_TintableTexture":
+        self.copy_count += 1
+        return _TintableTexture()
+
+    def fill(self, color: object, *, special_flags: object) -> None:
+        self.fill_calls.append((color, special_flags))
 
 
 class _FakePygame:
@@ -170,6 +186,61 @@ class TestPygameRenderer(unittest.TestCase):
         self.assertEqual(renderer.pygame.draw.rects[1][1], (0, 255, 0))
         self.assertEqual(renderer.pygame.draw.rects[2][1], (0, 0, 255))
         self.assertEqual(renderer.pygame.draw.rects[2][3], 2)
+
+    def test_contract_frame_applies_canvas_modulation_after_material_tint_once(self) -> None:
+        renderer = PygameRenderer(_FakePygame(_FakeFont()), _FakeSurface())
+        renderer.start(RenderContext(Viewport(0, 0, 100, 100)))
+        item = RenderItem(
+            "styled",
+            PrimitiveDescriptor("rectangle", size=(2, 2)),
+            Transform(),
+            material=MaterialDescriptor(
+                color=Color(0.8, 0.6, 0.4, 0.8),
+                tint=Color(0.5, 0.5, 0.5, 0.5),
+                outline=Color(0.4, 0.8, 1.0, 0.6),
+                outline_width=2,
+            ),
+        )
+
+        renderer.render(
+            RenderContractFrame(
+                (item,),
+                modulation=Color(0.5, 0.5, 0.5, 0.5),
+            )
+        )
+
+        self.assertEqual(renderer.pygame.draw.rects[1][1], (51, 38, 26, 51))
+        self.assertEqual(renderer.pygame.draw.rects[2][1], (51, 102, 128, 76))
+
+    def test_contract_frame_applies_canvas_modulation_to_text_alpha(self) -> None:
+        font = _FakeFont()
+        renderer = PygameRenderer(
+            _FakePygame(font), _FakeSurface(), font_provider=lambda name, size: font
+        )
+        renderer.start(RenderContext(Viewport(0, 0, 100, 100)))
+        item = RenderItem(
+            "label",
+            PrimitiveDescriptor("text", size=(2, 2)),
+            Transform(),
+            material=MaterialDescriptor(color=Color(1.0, 1.0, 1.0), opacity=0.8),
+            text=TextDescriptor("hello", color=Color(0.5, 0.4, 0.3, 0.5)),
+        )
+
+        renderer.render(RenderContractFrame((item,), modulation=Color(0.5, 0.5, 0.5, 0.5)))
+
+        assert renderer.surface.blits[-1][0][2] == (64, 51, 38, 51)
+
+    def test_scene_extractor_to_pygame_renderer_uses_canonical_modulation(self) -> None:
+        scene = Scene("night")
+        entity = scene.create_entity("panel")
+        entity.add_component(PrimitiveComponent(fill=Color(0.8, 0.6, 0.4)))
+        entity.add_component(CanvasModulateComponent((0.5, 0.5, 0.5, 0.5)))
+        renderer = PygameRenderer(_FakePygame(_FakeFont()), _FakeSurface())
+        renderer.start(RenderContext(Viewport(0, 0, 100, 100)))
+
+        renderer.render(extract_render_frame(scene))
+
+        assert renderer.pygame.draw.rects[1][1] == (82, 46, 20, 128)
     def test_render_frame_aliases_keep_protocol_and_legacy_hud_frames_distinct(self) -> None:
         self.assertIs(RenderFrame, PygameRenderFrame)
         self.assertIsNot(RenderContractFrame, PygameRenderFrame)
@@ -250,6 +321,76 @@ class TestPygameRenderer(unittest.TestCase):
         self.assertEqual(calls[0], ("rotate", 20.0))
         self.assertEqual(calls[1], ("scale", (20, 10)))
 
+    def test_texture_modulation_uses_copy_and_preserves_source_texture(self) -> None:
+        texture = _TintableTexture()
+        pygame = _FakePygame(_FakeFont())
+        pygame.BLEND_RGBA_MULT = 123
+        renderer = PygameRenderer(
+            pygame,
+            _FakeSurface(),
+            resource_provider=lambda _: texture,
+        )
+        renderer.start(RenderContext(Viewport(0, 0, 100, 100)))
+        item = RenderItem(
+            "sprite",
+            PrimitiveDescriptor("sprite", size=(2.0, 1.0)),
+            Transform(),
+            material=MaterialDescriptor(texture_id="ship", tint=Color(0.8, 0.6, 0.4)),
+        )
+
+        renderer.render(RenderContractFrame((item,), modulation=Color(0.5, 0.5, 0.5, 0.5)))
+
+        assert texture.copy_count == 1
+        assert texture.fill_calls == []
+        assert renderer.surface.blits
+
+    def test_neutral_canvas_modulation_preserves_existing_texture_rendering(self) -> None:
+        texture = _TintableTexture()
+        renderer = PygameRenderer(
+            _FakePygame(_FakeFont()),
+            _FakeSurface(),
+            resource_provider=lambda _: texture,
+        )
+        renderer.start(RenderContext(Viewport(0, 0, 100, 100)))
+        item = RenderItem(
+            "sprite",
+            PrimitiveDescriptor("sprite", size=(2.0, 1.0)),
+            Transform(),
+            material=MaterialDescriptor(texture_id="ship", tint=Color(0.2, 0.3, 0.4)),
+        )
+
+        renderer.render(RenderContractFrame((item,)))
+
+        assert texture.copy_count == 0
+        assert renderer.surface.blits[0][0] is texture
+
+    def test_nine_slice_modulation_uses_backend_copy_when_supported(self) -> None:
+        texture = _TintableTexture()
+        pygame = _FakePygame(_FakeFont())
+        pygame.BLEND_RGBA_MULT = 123
+        renderer = PygameRenderer(
+            pygame,
+            _FakeSurface(),
+            resource_provider=lambda _: texture,
+        )
+        renderer.start(RenderContext(Viewport(0, 0, 100, 100)))
+        descriptor = NineSliceDescriptor(
+            "panel",
+            Rect(0, 0, 20, 20),
+            NineSlice(Insets(2, 2, 2, 2)),
+        )
+        item = RenderItem(
+            "panel",
+            PrimitiveDescriptor("panel"),
+            Transform(),
+            nine_slice=descriptor,
+        )
+
+        renderer.render(RenderContractFrame((item,), modulation=Color(0.5, 0.5, 0.5, 0.5)))
+
+        assert texture.copy_count == 1
+        assert len(renderer.surface.blits) == 9
+
     def test_maps_transform_coordinates_into_arena_coordinates(self) -> None:
         scene = Scene("Arena")
         player = scene.create_entity("Player")
@@ -290,6 +431,22 @@ class TestPygameRenderer(unittest.TestCase):
         renderer.on_render(RenderFrame(scene, interpolator=interpolator, interpolation_fraction=0.5))
 
         assert renderer.pygame.draw.rects[1][2].center == (5, 0)
+
+    def test_legacy_renderer_consumes_carried_canvas_modulation(self) -> None:
+        scene = Scene("Arena")
+        player = scene.create_entity("Player")
+        player.add_tag("player")
+        player.add_component(TransformComponent())
+        renderer = PygameRenderer(_FakePygame(_FakeFont()), _FakeSurface())
+
+        renderer.on_render(
+            RenderFrame(
+                scene,
+                modulation=Color(0.5, 0.25, 0.75, 1.0),
+            )
+        )
+
+        assert renderer.pygame.draw.rects[1][1] == (24, 56, 191)
 
     def test_legacy_scene_entities_use_active_camera_projection(self) -> None:
         scene = Scene("Camera")

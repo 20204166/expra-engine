@@ -328,10 +328,13 @@ class RenderFrame:
     items: tuple[RenderItem, ...] = ()
     elapsed: float = 0.0
     payload: object | None = None
+    modulation: Color = field(default_factory=lambda: Color(1.0, 1.0, 1.0, 1.0))
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "items", tuple(self.items))
         _finite(self.elapsed, "elapsed")
+        if not isinstance(self.modulation, Color):
+            raise TypeError("modulation must be a Color")
 
     def ordered_items(self) -> tuple[RenderItem, ...]:
         return tuple(

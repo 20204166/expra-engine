@@ -2,6 +2,7 @@
 
 from expra_engine.runtime.animator import AnimatorStateMachine
 from expra_engine.runtime.area import AreaComponent, SpaceOverride
+from expra_engine.runtime.canvas_effects import CanvasModulateComponent, CanvasModulation
 from expra_engine.runtime.behaviour import (
     HANDLED,
     PASS,
@@ -81,6 +82,8 @@ __all__ = [
     "BehaviourSystem",
     "Color",
     "CubicBezier",
+    "CanvasModulateComponent",
+    "CanvasModulation",
     "EventQueue",
     "ExposedField",
     "FrameUpdate",
