@@ -868,9 +868,13 @@ class EditorWindow:
         if not isinstance(payload, tuple) or len(payload) != 2:
             return
         scene, selected_id = payload
+        runtime_preview = self._engine.run_state in (EngineRunState.PLAY, EngineRunState.PAUSED)
         self._viewport.render(
             scene,
             selected_id,
+            editor_overlays=not runtime_preview,
+            interpolator=self._engine.transform_interpolator if runtime_preview else None,
+            interpolation_fraction=self._engine.interpolation_fraction if runtime_preview else 0.0,
             animated_players=self._engine.animated_sprite_system.players,
         )
 

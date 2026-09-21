@@ -11,15 +11,15 @@ from expra_engine.core.engine import Engine
 from expra_engine.core.scene import Scene
 from expra_engine.editor.assets import AssetEntry
 from expra_engine.filesystem import ResourceId
+from expra_engine.runtime.rendering import Color
+from expra_engine.runtime.script_component import ScriptComponent
+from expra_engine.runtime.visual_components import TextComponent
 from expra_engine.ui.asset_browser import AssetBrowserPanel
 from expra_engine.ui.editor_window import EditorWindow
 from expra_engine.ui.hierarchy import HierarchyPanel
 from expra_engine.ui.inspector import InspectorPanel
 from expra_engine.ui.styles import COLORS, configure_app_styles, editor_entity_kind
 from expra_engine.ui.viewport import ViewportPanel
-from expra_engine.runtime.rendering import Color
-from expra_engine.runtime.script_component import ScriptComponent
-from expra_engine.runtime.visual_components import TextComponent
 
 
 def _display_available() -> bool:
@@ -175,6 +175,22 @@ class EditorPanelTests(unittest.TestCase):
         self.root.update_idletasks()
 
         self.assertFalse(panel._canvas.find_withtag(f"entity:{controller.entity_id}"))
+
+    def test_viewport_hides_editor_markers_in_runtime_preview(self) -> None:
+        panel = ViewportPanel(self.root)
+        panel.pack(fill="both", expand=True)
+        scene = Scene("Runtime preview")
+        camera = scene.create_entity("Camera")
+        camera.add_component(TransformComponent())
+        player = scene.create_entity("Player")
+        player.add_component(TransformComponent())
+        player.add_component(TextComponent("ball"))
+
+        panel.render(scene, editor_overlays=False)
+        self.root.update_idletasks()
+
+        self.assertFalse(panel._canvas.find_withtag(f"entity:{camera.entity_id}"))
+        self.assertTrue(panel._canvas.find_withtag(f"entity:{player.entity_id}"))
 
     def test_viewport_accepts_float_text_sizes(self) -> None:
         panel = ViewportPanel(self.root)

@@ -3,20 +3,24 @@
 from __future__ import annotations
 
 import unittest
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, cast
 
 from expra_engine.coordinators.ui_coordinator import RenderIntent, UICoordinator
-from expra_engine.editor.contributions import RenderTargetRegistry
 from expra_engine.core.component import TransformComponent
+from expra_engine.core.engine import EngineRunState
 from expra_engine.core.scene import Scene
-from expra_engine.runtime.collider import ColliderComponent
+from expra_engine.editor.contributions import RenderTargetRegistry
 from expra_engine.runtime.canvas_effects import CanvasModulateComponent
+from expra_engine.runtime.collider import ColliderComponent
 from expra_engine.runtime.rendering import Color
+from expra_engine.runtime.transform_interpolation import TransformInterpolator
 from expra_engine.runtime.visual_components import (
     PrimitiveComponent,
     SpriteComponent,
     TextComponent,
 )
+from expra_engine.ui.editor_window import EditorWindow
 from expra_engine.ui.viewport import ViewportCamera, build_editor_render_target
 
 
@@ -63,6 +67,38 @@ class RenderTargetRegistryTests(unittest.TestCase):
 
 
 class EditorRenderTargetTests(unittest.TestCase):
+    def test_editor_viewport_routes_runtime_interpolation_only_during_play(self) -> None:
+        class ViewportSink:
+            def __init__(self) -> None:
+                self.calls: list[dict[str, Any]] = []
+
+            def render(self, scene: Scene, selected_id: str | None, **kwargs: Any) -> None:
+                self.calls.append({"scene": scene, "selected_id": selected_id, **kwargs})
+
+        interpolator = object()
+        sink = ViewportSink()
+        window = cast(Any, EditorWindow.__new__(EditorWindow))
+        window._viewport = sink
+        window._engine = SimpleNamespace(
+            run_state=EngineRunState.EDIT,
+            transform_interpolator=interpolator,
+            interpolation_fraction=0.5,
+            animated_sprite_system=SimpleNamespace(players={}),
+        )
+        scene = Scene("routing")
+
+        for state, overlays, expected_interpolator in (
+            (EngineRunState.EDIT, True, None),
+            (EngineRunState.PLAY, False, interpolator),
+            (EngineRunState.PAUSED, False, interpolator),
+        ):
+            window._engine.run_state = state
+            window._render_viewport(RenderIntent(target="viewport", payload=(scene, None)))
+            call = sink.calls[-1]
+            self.assertEqual(call["editor_overlays"], overlays)
+            self.assertIs(call["interpolator"], expected_interpolator)
+            self.assertEqual(call["interpolation_fraction"], 0.5 if expected_interpolator else 0.0)
+
     def test_target_uses_extracted_visuals_and_preserves_colors_and_layer_order(self) -> None:
         scene = Scene("preview")
         primitive = scene.create_entity("primitive", entity_id="primitive", layer=2)
@@ -134,6 +170,26 @@ class EditorRenderTargetTests(unittest.TestCase):
         target = build_editor_render_target(scene, viewport=(200, 100))
 
         self.assertEqual([item.key for item in target.items], ["good"])
+
+    def test_target_uses_runtime_interpolation_when_supplied(self) -> None:
+        scene = Scene("runtime preview")
+        entity = scene.create_entity("moving", entity_id="moving")
+        transform = TransformComponent()
+        entity.add_component(transform)
+        entity.add_component(PrimitiveComponent())
+        interpolator = TransformInterpolator()
+        interpolator.capture_scene(scene)
+
+        transform.x = 10.0
+        interpolator.capture_scene(scene)
+        target = build_editor_render_target(
+            scene,
+            viewport=(200, 100),
+            interpolator=interpolator,
+            interpolation_fraction=0.5,
+        )
+
+        self.assertEqual(target.items[0].world_transform.position[0], 5.0)
 
 
 class ViewportCameraTests(unittest.TestCase):
