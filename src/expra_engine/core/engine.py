@@ -28,7 +28,7 @@ import json
 import time
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from expra_engine.core.scene import Scene
 from expra_engine.core.utils import get_time
@@ -94,6 +94,10 @@ class Engine:
 
         # Pluggable runtime systems
         self._systems: list[RuntimeSystem] = []
+        from expra_engine.runtime.animated_sprite_system import AnimatedSpriteSystem
+
+        self._animated_sprite_system = AnimatedSpriteSystem()
+        self.add_system(self._animated_sprite_system)
         self._behaviour_system: BehaviourSystem | None = None
         self._input_map = InputMap()
         self._quit_requested = False
@@ -132,6 +136,11 @@ class Engine:
     def transform_interpolator(self) -> TransformInterpolator:
         """Runtime-only fixed-tick transform snapshots for presentation."""
         return self._transform_interpolator
+
+    @property
+    def animated_sprite_system(self) -> Any:
+        """Built-in owner of transient AnimatedSprite2D playback state."""
+        return self._animated_sprite_system
 
     @property
     def interpolation_fraction(self) -> float:

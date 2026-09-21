@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -17,6 +19,7 @@ class PropertyDescriptor:
     enum_values: tuple[Any, ...] = ()
     minimum: float | None = None
     maximum: float | None = None
+    tuple_length: int | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "enum_values", tuple(self.enum_values))
@@ -27,6 +30,7 @@ class PropertyDescriptor:
         if not self.editable:
             return fallback
         try:
+            converted: Any
             if self.value_type is bool:
                 if isinstance(value, bool):
                     converted = value
@@ -38,8 +42,17 @@ class PropertyDescriptor:
                     return fallback
             elif self.value_type is tuple:
                 converted = tuple(float(part.strip()) for part in str(value).split(","))
-                if not converted or not all(math.isfinite(part) for part in converted):
+                if (
+                    not converted
+                    or not all(math.isfinite(part) for part in converted)
+                    or (self.tuple_length is not None and len(converted) != self.tuple_length)
+                ):
                     return fallback
+            elif hasattr(self.value_type, "from_dict"):
+                raw = json.loads(value) if isinstance(value, str) else value
+                if not isinstance(raw, Mapping):
+                    return fallback
+                converted = self.value_type.from_dict(raw)
             else:
                 converted = self.value_type(value)
             if isinstance(converted, (int, float)) and not isinstance(converted, bool):

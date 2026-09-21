@@ -14,6 +14,7 @@ from expra_engine.core.project import Project
 from expra_engine.runtime import (
     PygameRenderer,
     PygameRenderFrame,
+    PygameResourceProvider,
     PygameRuntime,
     RenderContractFrame,
     ScriptRegistry,
@@ -113,6 +114,7 @@ def main() -> None:
             None,
             world_bounds=(0, 0, 100, 100),
             arena_bounds=(0, 0, 800, 600),
+            resource_provider=PygameResourceProvider(pygame, project.resource_service()),
         )
         runtime = PygameRuntime(
             engine,
@@ -141,7 +143,15 @@ def main() -> None:
             report["frames_rendered"] += 1
             if smoke is not None and report["frames_rendered"] >= smoke.frame_limit:
                 runtime.stop()
+            extracted = extract_render_frame(
+                current_engine.active_scene,
+                elapsed=elapsed,
+                interpolator=current_engine.transform_interpolator,
+                interpolation_fraction=current_engine.interpolation_fraction,
+                animated_players=current_engine.animated_sprite_system.players,
+            )
             return RenderContractFrame(
+                extracted.items,
                 elapsed=elapsed,
                 payload=PygameRenderFrame(
                     current_engine.active_scene,
@@ -149,7 +159,7 @@ def main() -> None:
                     status=game.status if game is not None else _scripted_state(current_engine)[1],
                     interpolator=current_engine.transform_interpolator,
                     interpolation_fraction=current_engine.interpolation_fraction,
-                    modulation=extract_render_frame(current_engine.active_scene).modulation,
+                    modulation=extracted.modulation,
                 ),
             )
 

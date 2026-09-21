@@ -128,7 +128,7 @@ class EventQueue:
             event = item
             targets = walk(self._root)
 
-        handler_name = _handler_name(type(event).__name__)
+        handler_name = getattr(event, "event_handler_name", _handler_name(type(event).__name__))
         for obj in targets:
             method = getattr(obj, handler_name, None)
             if method is not None and callable(method):

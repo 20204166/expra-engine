@@ -2,21 +2,32 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
+from expra_engine.core.component import TransformComponent
 from expra_engine.core.entity import Entity
 from expra_engine.core.scene import Scene
-from expra_engine.core.component import TransformComponent
+from expra_engine.runtime.animated_sprite_2d import (
+    AnimatedSprite2DComponent,
+    AnimatedSpritePlayer2D,
+)
+from expra_engine.runtime.canvas_effects import resolve_canvas_modulation
 from expra_engine.runtime.rendering import (
+    Color,
     MaterialDescriptor,
     PrimitiveDescriptor,
     RenderFrame,
     RenderItem,
     RenderPhase,
-    Transform,
     TextDescriptor,
+    Transform,
 )
 from expra_engine.runtime.transform_interpolation import TransformInterpolator
-from expra_engine.runtime.visual_components import PrimitiveComponent, SpriteComponent, TextComponent
-from expra_engine.runtime.canvas_effects import resolve_canvas_modulation
+from expra_engine.runtime.visual_components import (
+    PrimitiveComponent,
+    SpriteComponent,
+    TextComponent,
+)
 
 __all__ = ("extract_render_frame",)
 
@@ -59,7 +70,12 @@ def _transform(
     return result
 
 
-def _item(entity: Entity, visual: object, transform: Transform) -> RenderItem:
+def _item(
+    entity: Entity,
+    visual: object,
+    transform: Transform,
+    player: AnimatedSpritePlayer2D | None = None,
+) -> RenderItem:
     if isinstance(visual, PrimitiveComponent):
         if visual.kind not in {"point", "rectangle", "circle", "rounded_rectangle"}:
             raise ValueError("unsupported primitive kind")
@@ -83,6 +99,19 @@ def _item(entity: Entity, visual: object, transform: Transform) -> RenderItem:
         material = MaterialDescriptor(color=color, tint=color, texture_id=visual.asset)
         payload = visual.to_dict()
         layer = visual.layer
+    elif isinstance(visual, AnimatedSprite2DComponent):
+        player = player or AnimatedSpritePlayer2D(visual)
+        view = player.view
+        if view is None:
+            raise ValueError("animated sprite has no current frame")
+        primitive = PrimitiveDescriptor("sprite", (1.0, 1.0))
+        color = Color(1.0, 1.0, 1.0, 1.0)
+        material = MaterialDescriptor(
+            texture_id=view.asset_id,
+            source_region=view.region,
+        )
+        payload = visual.to_dict()
+        layer = view.layer
     elif isinstance(visual, TextComponent):
         if visual.size <= 0 or (visual.max_width is not None and visual.max_width <= 0):
             raise ValueError("invalid text")
@@ -102,6 +131,10 @@ def _item(entity: Entity, visual: object, transform: Transform) -> RenderItem:
         phase=phase,
         layer=entity.layer + layer,
         payload=payload,
+        sprite_offset=view.offset if isinstance(visual, AnimatedSprite2DComponent) and view is not None else (0.0, 0.0),
+        sprite_centered=view.centered if isinstance(visual, AnimatedSprite2DComponent) and view is not None else True,
+        sprite_flip_h=view.flip_h if isinstance(visual, AnimatedSprite2DComponent) and view is not None else False,
+        sprite_flip_v=view.flip_v if isinstance(visual, AnimatedSprite2DComponent) and view is not None else False,
         text=TextDescriptor(
             visual.text,
             visual.font,
@@ -119,6 +152,7 @@ def extract_render_frame(
     elapsed: float = 0.0,
     interpolator: TransformInterpolator | None = None,
     interpolation_fraction: float = 0.0,
+    animated_players: Mapping[AnimatedSprite2DComponent, AnimatedSpritePlayer2D] | None = None,
 ) -> RenderFrame:
     """Convert registered scene visuals into backend-neutral render data."""
     entities = {entity.entity_id: entity for entity in scene.entities}
@@ -137,12 +171,21 @@ def extract_render_frame(
         except (TypeError, ValueError, OverflowError):
             continue
         for visual in entity.components:
-            if isinstance(visual, (PrimitiveComponent, SpriteComponent, TextComponent)):
-                if visual.enabled and visual.visible:
-                    try:
-                        items.append(_item(entity, visual, transform))
-                    except (TypeError, ValueError, OverflowError):
-                        continue
+            if not isinstance(
+                visual, (PrimitiveComponent, SpriteComponent, TextComponent, AnimatedSprite2DComponent)
+            ) or not visual.enabled or not visual.visible:
+                continue
+            try:
+                items.append(
+                    _item(
+                        entity,
+                        visual,
+                        transform,
+                        animated_players.get(visual) if animated_players else None,
+                    )
+                )
+            except (TypeError, ValueError, OverflowError):
+                continue
     return RenderFrame(
         tuple(items),
         elapsed=elapsed,

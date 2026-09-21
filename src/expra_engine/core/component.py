@@ -158,14 +158,15 @@ def registered_component_types() -> tuple[tuple[str, type[Component]], ...]:
 def _register_visual_components() -> None:
     if "primitive" in _COMPONENT_REGISTRY:
         return
+    from expra_engine.runtime.animated_sprite_2d import AnimatedSprite2DComponent, SpriteFrames2D
+    from expra_engine.runtime.canvas_effects import CanvasModulateComponent
     from expra_engine.runtime.visual_components import (
         PrimitiveComponent,
         SpriteComponent,
         TextComponent,
     )
-    from expra_engine.runtime.canvas_effects import CanvasModulateComponent
 
-    registrations = (
+    registrations: tuple[tuple[str, type[Component], tuple[PropertyDescriptor, ...]], ...] = (
         (
             PrimitiveComponent.component_type,
             PrimitiveComponent,
@@ -202,7 +203,29 @@ def _register_visual_components() -> None:
                 PropertyDescriptor("size", "Size", float, 16.0),
                 PropertyDescriptor("color", "Color", tuple, (1.0, 1.0, 1.0, 1.0)),
                 PropertyDescriptor("max_width", "Max Width", float, None),
-                PropertyDescriptor("align", "Align", str, "left", enum_values=("left", "center", "right")),
+                PropertyDescriptor(
+                    "align", "Align", str, "left", enum_values=("left", "center", "right")
+                ),
+                PropertyDescriptor("layer", "Layer", int, 0),
+                PropertyDescriptor("visible", "Visible", bool, True),
+            ),
+        ),
+        (
+            AnimatedSprite2DComponent.component_type,
+            AnimatedSprite2DComponent,
+            (
+                PropertyDescriptor("frames", "Frames", SpriteFrames2D, SpriteFrames2D()),
+                PropertyDescriptor("animation", "Animation", str, "default"),
+                PropertyDescriptor("autoplay", "Autoplay", str, ""),
+                PropertyDescriptor("frame", "Frame", int, 0, minimum=0),
+                PropertyDescriptor(
+                    "frame_progress", "Frame Progress", float, 0.0, minimum=0.0, maximum=1.0
+                ),
+                PropertyDescriptor("speed_scale", "Speed Scale", float, 1.0),
+                PropertyDescriptor("centered", "Centered", bool, True),
+                PropertyDescriptor("offset", "Offset", tuple, (0.0, 0.0), tuple_length=2),
+                PropertyDescriptor("flip_h", "Flip Horizontal", bool, False),
+                PropertyDescriptor("flip_v", "Flip Vertical", bool, False),
                 PropertyDescriptor("layer", "Layer", int, 0),
                 PropertyDescriptor("visible", "Visible", bool, True),
             ),
@@ -225,8 +248,10 @@ def _register_physics_components() -> None:
     if "collider" not in _COMPONENT_REGISTRY:
         from expra_engine.runtime.collider import ColliderComponent
 
-        fields = (
-            PropertyDescriptor("shape", "Shape", str, "rectangle", enum_values=("rectangle", "circle")),
+        collider_fields: tuple[PropertyDescriptor, ...] = (
+            PropertyDescriptor(
+                "shape", "Shape", str, "rectangle", enum_values=("rectangle", "circle")
+            ),
             PropertyDescriptor("width", "Width", float, 1.0, minimum=0.0),
             PropertyDescriptor("height", "Height", float, 1.0, minimum=0.0),
             PropertyDescriptor("radius", "Radius", float, None, minimum=0.0),
@@ -238,26 +263,34 @@ def _register_physics_components() -> None:
             PropertyDescriptor("mask", "Mask", int, 0xFFFFFFFF, minimum=0),
         )
         _COMPONENT_REGISTRY["collider"] = ColliderComponent
-        register_component_spec(ComponentTypeSpec("collider", ColliderComponent, fields))
+        register_component_spec(ComponentTypeSpec("collider", ColliderComponent, collider_fields))
 
     if "area" not in _COMPONENT_REGISTRY:
         from expra_engine.runtime.area import AreaComponent, SpaceOverride
         from expra_engine.runtime.collider import ColliderComponent
 
         modes = tuple(mode.value for mode in SpaceOverride)
-        fields = (
+        area_fields: tuple[PropertyDescriptor, ...] = (
             PropertyDescriptor("priority", "Priority", int, 0),
             PropertyDescriptor("gravity_mode", "Gravity Mode", str, "disabled", enum_values=modes),
             PropertyDescriptor("gravity", "Gravity", float, 0.0),
             PropertyDescriptor("gravity_direction", "Gravity Direction", tuple, (0.0, -1.0)),
             PropertyDescriptor("gravity_point", "Point Gravity", bool, False),
             PropertyDescriptor("gravity_point_center", "Point Center", tuple, (0.0, 0.0)),
-            PropertyDescriptor("gravity_point_unit_distance", "Point Unit Distance", float, 0.0, minimum=0.0),
-            PropertyDescriptor("linear_damp_mode", "Linear Damp Mode", str, "disabled", enum_values=modes),
+            PropertyDescriptor(
+                "gravity_point_unit_distance", "Point Unit Distance", float, 0.0, minimum=0.0
+            ),
+            PropertyDescriptor(
+                "linear_damp_mode", "Linear Damp Mode", str, "disabled", enum_values=modes
+            ),
             PropertyDescriptor("linear_damp", "Linear Damp", float, 0.0, minimum=0.0),
-            PropertyDescriptor("angular_damp_mode", "Angular Damp Mode", str, "disabled", enum_values=modes),
+            PropertyDescriptor(
+                "angular_damp_mode", "Angular Damp Mode", str, "disabled", enum_values=modes
+            ),
             PropertyDescriptor("angular_damp", "Angular Damp", float, 0.0, minimum=0.0),
             PropertyDescriptor("enabled", "Enabled", bool, True),
         )
         _COMPONENT_REGISTRY["area"] = AreaComponent
-        register_component_spec(ComponentTypeSpec("area", AreaComponent, fields, (ColliderComponent,)))
+        register_component_spec(
+            ComponentTypeSpec("area", AreaComponent, area_fields, (ColliderComponent,))
+        )

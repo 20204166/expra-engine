@@ -8,6 +8,7 @@ from enum import IntEnum
 from typing import Protocol, runtime_checkable
 
 from expra_engine.core.scene.camera import Camera2D
+from expra_engine.runtime.animation import SpriteRegion
 from expra_engine.ui_model.geometry import Rect
 from expra_engine.ui_model.nine_slice import NineSlice
 
@@ -23,8 +24,8 @@ __all__ = (
     "RenderPhase",
     "Renderer",
     "RendererCapabilities",
-    "Transform",
     "TextDescriptor",
+    "Transform",
     "Viewport",
 )
 
@@ -195,6 +196,7 @@ class MaterialDescriptor:
     outline: Color | None = None
     outline_width: float = 0.0
     blend_mode: str = "normal"
+    source_region: SpriteRegion | None = None
 
     def __post_init__(self) -> None:
         opacity = _finite(self.opacity, "opacity")
@@ -276,13 +278,38 @@ class RenderItem:
     payload: object | None = None
     text: TextDescriptor | None = None
     nine_slice: NineSliceDescriptor | None = None
+    sprite_offset: Vec2 = (0.0, 0.0)
+    sprite_centered: bool = True
+    sprite_flip_h: bool = False
+    sprite_flip_v: bool = False
 
     @property
     def world_transform(self) -> Transform:
         return self.parent.compose(self.transform) if self.parent is not None else self.transform
 
-    def _projected_bounds(self, context: RenderContext) -> tuple[float, float, float, float]:
+    @property
+    def sprite_transform(self) -> Transform:
+        """Return the visual transform after sprite-local placement is applied."""
         transform = self.world_transform
+        angle = math.radians(transform.rotation)
+        offset_x, offset_y = self.sprite_offset
+        if not self.sprite_centered:
+            offset_x += self.primitive.size[0] / 2
+            offset_y += self.primitive.size[1] / 2
+        local_x = offset_x * transform.scale[0]
+        local_y = offset_y * transform.scale[1]
+        return Transform(
+            position=(
+                transform.position[0] + local_x * math.cos(angle) - local_y * math.sin(angle),
+                transform.position[1] + local_x * math.sin(angle) + local_y * math.cos(angle),
+                transform.position[2],
+            ),
+            rotation=transform.rotation,
+            scale=transform.scale,
+        )
+
+    def _projected_bounds(self, context: RenderContext) -> tuple[float, float, float, float]:
+        transform = self.sprite_transform if self.primitive.kind == "sprite" else self.world_transform
         center = context.camera.project(transform.position, context.viewport)
         if context.camera.rotation and self.primitive.radius is None:
             half_width = abs(self.primitive.size[0] * transform.scale[0]) / 2

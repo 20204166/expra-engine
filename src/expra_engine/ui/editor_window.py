@@ -868,7 +868,11 @@ class EditorWindow:
         if not isinstance(payload, tuple) or len(payload) != 2:
             return
         scene, selected_id = payload
-        self._viewport.render(scene, selected_id)
+        self._viewport.render(
+            scene,
+            selected_id,
+            animated_players=self._engine.animated_sprite_system.players,
+        )
 
     def _present_selection(self, scene: Scene | None, entity: Any) -> None:
         self._ui.begin_batch()

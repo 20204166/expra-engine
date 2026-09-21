@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable, Iterable
-from typing import IO
+from typing import IO, TYPE_CHECKING
 
-from expra_engine.coordinators.app_coordinator import AppCoordinator
+if TYPE_CHECKING:
+    from expra_engine.coordinators.app_coordinator import AppCoordinator
 
 from .cache import CachePolicy, ContentIdentity, ResourceCache
 from .dependencies import DependencyGraph

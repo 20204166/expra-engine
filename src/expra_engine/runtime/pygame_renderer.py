@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import math
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from io import BytesIO
 from typing import Any
 
 from expra_engine.core.component import TransformComponent
@@ -22,7 +23,7 @@ from expra_engine.runtime.rendering import RenderFrame as ContractRenderFrame
 from expra_engine.runtime.transform_interpolation import TransformInterpolator
 from expra_engine.ui_model.geometry import Rect
 
-__all__ = ("PygameRenderFrame", "PygameRenderer", "RenderFrame")
+__all__ = ("PygameRenderFrame", "PygameRenderer", "PygameResourceProvider", "RenderFrame")
 
 
 @dataclass(frozen=True)
@@ -34,7 +35,7 @@ class RenderFrame:
     status: str = ""
     interpolator: TransformInterpolator | None = None
     interpolation_fraction: float = 0.0
-    modulation: Color = Color(1.0, 1.0, 1.0, 1.0)
+    modulation: Color = field(default_factory=lambda: Color(1.0, 1.0, 1.0, 1.0))
 
 
 @dataclass(frozen=True)
@@ -51,6 +52,25 @@ class _FallbackRect:
     @property
     def size(self) -> tuple[int, int]:
         return (self.width, self.height)
+
+
+class PygameResourceProvider:
+    """Decode project-owned resource bytes into cached Pygame textures."""
+
+    def __init__(self, pygame_module: Any, resources: Any) -> None:
+        self._pygame = pygame_module
+        self._resources = resources
+        self._textures: dict[str, Any] = {}
+
+    def __call__(self, texture_id: str) -> Any | None:
+        if texture_id in self._textures:
+            return self._textures[texture_id]
+        try:
+            texture = self._pygame.image.load(BytesIO(self._resources.read_bytes(texture_id)))
+        except Exception:  # noqa: BLE001 - resource and decoder failures are frame-local
+            return None
+        self._textures[texture_id] = texture
+        return texture
 
 
 class PygameRenderer:
@@ -150,6 +170,18 @@ class PygameRenderer:
                     texture = self._resource_provider(item.material.texture_id)
                     if texture is None:
                         continue
+                    source_region = item.material.source_region
+                    if source_region is not None:
+                        subsurface = getattr(texture, "subsurface", None)
+                        if callable(subsurface):
+                            texture = subsurface(
+                                (
+                                    source_region.x,
+                                    source_region.y,
+                                    source_region.width,
+                                    source_region.height,
+                                )
+                            )
                     width = round(
                         abs(
                             item.primitive.size[0]
@@ -178,15 +210,35 @@ class PygameRenderer:
                     if rendered_texture is None:
                         continue
                     transform_api = getattr(self.pygame, "transform", None)
+                    if transform_api is not None and (item.sprite_flip_h or item.sprite_flip_v):
+                        flip = getattr(transform_api, "flip", None)
+                        if callable(flip):
+                            rendered_texture = flip(
+                                rendered_texture, item.sprite_flip_h, item.sprite_flip_v
+                            )
                     if angle and transform_api is not None:
                         rendered_texture = transform_api.rotate(rendered_texture, angle)
                     if transform_api is not None and hasattr(transform_api, "smoothscale"):
-                        rendered_texture = transform_api.smoothscale(rendered_texture, (width, height))
-                    texture_size = getattr(rendered_texture, "get_size", lambda: (width, height))()
-                    self.surface.blit(
-                        rendered_texture,
-                        self._rect_from_center(position, round(texture_size[0]), round(texture_size[1])),
-                    )
+                        rendered_texture = transform_api.smoothscale(
+                            rendered_texture, (width, height)
+                        )
+                    get_size = getattr(rendered_texture, "get_size", None)
+                    texture_size = get_size() if callable(get_size) else (width, height)
+                    draw_position = self._sprite_position(item, transform, context)
+                    if item.sprite_centered:
+                        destination = self._rect_from_center(
+                            draw_position, round(texture_size[0]), round(texture_size[1])
+                        )
+                    else:
+                        destination = self._rect(
+                            (
+                                draw_position[0],
+                                draw_position[1],
+                                round(texture_size[0]),
+                                round(texture_size[1]),
+                            )
+                        )
+                    self.surface.blit(rendered_texture, destination)
                     continue
                 if item.text is not None:
                     self.draw_text(
@@ -302,7 +354,10 @@ class PygameRenderer:
             current = words[0]
             for word in words[1:]:
                 candidate = f"{current} {word}"
-                if descriptor.max_width is not None and font.size(candidate)[0] > descriptor.max_width:
+                if (
+                    descriptor.max_width is not None
+                    and font.size(candidate)[0] > descriptor.max_width
+                ):
                     lines.append(current)
                     current = word
                 else:
@@ -331,7 +386,10 @@ class PygameRenderer:
             current = words[0]
             for word in words[1:]:
                 candidate = f"{current} {word}"
-                if descriptor.max_width is not None and font.size(candidate)[0] > descriptor.max_width:
+                if (
+                    descriptor.max_width is not None
+                    and font.size(candidate)[0] > descriptor.max_width
+                ):
                     lines.append(current)
                     current = word
                 else:
@@ -501,8 +559,10 @@ class PygameRenderer:
                     try:
                         self._draw_legacy_box(
                             self._legacy_color((48, 224, 255), frame.modulation),
-                            sampled.position[0], sampled.position[1],
-                            20 * abs(sampled.scale[0]), 20 * abs(sampled.scale[1]),
+                            sampled.position[0],
+                            sampled.position[1],
+                            20 * abs(sampled.scale[0]),
+                            20 * abs(sampled.scale[1]),
                             sampled.rotation,
                         )
                         angle = math.radians(sampled.rotation)
@@ -522,8 +582,10 @@ class PygameRenderer:
                     with suppress(Exception):
                         self._draw_legacy_box(
                             self._legacy_color((255, 72, 178), frame.modulation),
-                            sampled.position[0], sampled.position[1],
-                            20 * abs(sampled.scale[0]), 20 * abs(sampled.scale[1]),
+                            sampled.position[0],
+                            sampled.position[1],
+                            20 * abs(sampled.scale[0]),
+                            20 * abs(sampled.scale[1]),
                             sampled.rotation,
                         )
                 elif entity.has_tag("target") or entity.name.lower() == "target":
@@ -566,7 +628,9 @@ class PygameRenderer:
     def _legacy_color(rgb: tuple[int, int, int], modulation: Color) -> tuple[int, int, int]:
         return tuple(
             round(channel * factor)
-            for channel, factor in zip(rgb, (modulation.red, modulation.green, modulation.blue))
+            for channel, factor in zip(
+                rgb, (modulation.red, modulation.green, modulation.blue), strict=True
+            )
         )
 
     @staticmethod
@@ -599,7 +663,10 @@ class PygameRenderer:
         camera = self.context.camera
         return round(
             world_radius
-            * min(self.context.viewport.width / camera.width, self.context.viewport.height / camera.height)
+            * min(
+                self.context.viewport.width / camera.width,
+                self.context.viewport.height / camera.height,
+            )
         )
 
     def _draw_legacy_box(
@@ -613,12 +680,21 @@ class PygameRenderer:
     ) -> None:
         draw = self.pygame.draw
         if self.context is None:
-            draw.rect(self.surface, color, self._rect_from_center(self._legacy_project(x, y), round(width), round(height)))
+            draw.rect(
+                self.surface,
+                color,
+                self._rect_from_center(self._legacy_project(x, y), round(width), round(height)),
+            )
             return
         angle = math.radians(rotation)
         cos_angle, sin_angle = math.cos(angle), math.sin(angle)
         corners = []
-        for local_x, local_y in ((-width / 2, -height / 2), (-width / 2, height / 2), (width / 2, height / 2), (width / 2, -height / 2)):
+        for local_x, local_y in (
+            (-width / 2, -height / 2),
+            (-width / 2, height / 2),
+            (width / 2, height / 2),
+            (width / 2, -height / 2),
+        ):
             world_x = x + local_x * cos_angle - local_y * sin_angle
             world_y = y + local_x * sin_angle + local_y * cos_angle
             corners.append(self._legacy_project(world_x, world_y))
@@ -638,6 +714,26 @@ class PygameRenderer:
 
     def _rect_from_center(self, center: tuple[int, int], width: int, height: int) -> Any:
         return self._rect((center[0] - width // 2, center[1] - height // 2, width, height))
+
+    def _sprite_position(
+        self,
+        item: Any,
+        transform: Transform,
+        context: RenderContext,
+    ) -> tuple[int, int]:
+        offset_x, offset_y = item.sprite_offset
+        angle = math.radians(transform.rotation)
+        local_x = (offset_x * transform.scale[0]) * math.cos(angle) - (
+            offset_y * transform.scale[1]
+        ) * math.sin(angle)
+        local_y = (offset_x * transform.scale[0]) * math.sin(angle) + (
+            offset_y * transform.scale[1]
+        ) * math.cos(angle)
+        projected = context.camera.project(
+            (transform.position[0] + local_x, transform.position[1] + local_y),
+            context.viewport,
+        )
+        return round(projected[0]), round(projected[1])
 
 
 PygameRenderFrame = RenderFrame

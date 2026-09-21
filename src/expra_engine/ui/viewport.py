@@ -22,6 +22,7 @@ from expra_engine.core.camera import Camera2D
 from expra_engine.core.component import TransformComponent
 from expra_engine.core.scene import Scene
 from expra_engine.runtime.collider import ColliderComponent
+from expra_engine.runtime.animated_sprite_2d import AnimatedSprite2DComponent, AnimatedSpritePlayer2D
 from expra_engine.runtime.canvas_effects import modulate_color
 from expra_engine.runtime.render_extractor import extract_render_frame
 from expra_engine.runtime.rendering import (
@@ -58,11 +59,12 @@ def build_editor_render_target(
     viewport: tuple[int, int] = (400, 300),
     selected_id: str | None = None,
     camera: Any | None = None,
+    animated_players: dict[AnimatedSprite2DComponent, AnimatedSpritePlayer2D] | None = None,
 ) -> EditorRenderTarget:
     """Extract the runtime frame once and apply editor preview clipping."""
     if scene is None:
         return EditorRenderTarget(RenderFrame(), (), None)
-    frame = extract_render_frame(scene)
+    frame = extract_render_frame(scene, animated_players=animated_players)
     width, height = viewport
     if width <= 0 or height <= 0:
         return EditorRenderTarget(frame, (), None)
@@ -206,13 +208,20 @@ class ViewportPanel(tk.Frame):
         self._canvas.bind("<KeyPress-r>", lambda _event: self._reset_camera())
         resize_aware(self, lambda _w: self._on_resize())
 
-    def render(self, scene: Scene | None, selected_id: str | None = None) -> None:
+    def render(
+        self,
+        scene: Scene | None,
+        selected_id: str | None = None,
+        *,
+        animated_players: dict[AnimatedSprite2DComponent, AnimatedSpritePlayer2D] | None = None,
+    ) -> None:
         """Redraw the viewport for ``scene``. Called on the main thread."""
         scene_changed = scene is not None and (
             self._scene is None or self._scene.scene_id != scene.scene_id
         )
         self._scene = scene
         self._selected_id = selected_id
+        self._animated_players = animated_players
         if scene_changed and scene is not None:
             self._camera.apply_dict(scene.camera)
         self._target = build_editor_render_target(
@@ -220,6 +229,7 @@ class ViewportPanel(tk.Frame):
             viewport=(max(1, self._canvas.winfo_width()), max(1, self._canvas.winfo_height())),
             selected_id=selected_id,
             camera=self._camera,
+            animated_players=animated_players,
         )
         self._redraw()
 
@@ -265,6 +275,7 @@ class ViewportPanel(tk.Frame):
             viewport=(max(1, self._canvas.winfo_width()), max(1, self._canvas.winfo_height())),
             selected_id=self._selected_id,
             camera=self._camera,
+            animated_players=getattr(self, "_animated_players", None),
         )
         self._redraw()
 
@@ -480,7 +491,7 @@ class ViewportPanel(tk.Frame):
             )
 
     def _draw_render_item(self, item: RenderItem) -> None:
-        transform = item.world_transform
+        transform = item.sprite_transform if item.primitive.kind == "sprite" else item.world_transform
         ex, ey = self._camera.project((transform.position[0], transform.position[1]))
         sx = abs(item.primitive.size[0] * transform.scale[0]) * self._camera._camera.pixel_ratio / 2
         sy = abs(item.primitive.size[1] * transform.scale[1]) * self._camera._camera.pixel_ratio / 2
@@ -518,7 +529,7 @@ class ViewportPanel(tk.Frame):
             self._canvas.create_rectangle(ex - sx - 4, ey - sy - 4, ex + sx + 4, ey + sy + 4, outline=self._colors["accent"], width=2, tags="selection")
 
     def _projected_corners(self, item: RenderItem) -> tuple[float, ...]:
-        transform = item.world_transform
+        transform = item.sprite_transform if item.primitive.kind == "sprite" else item.world_transform
         half_width = abs(item.primitive.size[0] * transform.scale[0]) / 2
         half_height = abs(item.primitive.size[1] * transform.scale[1]) / 2
         angle = math.radians(transform.rotation)
