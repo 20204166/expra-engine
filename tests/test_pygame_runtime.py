@@ -5,6 +5,8 @@ from types import SimpleNamespace
 from typing import Any
 
 from expra_engine.runtime import PygameRuntime, RenderContext, RenderContractFrame, Viewport
+from expra_engine.core.component import TransformComponent
+from expra_engine.core.scene import Scene
 from expra_engine.runtime.ui import Button, GameCanvas, LayoutSpec, Viewport as UIViewport
 
 
@@ -98,6 +100,78 @@ class _FailingStopRenderer(_RecordingRenderer):
 
 
 class TestPygameRuntime(unittest.TestCase):
+    def test_runtime_updates_camera_following_before_render(self) -> None:
+        from expra_engine.runtime import OrthographicCamera
+
+        pygame = _FakePygame([[], [SimpleNamespace(type=_FakePygame.QUIT)]])
+        camera = OrthographicCamera()
+        camera.position_smoothing_enabled = False
+        camera.target_position = (7.0, -3.0)
+        runtime = PygameRuntime(
+            _FakeEngine(),
+            renderer=_RecordingRenderer(),
+            pygame_module=pygame,
+            clock=_FakeClock([16, 16]),
+            surface_factory=pygame.display.set_mode,
+            camera=camera,
+        )
+
+        runtime.run()
+
+        self.assertEqual(camera.position[:2], (7.0, -3.0))
+
+    def test_runtime_rejects_invalid_camera_delta_without_silent_fallback(self) -> None:
+        from expra_engine.runtime import OrthographicCamera
+
+        camera = OrthographicCamera()
+        with self.assertRaises(ValueError):
+            camera.update(-1.0)
+
+    def test_runtime_binds_camera_to_scene_entity_and_converts_input(self) -> None:
+        from expra_engine.runtime import OrthographicCamera
+
+        scene = Scene("Follow")
+        target = scene.create_entity("Target", entity_id="target")
+        target.add_component(TransformComponent(x=7.0, y=-3.0))
+        engine = _FakeEngine()
+        engine.active_scene = scene
+        camera = OrthographicCamera(width=20.0, height=10.0)
+        runtime = PygameRuntime(
+            engine,
+            pygame_module=_FakePygame([[], [SimpleNamespace(type=_FakePygame.QUIT)]]),
+            clock=_FakeClock([16, 16]),
+            surface_factory=lambda size: _FakeSurface(),
+            camera=camera,
+            camera_target_id="target",
+        )
+
+        runtime.run()
+
+        self.assertEqual(camera.position[:2], (7.0, -3.0))
+        self.assertEqual(runtime.screen_to_world((400.0, 300.0)), (7.0, -3.0))
+
+    def test_runtime_applies_persisted_scene_camera_settings_once(self) -> None:
+        from expra_engine.runtime import OrthographicCamera
+
+        scene = Scene("Configured")
+        scene.camera = {"position": [4.0, 5.0, 2.0], "zoom": 2.0, "rotation": 0.25}
+        engine = _FakeEngine()
+        engine.active_scene = scene
+        camera = OrthographicCamera()
+        runtime = PygameRuntime(
+            engine,
+            pygame_module=_FakePygame([[], [SimpleNamespace(type=_FakePygame.QUIT)]]),
+            clock=_FakeClock([16, 16]),
+            surface_factory=lambda size: _FakeSurface(),
+            camera=camera,
+        )
+
+        runtime.run()
+
+        self.assertEqual(camera.position, (4.0, 5.0, 2.0))
+        self.assertEqual(camera.zoom, 2.0)
+        self.assertEqual(camera.rotation, 0.25)
+
     def test_ui_owns_pointer_events_before_gameplay_input(self) -> None:
         pygame = _FakePygame(
             [

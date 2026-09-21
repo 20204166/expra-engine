@@ -20,7 +20,7 @@ Tests cover:
 """
 
 import unittest
-from math import inf, isclose, nan
+from math import inf, isclose, nan, pi
 
 from expra_engine.core.camera import Camera2D
 from expra_engine.core.scene.camera import Camera2D as SceneCamera2D
@@ -243,6 +243,172 @@ class TestCamera2DPositionMove(unittest.TestCase):
         cam.position = (10.0, 0.0)
         self.assertAlmostEqual(cam.left, 5.0, places=4)
         self.assertAlmostEqual(cam.right, 15.0, places=4)
+
+
+class TestCamera2DFollowing(unittest.TestCase):
+    def _cam(self) -> Camera2D:
+        return Camera2D(position=(0.0, 0.0), target_width=10.0, viewport=(800, 600))
+
+    def test_target_moves_camera_without_smoothing(self) -> None:
+        cam = self._cam()
+        cam.target_position = (12.0, -4.0)
+
+        self.assertEqual(cam.update(0.0), (12.0, -4.0))
+        self.assertEqual(cam.position, (12.0, -4.0))
+
+    def test_position_assignment_remains_immediate_and_resets_target(self) -> None:
+        cam = self._cam()
+        cam.target_position = (20.0, 20.0)
+        cam.position = (3.0, 4.0)
+
+        self.assertEqual(cam.position, (3.0, 4.0))
+        self.assertEqual(cam.target_position, (3.0, 4.0))
+
+    def test_position_smoothing_moves_part_way_then_reset_snaps(self) -> None:
+        cam = self._cam()
+        cam.position_smoothing_enabled = True
+        cam.position_smoothing_speed = 1.0
+        cam.target_position = (10.0, 0.0)
+
+        position = cam.update(1.0)
+
+        self.assertGreater(position[0], 0.0)
+        self.assertLess(position[0], 10.0)
+        cam.reset_smoothing()
+        self.assertEqual(cam.position, (10.0, 0.0))
+
+    def test_invalid_update_delta_raises(self) -> None:
+        cam = self._cam()
+        for delta in (-1.0, nan, inf):
+            with self.subTest(delta=delta), self.assertRaises(ValueError):
+                cam.update(delta)
+
+    def test_invalid_smoothing_speed_raises_on_update(self) -> None:
+        cam = self._cam()
+        cam.position_smoothing_enabled = True
+        cam.position_smoothing_speed = nan
+
+        with self.assertRaises(ValueError):
+            cam.update(1.0)
+
+
+class TestCamera2DZoomOffsetAndRotation(unittest.TestCase):
+    def _cam(self) -> Camera2D:
+        return Camera2D(position=(0.0, 0.0), target_width=10.0, viewport=(800, 600))
+
+    def test_zoom_scales_visible_dimensions_and_preserves_round_trip(self) -> None:
+        cam = self._cam()
+        cam.zoom = 2.0
+
+        self.assertAlmostEqual(cam.width, 5.0)
+        self.assertAlmostEqual(cam.height, 3.75)
+        point = (1.25, -0.75)
+        self.assertEqual(cam.translate_to_game(cam.translate_to_screen(point)), point)
+
+    def test_invalid_zoom_values_raise(self) -> None:
+        cam = self._cam()
+        for zoom in (0.0, -1.0, nan, inf):
+            with self.subTest(zoom=zoom), self.assertRaises(ValueError):
+                cam.zoom = zoom
+
+    def test_offset_moves_view_edges_without_moving_position(self) -> None:
+        cam = self._cam()
+        cam.offset = (2.0, -1.0)
+
+        self.assertEqual(cam.position, (0.0, 0.0))
+        self.assertAlmostEqual(cam.left, -3.0)
+        self.assertAlmostEqual(cam.top, 2.75)
+        self.assertEqual(cam.translate_to_game((400.0, 300.0)), (2.0, -1.0))
+
+    def test_rotation_round_trip_and_rotated_visibility(self) -> None:
+        cam = self._cam()
+        cam.rotation = pi / 2
+        point = (1.0, 0.0)
+
+        screen = cam.translate_to_screen(point)
+        result = cam.translate_to_game(screen)
+        self.assertAlmostEqual(result[0], point[0])
+        self.assertAlmostEqual(result[1], point[1])
+        self.assertTrue(cam.point_is_visible(point))
+
+    def test_rotation_smoothing_uses_shortest_angle(self) -> None:
+        cam = self._cam()
+        cam.rotation_smoothing_enabled = True
+        cam.rotation_smoothing_speed = 1.0
+        cam.target_rotation = pi
+
+        cam.update(1.0)
+
+        self.assertLess(cam.rotation, 0.0)
+        self.assertLessEqual(abs(cam.rotation), pi)
+
+    def test_invalid_rotation_and_offset_inputs_raise(self) -> None:
+        cam = self._cam()
+        with self.assertRaises(ValueError):
+            cam.rotation = nan
+        with self.assertRaises(TypeError):
+            cam.offset = "bad"  # type: ignore[assignment]
+
+
+class TestCamera2DDragAndLimits(unittest.TestCase):
+    def _cam(self) -> Camera2D:
+        return Camera2D(position=(0.0, 0.0), target_width=10.0, viewport=(800, 600))
+
+    def test_horizontal_drag_keeps_target_inside_dead_zone(self) -> None:
+        cam = self._cam()
+        cam.drag_horizontal_enabled = True
+        cam.target_position = (8.0, 0.0)
+
+        cam.update(0.0)
+
+        self.assertAlmostEqual(cam.position[0], 7.0)
+
+    def test_vertical_drag_keeps_target_inside_dead_zone(self) -> None:
+        cam = self._cam()
+        cam.drag_vertical_enabled = True
+        cam.target_position = (0.0, 6.0)
+
+        cam.update(0.0)
+
+        self.assertAlmostEqual(cam.position[1], 5.25)
+
+    def test_drag_margins_validate_length_and_range(self) -> None:
+        cam = self._cam()
+        with self.assertRaises(ValueError):
+            cam.drag_margins = (0.1, 0.2, 0.3)  # type: ignore[assignment]
+        for margins in ((-0.1, 0.2, 0.3, 0.4), (0.1, 0.2, 1.1, 0.4), (nan, 0.2, 0.3, 0.4)):
+            with self.subTest(margins=margins), self.assertRaises(ValueError):
+                cam.drag_margins = margins
+
+    def test_limits_clamp_camera_position(self) -> None:
+        cam = self._cam()
+        cam.set_limits(left=-6.0, bottom=-5.0, right=6.0, top=5.0)
+        cam.position = (100.0, -100.0)
+
+        cam.update(0.0)
+
+        self.assertEqual(cam.position, (1.0, -1.25))
+
+    def test_impossible_limits_use_world_centre(self) -> None:
+        cam = self._cam()
+        cam.set_limits(left=-2.0, bottom=-2.0, right=2.0, top=2.0)
+        cam.target_position = (100.0, 100.0)
+
+        cam.update(0.0)
+
+        self.assertEqual(cam.position, (0.0, 0.0))
+
+    def test_invalid_limits_and_clear_limits(self) -> None:
+        cam = self._cam()
+        with self.assertRaises(ValueError):
+            cam.set_limits(left=1.0, bottom=0.0, right=0.0, top=1.0)
+
+        cam.set_limits(left=-6.0, bottom=-5.0, right=6.0, top=5.0)
+        cam.target_position = (100.0, 0.0)
+        cam.update(0.0)
+        cam.clear_limits()
+        cam.update(0.0)
+        self.assertEqual(cam.position, (100.0, 0.0))
 
 
 if __name__ == "__main__":

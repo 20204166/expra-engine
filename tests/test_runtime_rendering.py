@@ -1,6 +1,7 @@
 """Tests for backend-neutral, orthographic renderer contracts."""
 
 from dataclasses import FrozenInstanceError
+from math import pi
 from typing import get_type_hints
 
 import pytest
@@ -21,6 +22,7 @@ from expra_engine.runtime.rendering import (
     Transform,
     Viewport,
 )
+from expra_engine.core.scene.camera import Camera2D
 
 
 def test_contract_values_are_immutable_and_validate_finite_inputs() -> None:
@@ -43,6 +45,33 @@ def test_orthographic_camera_maps_world_coordinates_into_viewport() -> None:
     assert camera.project((10.0, 20.0), viewport) == (300.0, 150.0)
     assert camera.project((0.0, 25.0), viewport) == (100.0, 50.0)
     assert camera.project((20.0, 15.0), viewport) == (500.0, 250.0)
+
+
+def test_runtime_camera_uses_camera2d_features_through_3d_depth_contract() -> None:
+    camera = OrthographicCamera(position=(10.0, 20.0, 4.0), width=20.0, height=10.0)
+    camera.zoom = 2.0
+    camera.offset = (1.0, -2.0)
+    camera.rotation = pi / 2
+    camera.target_position = (12.0, 21.0)
+    camera.update(0.0)
+
+    assert isinstance(camera, Camera2D)
+    assert camera.position == (12.0, 21.0, 4.0)
+    assert camera.zoom == 2.0
+    assert camera.project((13.0, 19.0), Viewport(10, 20, 400, 200)) == (210.0, 120.0)
+
+
+def test_runtime_camera_preserves_depth_validation_at_camera2d_limits() -> None:
+    camera = OrthographicCamera(position=(0.0, 0.0, 0.0), near=-2.0, far=3.0)
+    camera.set_limits(-2.0, -2.0, 2.0, 2.0)
+    camera.target_position = (100.0, 100.0)
+    camera.update(0.0)
+
+    assert camera.position[:2] == (0.0, 0.0)
+    context = RenderContext(Viewport(0, 0, 100, 100), camera)
+    primitive = PrimitiveDescriptor("point")
+    assert RenderItem("near", primitive, Transform(position=(0, 0, -2))).is_visible(context)
+    assert not RenderItem("beyond", primitive, Transform(position=(0, 0, 3.1))).is_visible(context)
 
 
 def test_render_frame_culls_items_outside_orthographic_depth_range() -> None:

@@ -124,8 +124,45 @@ class ViewportCameraTests(unittest.TestCase):
 
         self.assertGreaterEqual(camera.zoom_level, 0.25)
         self.assertLessEqual(camera.zoom_level, 4.0)
+        self.assertAlmostEqual(camera._camera.zoom, camera.zoom_level)
         camera.frame_scene(((10.0, 5.0), (-2.0, -3.0)))
         self.assertEqual(camera.position, (4.0, 1.0))
+
+    def test_zoom_clamps_at_both_edges_using_camera_zoom(self) -> None:
+        camera = ViewportCamera((200, 100))
+
+        camera.zoom(-100.0)
+        self.assertEqual(camera.zoom_level, 0.25)
+        self.assertEqual(camera._camera.zoom, 0.25)
+        camera.zoom(10_000.0)
+        self.assertEqual(camera.zoom_level, 4.0)
+        self.assertEqual(camera._camera.zoom, 4.0)
+
+    def test_resize_preserves_camera_zoom_state(self) -> None:
+        camera = ViewportCamera((200, 100))
+        camera.zoom(100.0)
+        camera.resize((400, 200))
+
+        self.assertEqual(camera._camera.zoom, 2.0)
+        self.assertAlmostEqual(camera._camera.width, 10.0)
+
+    def test_editor_camera_rotation_and_inverse_projection(self) -> None:
+        camera = ViewportCamera((200, 100))
+        camera.rotate(90.0)
+
+        world = camera.unproject(camera.project((1.0, 0.0)))
+
+        self.assertAlmostEqual(world[0], 1.0)
+        self.assertAlmostEqual(world[1], 0.0)
+
+    def test_editor_camera_state_applies_and_reset_clears_controls(self) -> None:
+        camera = ViewportCamera((200, 100))
+        camera.apply_dict({"position": [4.0, 5.0], "zoom": 2.0, "rotation": 0.5})
+        camera.reset_view()
+
+        self.assertEqual(camera.position, (0.0, 0.0))
+        self.assertEqual(camera.zoom_level, 1.0)
+        self.assertEqual(camera._camera.rotation, 0.0)
 
     def test_frame_selected_ignores_missing_entity(self) -> None:
         camera = ViewportCamera((200, 100))

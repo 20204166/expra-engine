@@ -5,7 +5,8 @@ import unittest
 
 from expra_engine.core.component import TransformComponent
 from expra_engine.core.entity import Entity
-from expra_engine.core.scene import Scene
+from expra_engine.core.scene import Scene, SceneCamera
+from expra_engine.core.scene.camera import Camera2D
 
 
 class TestSceneBasics(unittest.TestCase):
@@ -64,6 +65,31 @@ class TestSceneBasics(unittest.TestCase):
 
 
 class TestSceneSerialization(unittest.TestCase):
+    def test_scene_camera_is_owned_object_with_legacy_mapping_access(self) -> None:
+        scene = Scene("Camera", camera={"target_entity_id": "player"})
+
+        self.assertIsInstance(scene.camera, SceneCamera)
+        self.assertEqual(scene.camera.target_entity_id, "player")
+        self.assertEqual(scene.camera["target_entity_id"], "player")
+
+    def test_camera_settings_round_trip_without_affecting_legacy_scenes(self) -> None:
+        scene = Scene("Camera Level")
+        camera = Camera2D(position=(3.0, 4.0), target_width=12.0, viewport=(800, 600))
+        camera.zoom = 2.0
+        camera.rotation = 0.25
+        scene.camera = camera.to_dict()
+
+        loaded = Scene.from_dict(json.loads(json.dumps(scene.to_dict())))
+
+        self.assertEqual(loaded.camera["position"], [3.0, 4.0])
+        self.assertEqual(loaded.camera["zoom"], 2.0)
+        self.assertEqual(loaded.camera["rotation"], 0.25)
+
+    def test_legacy_scene_without_camera_keeps_original_shape(self) -> None:
+        loaded = Scene.from_dict({"scene_id": "s", "name": "Legacy", "entities": []})
+
+        self.assertNotIn("camera", loaded.to_dict())
+
     def test_round_trip_preserves_ids(self) -> None:
         scene = Scene("Level 1", scene_id="s-001")
         e = scene.create_entity("Hero", entity_id="e-001")

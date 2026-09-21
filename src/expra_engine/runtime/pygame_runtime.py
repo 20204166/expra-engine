@@ -6,6 +6,7 @@ import importlib
 from collections.abc import Callable
 from typing import Any
 
+from expra_engine.core.component import TransformComponent
 from expra_engine.runtime.input import PhysicalInput
 from expra_engine.runtime.rendering import (
     OrthographicCamera,
@@ -39,6 +40,7 @@ class PygameRuntime:
         render_callback: Callable[[Any, Any], None] | None = None,
         frame_factory: Callable[[Any, float], RenderFrame] | None = None,
         camera: OrthographicCamera | None = None,
+        camera_target_id: str | None = None,
         ui_root: GameCanvas | None = None,
     ) -> None:
         if frame_rate <= 0:
@@ -55,6 +57,8 @@ class PygameRuntime:
         self.render_callback = render_callback
         self.frame_factory = frame_factory
         self.camera = camera or OrthographicCamera()
+        self.camera_target_id = camera_target_id
+        self._camera_scene_id: str | None = None
         self.ui_root = ui_root
         self.surface: Any | None = None
         self._keys: set[Any] = set()
@@ -98,6 +102,8 @@ class PygameRuntime:
                 self.engine.tick(dt)
                 if getattr(getattr(self.engine, "run_state", None), "value", None) == "edit":
                     self.stop()
+                self._sync_camera_target()
+                self.camera.update(dt)
                 if self.renderer is not None:
                     frame = (
                         self.frame_factory(self.engine, dt)
@@ -121,6 +127,31 @@ class PygameRuntime:
                     self.renderer.stop()
             finally:
                 self.pygame.quit()
+
+    def screen_to_world(self, point: tuple[float, float]) -> tuple[float, float]:
+        """Convert runtime pixel coordinates through the active camera."""
+        viewport = self._context.viewport if self._context is not None else Viewport(0, 0, *self.size)
+        return self.camera.unproject(point, viewport)
+
+    def _sync_camera_target(self) -> None:
+        scene = getattr(self.engine, "active_scene", None)
+        if scene is None:
+            return
+        if scene.scene_id != self._camera_scene_id:
+            self._camera_scene_id = scene.scene_id
+            settings = getattr(scene, "camera", {})
+            if isinstance(settings, dict):
+                if hasattr(settings, "apply_to"):
+                    settings.apply_to(self.camera)
+                else:
+                    self.camera.apply_dict(settings)
+                self.camera_target_id = getattr(settings, "target_entity_id", None) or self.camera_target_id
+        if self.camera_target_id is None:
+            return
+        target = scene.find_entity(self.camera_target_id)
+        transform = target.get_component(TransformComponent) if target is not None else None
+        if target is not None and target.enabled and transform is not None and transform.enabled:
+            self.camera.target_position = (transform.x, transform.y)
 
     def _poll_events(self) -> None:
         for event in self.pygame.event.get():

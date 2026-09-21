@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from expra_engine.editor.persistence import atomic_write_text, read_text_or_none
@@ -19,6 +19,7 @@ class EditorPreferences:
     recent_projects: tuple[str, ...] = ()
     autosave_interval_ms: int = 30_000
     window_geometry: str | None = None
+    viewport_camera: dict[str, object] = field(default_factory=dict)
     schema_version: int = _SCHEMA_VERSION
 
 
@@ -49,6 +50,11 @@ class PreferencesStore:
                     str(data["window_geometry"])
                     if data.get("window_geometry") is not None
                     else None
+                ),
+                viewport_camera=(
+                    dict(data["viewport_camera"])
+                    if isinstance(data.get("viewport_camera"), dict)
+                    else {}
                 ),
                 schema_version=_SCHEMA_VERSION,
             )

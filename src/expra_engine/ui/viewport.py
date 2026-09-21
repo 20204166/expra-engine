@@ -12,6 +12,7 @@ pyglet, moderngl, etc. The seam is the ``render_scene`` method.
 
 from __future__ import annotations
 
+import math
 import tkinter as tk
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -101,14 +102,15 @@ class ViewportCamera:
 
     def zoom(self, percent: float) -> None:
         self.zoom_level = min(4.0, max(0.25, self.zoom_level * (1.0 + percent / 100.0)))
-        self._camera.width = 20.0 / self.zoom_level
+        self._camera.zoom = self.zoom_level
 
     def resize(self, viewport: tuple[int, int]) -> None:
         if viewport[0] <= 0 or viewport[1] <= 0:
             return
         self._viewport = viewport
         position = self.position
-        self._camera = Camera2D(position=position, viewport=viewport, target_width=self._camera.width)
+        self._camera = Camera2D(position=position, viewport=viewport, target_width=20.0)
+        self._camera.zoom = self.zoom_level
 
     def frame_selected(self, point: tuple[float, float] | None) -> bool:
         if point is None:
@@ -129,6 +131,26 @@ class ViewportCamera:
     def project(self, point: tuple[float, float]) -> tuple[float, float]:
         return self._camera.translate_to_screen(point)
 
+    def unproject(self, point: tuple[float, float]) -> tuple[float, float]:
+        return self._camera.translate_to_game(point)
+
+    def rotate(self, degrees: float) -> None:
+        self._camera.rotation += math.radians(float(degrees))
+
+    def reset_view(self) -> None:
+        self._camera.position = (0.0, 0.0)
+        self._camera.zoom = 1.0
+        self._camera.rotation = 0.0
+        self._camera.offset = (0.0, 0.0)
+        self.zoom_level = 1.0
+
+    def to_dict(self) -> dict[str, object]:
+        return self._camera.to_dict()
+
+    def apply_dict(self, values: object) -> None:
+        self._camera.apply_dict(values)
+        self.zoom_level = min(4.0, max(0.25, self._camera.zoom))
+
 
 class ViewportPanel(tk.Frame):
     """Canvas-based editor viewport.
@@ -144,6 +166,8 @@ class ViewportPanel(tk.Frame):
         *,
         colors: dict[str, str] | None = None,
         on_entity_click: Any = None,
+        camera_state: dict[str, object] | None = None,
+        on_camera_change: Any = None,
     ) -> None:
         c = colors or COLORS
         super().__init__(
@@ -151,11 +175,14 @@ class ViewportPanel(tk.Frame):
         )
 
         self._on_entity_click = on_entity_click
+        self._on_camera_change = on_camera_change
         self._colors = c
         self._scene: Scene | None = None
         self._selected_id: str | None = None
         self._target = EditorRenderTarget(RenderFrame(), (), None)
         self._camera = ViewportCamera()
+        if camera_state:
+            self._camera.apply_dict(camera_state)
         self._pan_anchor: tuple[float, float] | None = None
 
         # Canvas fills the frame
@@ -169,6 +196,9 @@ class ViewportPanel(tk.Frame):
         self._canvas.bind("<ButtonPress-2>", self._on_pan_start)
         self._canvas.bind("<B2-Motion>", self._on_pan_motion)
         self._canvas.bind("<MouseWheel>", self._on_wheel)
+        self._canvas.bind("<KeyPress-q>", lambda _event: self._rotate_camera(-15.0))
+        self._canvas.bind("<KeyPress-e>", lambda _event: self._rotate_camera(15.0))
+        self._canvas.bind("<KeyPress-r>", lambda _event: self._reset_camera())
         resize_aware(self, lambda _w: self._on_resize())
 
     def render(self, scene: Scene | None, selected_id: str | None = None) -> None:
@@ -184,10 +214,12 @@ class ViewportPanel(tk.Frame):
 
     def pan(self, x: float, y: float) -> None:
         self._camera.pan(x, y)
+        self._notify_camera_change()
         self._redraw()
 
     def zoom(self, percent: float) -> None:
         self._camera.zoom(percent)
+        self._notify_camera_change()
         self._redraw()
 
     def frame_selected(self) -> bool:
@@ -197,6 +229,7 @@ class ViewportPanel(tk.Frame):
         transform = entity.get_component(TransformComponent) if entity else None
         framed = self._camera.frame_selected((transform.x, transform.y) if transform else None)
         if framed:
+            self._notify_camera_change()
             self._redraw()
         return framed
 
@@ -210,6 +243,7 @@ class ViewportPanel(tk.Frame):
                 points.append((transform.x, transform.y))
         framed = self._camera.frame_scene(points)
         if framed:
+            self._notify_camera_change()
             self._redraw()
         return framed
 
@@ -440,6 +474,10 @@ class ViewportPanel(tk.Frame):
         elif item.primitive.kind == "text":
             text = item.text.text if item.text else ""
             self._canvas.create_text(ex, ey, text=text, fill=color, font=(item.text.font, item.text.size) if item.text else None, tags=tag)
+        elif transform.rotation or self._camera._camera.rotation:
+            self._canvas.create_polygon(
+                *self._projected_corners(item), fill=color, outline=outline, tags=tag
+            )
         else:
             self._canvas.create_rectangle(ex - sx, ey - sy, ex + sx, ey + sy, fill=color, outline=outline, tags=tag)
         self._canvas.tag_bind(tag, "<Button-1>", lambda _e, eid=item.key: self._click_entity(eid))
@@ -455,6 +493,25 @@ class ViewportPanel(tk.Frame):
             )
         if item.key == self._target.selected_id:
             self._canvas.create_rectangle(ex - sx - 4, ey - sy - 4, ex + sx + 4, ey + sy + 4, outline=self._colors["accent"], width=2, tags="selection")
+
+    def _projected_corners(self, item: RenderItem) -> tuple[float, ...]:
+        transform = item.world_transform
+        half_width = abs(item.primitive.size[0] * transform.scale[0]) / 2
+        half_height = abs(item.primitive.size[1] * transform.scale[1]) / 2
+        angle = math.radians(transform.rotation)
+        cos_angle, sin_angle = math.cos(angle), math.sin(angle)
+        points: list[float] = []
+        for local_x, local_y in (
+            (-half_width, -half_height),
+            (-half_width, half_height),
+            (half_width, half_height),
+            (half_width, -half_height),
+        ):
+            world_x = transform.position[0] + local_x * cos_angle - local_y * sin_angle
+            world_y = transform.position[1] + local_x * sin_angle + local_y * cos_angle
+            projected = self._camera.project((world_x, world_y))
+            points.extend(projected)
+        return tuple(points)
 
     def _draw_colliders(self) -> None:
         for collider in self._target.colliders:
@@ -473,7 +530,19 @@ class ViewportPanel(tk.Frame):
         return "#%02x%02x%02x" % (round(color.red * 255), round(color.green * 255), round(color.blue * 255))
 
     def _on_click(self, event: Any) -> None:
-        pass
+        current_tags = self._canvas.gettags("current")
+        if any(tag.startswith("entity:") for tag in current_tags):
+            return
+        world = self._camera.unproject((float(event.x), float(event.y)))
+        for item in reversed(self._target.items):
+            transform = item.world_transform
+            half_width = abs(item.primitive.size[0] * transform.scale[0]) / 2
+            half_height = abs(item.primitive.size[1] * transform.scale[1]) / 2
+            if abs(world[0] - transform.position[0]) <= half_width and abs(world[1] - transform.position[1]) <= half_height:
+                self._click_entity(item.key)
+                return
+        if self._on_entity_click is not None:
+            self._on_entity_click(None)
 
     def _on_pan_start(self, event: Any) -> None:
         self._pan_anchor = (float(event.x), float(event.y))
@@ -489,6 +558,22 @@ class ViewportPanel(tk.Frame):
 
     def _on_wheel(self, event: Any) -> None:
         self.zoom(10.0 if event.delta > 0 else -10.0)
+
+    def _rotate_camera(self, degrees: float) -> str:
+        self._camera.rotate(degrees)
+        self._notify_camera_change()
+        self._redraw()
+        return "break"
+
+    def _reset_camera(self) -> str:
+        self._camera.reset_view()
+        self._notify_camera_change()
+        self._redraw()
+        return "break"
+
+    def _notify_camera_change(self) -> None:
+        if self._on_camera_change is not None:
+            self._on_camera_change(self._camera.to_dict())
 
     def _click_entity(self, entity_id: str) -> None:
         if self._on_entity_click:

@@ -12,6 +12,7 @@ import uuid
 from typing import Any
 
 from expra_engine.core.entity import Entity
+from expra_engine.core.scene.camera import SceneCamera
 
 
 class Scene:
@@ -27,14 +28,24 @@ class Scene:
         name: str,
         *,
         scene_id: str | None = None,
+        camera: dict[str, Any] | SceneCamera | None = None,
     ) -> None:
         self.scene_id: str = scene_id or str(uuid.uuid4())
         self.name = name
+        self._camera = camera if isinstance(camera, SceneCamera) else SceneCamera(camera)
         self._entities: list[Entity] = []
 
     @property
     def entities(self) -> tuple[Entity, ...]:
         return tuple(self._entities)
+
+    @property
+    def camera(self) -> SceneCamera:
+        return self._camera
+
+    @camera.setter
+    def camera(self, value: dict[str, Any] | SceneCamera) -> None:
+        self._camera = value if isinstance(value, SceneCamera) else SceneCamera(value)
 
     def create_entity(self, name: str, **kwargs: Any) -> Entity:
         """Create and register a new entity, returning it."""
@@ -140,17 +151,21 @@ class Scene:
         return None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        data = {
             "scene_id": self.scene_id,
             "name": self.name,
             "entities": [e.to_dict() for e in self._entities],
         }
+        if self.camera:
+            data["camera"] = self.camera.to_dict()
+        return data
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Scene:
         scene = cls(
             name=str(data["name"]),
             scene_id=str(data["scene_id"]),
+            camera=data.get("camera") if isinstance(data.get("camera"), dict) else None,
         )
         for entity_data in data.get("entities", []):
             with contextlib.suppress(KeyError, TypeError):

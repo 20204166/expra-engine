@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Protocol, runtime_checkable
 
+from expra_engine.core.scene.camera import Camera2D
 from expra_engine.ui_model.geometry import Rect
 from expra_engine.ui_model.nine_slice import NineSlice
 
@@ -85,37 +86,50 @@ class Viewport:
         return self.x <= point[0] <= self.right and self.y <= point[1] <= self.bottom
 
 
-@dataclass(frozen=True)
-class OrthographicCamera:
-    """A y-up world camera projecting into a y-down pixel viewport."""
+class OrthographicCamera(Camera2D):
+    """Depth-aware runtime camera backed by the shared 2D camera math."""
 
-    position: Vec3 = (0.0, 0.0, 0.0)
-    width: float = 10.0
-    height: float = 10.0
-    near: float = -1_000.0
-    far: float = 1_000.0
-
-    def __post_init__(self) -> None:
-        raw_position = tuple(self.position)
+    def __init__(
+        self,
+        position: Vec3 = (0.0, 0.0, 0.0),
+        width: float = 10.0,
+        height: float = 10.0,
+        near: float = -1_000.0,
+        far: float = 1_000.0,
+    ) -> None:
+        raw_position = tuple(position)
         if len(raw_position) == 2:
             raw_position = (*raw_position, 0.0)
-        position = _tuple(raw_position, 3, "position")
-        object.__setattr__(self, "position", position)
-        for name in ("width", "height", "near", "far"):
-            _finite(getattr(self, name), name)
-        if self.width <= 0 or self.height <= 0 or self.near >= self.far:
+        x, y, z = _tuple(raw_position, 3, "position")
+        width = _finite(width, "width")
+        height = _finite(height, "height")
+        near = _finite(near, "near")
+        far = _finite(far, "far")
+        if width <= 0 or height <= 0 or near >= far:
             raise ValueError("camera dimensions must be positive and near must be less than far")
 
-    def project(self, point: Vec3 | Vec2, viewport: Viewport) -> tuple[float, float]:
-        raw_point = tuple(point)
-        values = _tuple(raw_point, 2 if len(raw_point) == 2 else 3, "point")
-        x, y = values[:2]
-        left = self.position[0] - self.width / 2
-        top = self.position[1] + self.height / 2
-        return (
-            viewport.x + (x - left) / self.width * viewport.width,
-            viewport.y + (top - y) / self.height * viewport.height,
-        )
+        # The internal viewport anchors the camera dimensions. Runtime
+        # projection uses the actual RenderContext viewport.
+        super().__init__(position=(x, y), target_width=width, viewport=(width, height))
+        self._depth = z
+        self.near = near
+        self.far = far
+
+    @property
+    def position(self) -> Vec3:
+        return (*self._position, self._depth)
+
+    @position.setter
+    def position(self, value: Vec3 | Vec2) -> None:
+        raw_position = tuple(value)
+        if len(raw_position) == 2:
+            x, y = self._coerce_vec2(raw_position)
+            z = self._depth
+        else:
+            x, y, z = _tuple(raw_position, 3, "position")
+        self._position = (x, y)
+        self._target_position = (x, y)
+        self._depth = z
 
 
 @dataclass(frozen=True)
@@ -270,6 +284,19 @@ class RenderItem:
     def _projected_bounds(self, context: RenderContext) -> tuple[float, float, float, float]:
         transform = self.world_transform
         center = context.camera.project(transform.position, context.viewport)
+        if context.camera.rotation and self.primitive.radius is None:
+            half_width = abs(self.primitive.size[0] * transform.scale[0]) / 2
+            half_height = abs(self.primitive.size[1] * transform.scale[1]) / 2
+            corners = (
+                (transform.position[0] - half_width, transform.position[1] - half_height),
+                (transform.position[0] - half_width, transform.position[1] + half_height),
+                (transform.position[0] + half_width, transform.position[1] - half_height),
+                (transform.position[0] + half_width, transform.position[1] + half_height),
+            )
+            projected = tuple(context.camera.project(corner, context.viewport) for corner in corners)
+            xs = tuple(point[0] for point in projected)
+            ys = tuple(point[1] for point in projected)
+            return min(xs), min(ys), max(xs), max(ys)
         if self.primitive.radius is not None:
             radius = self.primitive.radius * max(abs(transform.scale[0]), abs(transform.scale[1]))
             rx = radius / context.camera.width * context.viewport.width

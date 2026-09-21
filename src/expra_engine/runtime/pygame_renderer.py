@@ -154,7 +154,18 @@ class PygameRenderer:
                             * context.viewport.height
                         )
                     )
-                    self.surface.blit(texture, self._rect_from_center(position, width, height))
+                    angle = transform.rotation - math.degrees(context.camera.rotation)
+                    rendered_texture = texture
+                    transform_api = getattr(self.pygame, "transform", None)
+                    if angle and transform_api is not None:
+                        rendered_texture = transform_api.rotate(texture, angle)
+                    if transform_api is not None and hasattr(transform_api, "smoothscale"):
+                        rendered_texture = transform_api.smoothscale(rendered_texture, (width, height))
+                    texture_size = getattr(rendered_texture, "get_size", lambda: (width, height))()
+                    self.surface.blit(
+                        rendered_texture,
+                        self._rect_from_center(position, round(texture_size[0]), round(texture_size[1])),
+                    )
                     continue
                 if item.text is not None:
                     self.draw_text(item.text, position, item.material.opacity)
@@ -397,7 +408,7 @@ class PygameRenderer:
                 if transform is None or not transform.enabled:
                     continue
                 try:
-                    position = self._to_screen(transform.x, transform.y)
+                    position = self._legacy_project(transform.x, transform.y)
                 except (OverflowError, ValueError, TypeError):
                     continue
                 if not all(
@@ -408,34 +419,37 @@ class PygameRenderer:
                 if transform.scale_x == 0 or transform.scale_y == 0:
                     continue
                 if entity.has_tag("player") or entity.name.lower() == "player":
-                    width = round(20 * abs(transform.scale_x))
-                    height = round(20 * abs(transform.scale_y))
-                    rectangle = self._rect_from_center(position, width, height)
                     try:
-                        draw.rect(self.surface, (48, 224, 255), rectangle)
+                        self._draw_legacy_box(
+                            (48, 224, 255), transform.x, transform.y,
+                            20 * abs(transform.scale_x), 20 * abs(transform.scale_y),
+                            transform.rotation,
+                        )
                         angle = math.radians(transform.rotation)
-                        direction = (
-                            position[0] + round(math.cos(angle) * 16),
-                            position[1] + round(math.sin(angle) * 16),
+                        direction = self._legacy_project(
+                            transform.x + math.cos(angle) * 16,
+                            transform.y + math.sin(angle) * 16,
                         )
                         draw.line(self.surface, (255, 255, 255), position, direction)
                     except Exception:  # noqa: BLE001 - backend draw failures are frame-local
                         pass
                 elif entity.has_tag("enemy"):
-                    width = round(20 * abs(transform.scale_x))
-                    height = round(20 * abs(transform.scale_y))
                     with suppress(Exception):
-                        draw.rect(
-                            self.surface,
-                            (255, 72, 178),
-                            self._rect_from_center(position, width, height),
+                        self._draw_legacy_box(
+                            (255, 72, 178), transform.x, transform.y,
+                            20 * abs(transform.scale_x), 20 * abs(transform.scale_y),
+                            transform.rotation,
                         )
                 elif entity.has_tag("target") or entity.name.lower() == "target":
-                    radius = round(8 * (abs(transform.scale_x) + abs(transform.scale_y)) / 2)
+                    radius = self._legacy_radius(
+                        8 * (abs(transform.scale_x) + abs(transform.scale_y)) / 2
+                    )
                     with suppress(Exception):
                         draw.circle(self.surface, (255, 72, 178), position, radius)
                 elif entity.has_tag("projectile"):
-                    radius = round(8 * (abs(transform.scale_x) + abs(transform.scale_y)) / 2)
+                    radius = self._legacy_radius(
+                        8 * (abs(transform.scale_x) + abs(transform.scale_y)) / 2
+                    )
                     with suppress(Exception):
                         draw.circle(self.surface, (245, 248, 255), position, radius)
 
@@ -469,6 +483,51 @@ class PygameRenderer:
             round(arena_x + (x - world_x) / world_width * arena_width),
             round(arena_y + (y - world_y) / world_height * arena_height),
         )
+
+    def _legacy_project(self, x: float, y: float) -> tuple[int, int]:
+        if self.context is None:
+            return self._to_screen(x, y)
+        projected = self.context.camera.project((x, y), self.context.viewport)
+        return round(projected[0]), round(projected[1])
+
+    def _legacy_radius(self, world_radius: float) -> int:
+        if self.context is None:
+            return round(world_radius)
+        camera = self.context.camera
+        return round(
+            world_radius
+            * min(self.context.viewport.width / camera.width, self.context.viewport.height / camera.height)
+        )
+
+    def _draw_legacy_box(
+        self,
+        color: tuple[int, ...],
+        x: float,
+        y: float,
+        width: float,
+        height: float,
+        rotation: float,
+    ) -> None:
+        draw = self.pygame.draw
+        if self.context is None:
+            draw.rect(self.surface, color, self._rect_from_center(self._legacy_project(x, y), round(width), round(height)))
+            return
+        angle = math.radians(rotation)
+        cos_angle, sin_angle = math.cos(angle), math.sin(angle)
+        corners = []
+        for local_x, local_y in ((-width / 2, -height / 2), (-width / 2, height / 2), (width / 2, height / 2), (width / 2, -height / 2)):
+            world_x = x + local_x * cos_angle - local_y * sin_angle
+            world_y = y + local_x * sin_angle + local_y * cos_angle
+            corners.append(self._legacy_project(world_x, world_y))
+        if rotation or self.context.camera.rotation:
+            polygon = getattr(draw, "polygon", None)
+            if polygon is not None:
+                polygon(self.surface, color, corners)
+                return
+        center = self._legacy_project(x, y)
+        pixel_width = round(width / self.context.camera.width * self.context.viewport.width)
+        pixel_height = round(height / self.context.camera.height * self.context.viewport.height)
+        draw.rect(self.surface, color, self._rect_from_center(center, pixel_width, pixel_height))
 
     def _rect(self, rectangle: tuple[int, int, int, int]) -> Any:
         rect_type = getattr(self.pygame, "Rect", None)

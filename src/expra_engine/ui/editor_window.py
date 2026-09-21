@@ -234,6 +234,8 @@ class EditorWindow:
         self._viewport = ViewportPanel(
             view_frame,
             on_entity_click=self._on_viewport_entity_click,
+            camera_state=self._preferences.viewport_camera,
+            on_camera_change=self._save_viewport_camera,
         )
         self._viewport.pack(fill="both", expand=True)
         self._viewport_host = view_frame
@@ -753,17 +755,14 @@ class EditorWindow:
         self._update_undo_redo_state()
         self._present_all()
 
-    def _on_viewport_entity_click(self, entity_id: str) -> None:
+    def _on_viewport_entity_click(self, entity_id: str | None) -> None:
         self._on_hierarchy_select(entity_id)
-
-        # ------------------------------------------------------------------
-        # Runtime refresh and scene setup
-        # ------------------------------------------------------------------
         self._hierarchy.select(entity_id)
 
-    # ------------------------------------------------------------------
+    def _save_viewport_camera(self, values: dict[str, object]) -> None:
+        self._preferences = replace(self._preferences, viewport_camera=values)
+        self._preferences_store.save(self._preferences_path, self._preferences)
     # Refresh helpers
-    # ------------------------------------------------------------------
 
     def _refresh_viewport(self) -> None:
         self._request_render(

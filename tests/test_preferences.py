@@ -35,6 +35,23 @@ class PreferencesStoreTests(unittest.TestCase):
             self.assertEqual(loaded.theme, "litera")
             self.assertEqual(loaded.recent_projects, ("/a", "/b"))
 
+    def test_viewport_camera_state_round_trips(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "prefs.json"
+            state = {"position": [2.0, 3.0], "zoom": 2.0, "rotation": 0.5}
+            self.store.save(path, EditorPreferences(viewport_camera=state))
+
+            self.assertEqual(self.store.load(path).viewport_camera, state)
+
+    def test_invalid_viewport_camera_state_falls_back_to_empty(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "prefs.json"
+            path.write_text(
+                json.dumps({"schema_version": 1, "viewport_camera": []}), encoding="utf-8"
+            )
+
+            self.assertEqual(self.store.load(path).viewport_camera, {})
+
     def test_load_missing_file_returns_defaults(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             path = Path(d) / "nonexistent.json"

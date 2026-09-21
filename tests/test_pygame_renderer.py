@@ -1,6 +1,7 @@
 """Tests for the injected primitive Pygame renderer."""
 
 import unittest
+from math import radians
 from types import SimpleNamespace
 
 from expra_engine.core.component import TransformComponent
@@ -38,6 +39,7 @@ class _FakeDraw:
         self.rects: list[tuple[object, object, object]] = []
         self.circles: list[tuple[object, object, object, object]] = []
         self.lines: list[tuple[object, object, object, object]] = []
+        self.polygons: list[tuple[object, object, object]] = []
 
     def rect(self, surface: object, color: object, rectangle: object, width: int = 0) -> None:
         self.rects.append((surface, color, rectangle, width))
@@ -47,6 +49,9 @@ class _FakeDraw:
 
     def line(self, surface: object, color: object, start: object, end: object) -> None:
         self.lines.append((surface, color, start, end))
+
+    def polygon(self, surface: object, color: object, points: object) -> None:
+        self.polygons.append((surface, color, points))
 
 
 class _FakeFont:
@@ -59,6 +64,11 @@ class _FakeFont:
 
     def size(self, text: str) -> tuple[int, int]:
         return (len(text) * 10, 20)
+
+
+class _FakeTexture:
+    def get_size(self) -> tuple[int, int]:
+        return (32, 16)
 
 
 class _FakePygame:
@@ -215,6 +225,30 @@ class TestPygameRenderer(unittest.TestCase):
         renderer.render(RenderContractFrame())
         renderer.stop()
 
+    def test_rotated_texture_uses_camera_and_transform_rotation(self) -> None:
+        texture = _FakeTexture()
+        calls: list[tuple[str, object]] = []
+        pygame = _FakePygame(_FakeFont())
+        pygame.transform = SimpleNamespace(
+            rotate=lambda value, angle: (calls.append(("rotate", angle)) or value),
+            smoothscale=lambda value, size: (calls.append(("scale", size)) or value),
+        )
+        renderer = PygameRenderer(pygame, _FakeSurface(), resource_provider=lambda _: texture)
+        camera = OrthographicCamera()
+        camera.rotation = radians(10.0)
+        renderer.start(RenderContext(Viewport(0, 0, 100, 100), camera))
+        item = RenderItem(
+            "sprite",
+            PrimitiveDescriptor("sprite", size=(2.0, 1.0)),
+            Transform(rotation=30.0),
+            material=MaterialDescriptor(texture_id="ship"),
+        )
+
+        renderer.render(RenderContractFrame((item,)))
+
+        self.assertEqual(calls[0], ("rotate", 20.0))
+        self.assertEqual(calls[1], ("scale", (20, 10)))
+
     def test_maps_transform_coordinates_into_arena_coordinates(self) -> None:
         scene = Scene("Arena")
         player = scene.create_entity("Player")
@@ -232,6 +266,38 @@ class TestPygameRenderer(unittest.TestCase):
 
         player_rect = renderer.pygame.draw.rects[1][2]
         self.assertEqual(player_rect.center, (60, 70))
+
+    def test_legacy_scene_entities_use_active_camera_projection(self) -> None:
+        scene = Scene("Camera")
+        player = scene.create_entity("Player")
+        player.add_tag("player")
+        player.add_component(TransformComponent(x=10.0, y=5.0))
+        renderer = PygameRenderer(
+            _FakePygame(_FakeFont()),
+            _FakeSurface(),
+            world_bounds=(0, 0, 100, 100),
+            arena_bounds=(0, 0, 200, 100),
+        )
+        renderer.start(
+            RenderContext(Viewport(0, 0, 200, 100), OrthographicCamera(position=(10.0, 5.0, 0.0), width=20.0, height=10.0))
+        )
+
+        renderer.on_render(RenderFrame(scene))
+
+        self.assertEqual(renderer.pygame.draw.rects[1][2].center, (100, 50))
+
+    def test_rotated_legacy_entity_uses_polygon_draw_path(self) -> None:
+        scene = Scene("Rotated")
+        enemy = scene.create_entity("Enemy")
+        enemy.add_tag("enemy")
+        enemy.add_component(TransformComponent(rotation=45.0))
+        renderer = PygameRenderer(_FakePygame(_FakeFont()), _FakeSurface())
+        renderer.start(RenderContext(Viewport(0, 0, 100, 100)))
+
+        renderer.on_render(RenderFrame(scene))
+
+        self.assertEqual(len(renderer.pygame.draw.polygons), 1)
+        self.assertEqual(len(renderer.pygame.draw.polygons[0][2]), 4)
 
     def test_draws_player_rectangle_and_target_circle_from_transforms(self) -> None:
         scene = Scene("Arena")
