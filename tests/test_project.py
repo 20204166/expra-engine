@@ -102,6 +102,14 @@ class TestProjectCreateAndSave(unittest.TestCase):
         with self.assertRaises(ProjectError):
             project.set_start_scene("scenes/../secret.json")
 
+    def test_scene_folder_singular_is_supported(self) -> None:
+        project = Project("Game", Path("/tmp/game"))
+
+        project.set_start_scene("scene/main.json")
+
+        self.assertEqual(project.start_scene, "scene/main.json")
+        self.assertEqual(project.scenes_dir, project.path / "scene")
+
     def test_project_input_settings_round_trip(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project = Project.create("Input Game", Path(tmp) / "input-game")

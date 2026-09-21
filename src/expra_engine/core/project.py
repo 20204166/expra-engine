@@ -63,7 +63,11 @@ class Project:
 
     @property
     def scenes_dir(self) -> Path:
-        return self.path / "scenes"
+        scene_paths = (self.start_scene, *self._scene_paths)
+        folder = "scene" if any(
+            isinstance(value, str) and value.startswith("scene/") for value in scene_paths
+        ) else "scenes"
+        return self.path / folder
 
     @property
     def assets_dir(self) -> Path:
@@ -341,9 +345,11 @@ class Project:
         if (
             candidate.is_absolute()
             or ".." in candidate.parts
-            or not relative_path.startswith("scenes/")
+            or not any(relative_path.startswith(prefix) for prefix in ("scenes/", "scene/"))
         ):
-            raise ProjectError(f"scene must be project-relative under scenes/: {relative_path!r}")
+            raise ProjectError(
+                f"scene must be project-relative under scene/ or scenes/: {relative_path!r}"
+            )
 
     def __repr__(self) -> str:
         return f"Project({self.name!r}, path={self.path})"

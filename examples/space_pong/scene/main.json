@@ -3,6 +3,27 @@
   "name": "Main",
   "entities": [
     {
+      "entity_id": "space-pong-camera",
+      "name": "Camera",
+      "enabled": true,
+      "layer": 100,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 0.0,
+          "y": 0.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        }
+      ],
+      "tags": [
+        "camera"
+      ]
+    },
+    {
       "entity_id": "space-pong-arena",
       "name": "Arena",
       "enabled": true,

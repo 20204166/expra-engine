@@ -17,8 +17,9 @@ starter scene. `Project.load(path)` accepts either the project directory or its
 they are treated as legacy schema 0. Current manifests use schema 1 and may
 define `game_version`, `start_scene`, and `input`.
 
-Scene and script references are project-relative (`project://scenes/...` and
-`project://scripts/...`). No normal project operation depends on the process
+Scene references may use the conventional `scene/` or legacy `scenes/`
+project-relative folder (`project://scene/...` or `project://scenes/...`). Script
+references use `project://scripts/...`. No normal project operation depends on the process
 working directory, so projects can be moved and reopened elsewhere.
 
 The editor provides File -> New Project, Open Project, Close Project, New

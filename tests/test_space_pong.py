@@ -38,8 +38,9 @@ def test_space_pong_project_uses_generic_scene_components_and_project_scripts() 
     ).registered_component_types()}
 
     assert project.name == "Space Pong"
-    assert project.start_scene == "scenes/main.json"
+    assert project.start_scene == "scene/main.json"
     assert len(scene.entities) >= 8
+    assert any(entity.name == "Camera" for entity in scene.entities)
     assert {component.component_type for entity in scene.entities for component in entity.components} <= registered | {"script"}
     script_components = [
         component
@@ -151,7 +152,7 @@ def test_space_pong_save_reopen_and_export_workflow(tmp_path: Path) -> None:
     result = GameExporter(packager=_Packager()).export(plan, cancel=threading.Event())
     assert (result / "Space_Pong" / "project.json").is_file()
     assert (result / "Space_Pong" / "scripts" / "space_pong_behaviour.py").is_file()
-    assert (result / "Space_Pong" / "scenes" / "main.json").is_file()
+    assert (result / "Space_Pong" / "scene" / "main.json").is_file()
     assert (result / "Space_Pong" / "__main__.py").is_file()
 
 

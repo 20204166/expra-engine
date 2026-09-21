@@ -183,7 +183,7 @@ Create/open the project, construct entities/components/scripts through the GUI,
 run HUD/pause/win/resize flows, stop/edit/save/reopen/export/run standalone, and
 capture evidence without engine-specific branches.
 
-**Files:** `examples/space_pong/project.json`, `examples/space_pong/scenes/main.json`, `examples/space_pong/scripts/space_pong_behaviour.py`, `tests/test_space_pong.py`, `docs/POLISH_EXTRACTION_MAP.md`, `docs/SPACE_PONG_FINAL_REPORT.md`.
+**Files:** `examples/space_pong/project.json`, `examples/space_pong/scene/main.json`, `examples/space_pong/scripts/space_pong_behaviour.py`, `tests/test_space_pong.py`, `docs/POLISH_EXTRACTION_MAP.md`, `docs/SPACE_PONG_FINAL_REPORT.md`.
 
 - [ ] **Step 1: Write failing project tests that open the project, discover registered components/scripts, and verify scene data contains only generic components and project-owned script values.**
 - [ ] **Step 2: Run the Space Pong test red because the project does not exist.**
