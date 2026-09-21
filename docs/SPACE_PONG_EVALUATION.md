@@ -60,6 +60,7 @@ Those are the next useful signals for diagnosing a visual or gameplay report.
 | 0.3.2.0 | Tk-safe integer text rendering; float text regression coverage |
 | 0.3.2.1 | Generic editor keyboard input bridge and input edge-case coverage |
 | 0.3.4.0 | Script-only marker suppression and playable ball-speed tuning |
+| 0.3.4.1 | Exported runtime dependency closure and ten-module import smoke test |
 
 ## Verification Evidence
 
@@ -68,4 +69,12 @@ Those are the next useful signals for diagnosing a visual or gameplay report.
 - Space Pong after speed tuning: `8 passed`.
 - Editor, renderer, runtime, input, and observability checks all passed before
   the latest marker change.
-- Installed wheel: `0.3.4.0`; checksum is recorded in `dist/SHA256SUMS`.
+- Installed wheel: `0.3.4.1`; checksum is recorded in `dist/SHA256SUMS`.
+
+## Export Edge-Case Coverage
+
+The export regression now imports ten runtime modules from the staged bundle:
+component schemas, engine, project, scene, logical IDs, behaviour, rendering,
+render extraction, Pygame runtime, and UI geometry. This catches omitted files
+such as `core/component_schema.py` and omitted runtime-neutral packages such as
+`ui_model` before a user receives an unusable export.

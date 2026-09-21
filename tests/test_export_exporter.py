@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 import tempfile
 import threading
 import unittest
@@ -120,6 +123,8 @@ class TestGameExporter(unittest.TestCase):
 
         runtime_package = out / "runtime" / "python" / "Lib" / "site-packages" / "expra_engine"
         self.assertTrue((runtime_package / "core" / "engine.py").exists())
+        self.assertTrue((runtime_package / "core" / "component_schema.py").exists())
+        self.assertTrue((runtime_package / "ui_model" / "geometry.py").exists())
         self.assertTrue((runtime_package / "runtime" / "pygame_runtime.py").exists())
         self.assertFalse((runtime_package / "editor").exists())
         self.assertEqual(packager.packages, ["pygame>=2.6"])
@@ -137,6 +142,33 @@ class TestGameExporter(unittest.TestCase):
 
         runtime_package = out / "runtime" / "lib" / "python3.12" / "site-packages" / "expra_engine"
         self.assertTrue((runtime_package / "runtime" / "pygame_runtime.py").exists())
+
+    def test_runtime_profile_imports_engine_dependency_closure(self) -> None:
+        plan = self._plan(runtime_profile=RuntimeProfile.PYGAME)
+        out = self._export(plan)
+        runtime_package = out / "runtime" / "python" / "Lib" / "site-packages"
+        modules = (
+            "expra_engine.core.component_schema",
+            "expra_engine.core.engine",
+            "expra_engine.core.project",
+            "expra_engine.core.scene",
+            "expra_engine.filesystem.ids",
+            "expra_engine.runtime.behaviour",
+            "expra_engine.runtime.rendering",
+            "expra_engine.runtime.render_extractor",
+            "expra_engine.runtime.pygame_runtime",
+            "expra_engine.ui_model.geometry",
+        )
+        script = "\n".join(f"import {module}" for module in modules)
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            env={**os.environ, "PYTHONPATH": str(runtime_package)},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_asset_manifest_written(self) -> None:
         plan = self._plan()

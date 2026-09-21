@@ -254,6 +254,7 @@ def _copy_assets(
 _RUNTIME_CORE_MODULES = (
     "bounds.py",
     "component.py",
+    "component_schema.py",
     "directions.py",
     "engine.py",
     "entity.py",
@@ -308,6 +309,7 @@ def _stage_pygame_runtime(site_packages: Path) -> None:
         encoding="utf-8",
     )
 
+    shutil.copytree(source_root / "ui_model", package_root / "ui_model")
     runtime_root = package_root / "runtime"
     shutil.copytree(source_root / "runtime", runtime_root)
 
