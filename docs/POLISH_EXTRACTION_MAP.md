@@ -162,6 +162,35 @@ At audit time, no reference implementation has been copied into Expra.
   behavior; no reference implementation was copied, so license status is not
   applicable.
 
+### Task 7: Space Pong Through the Real Workflow
+
+- **Source and destination:** Existing `Project`, `ProjectWorkflow`, `Engine`,
+  `ScriptRegistry`, `BehaviourSystem`, `GameCanvas`, `PygameRuntime`, generic
+  visual/collider components, and `GameExporter`; destination is the project-owned
+  `examples/space_pong/` manifest, scene, script, and standalone entry point.
+- **Behavior preserved:** Project-relative scene/script loading, edit/runtime
+  scene isolation, play/pause/stop lifecycle, deterministic wall bounce and
+  scoring, win state, restart, HUD layout under resize, hit feedback, generic
+  render extraction, and standard standalone runtime assembly.
+- **Coupling removed:** No engine module branches on Space Pong, project, or
+  entity names. Game rules, tunables, tags, colors, UI labels, and scene content
+  live under `examples/space_pong/`; runtime code consumes generic Expra APIs.
+- **Tests:** `tests/test_space_pong.py` covers generic component inventory,
+  script resolution, play/stop isolation, score/win/pause/restart/feedback,
+  deterministic bounce, resize-stable HUD, render extraction, save/reopen,
+  export packaging, and the standalone `PygameRuntime` path with an injected
+  backend.
+- **Editor evidence:** `xvfb-run` opened the project, selected the controller,
+  edited an exposed script value and collider field, verified undo, played,
+  paused, resumed, stopped, saved, and reopened the project. The command and
+  JSON output are recorded in `docs/SPACE_PONG_FINAL_REPORT.md`.
+- **Export evidence:** The real `expra_engine.export.cli` Linux export completed
+  to `/tmp/opencode/space-pong-export/space_pong_linux`; the fake-packager test
+  verifies project source, scripts, scenes, and launcher staging without network.
+- **License/provenance:** Rewritten project content using Expra contracts; no
+  reference repository or bundled asset was copied. License status is not
+  applicable to the new project-owned code.
+
 ## Final Acceptance Record
 
 Space-Pong-specific engine hacks: **MUST REMAIN NONE**.

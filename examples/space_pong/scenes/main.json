@@ -1,0 +1,403 @@
+{
+  "scene_id": "space-pong-main",
+  "name": "Main",
+  "entities": [
+    {
+      "entity_id": "space-pong-arena",
+      "name": "Arena",
+      "enabled": true,
+      "layer": 0,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 0.0,
+          "y": 0.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 100.0,
+          "height": 60.0,
+          "radius": null,
+          "fill": [
+            0.02,
+            0.04,
+            0.12,
+            1.0
+          ],
+          "outline": [
+            0.1,
+            0.6,
+            0.9,
+            1.0
+          ],
+          "outline_width": 0.5,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "arena"
+      ]
+    },
+    {
+      "entity_id": "space-pong-center-line",
+      "name": "Center Line",
+      "enabled": true,
+      "layer": 1,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 0.0,
+          "y": 0.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 0.25,
+          "height": 56.0,
+          "radius": null,
+          "fill": [
+            0.15,
+            0.35,
+            0.55,
+            0.7
+          ],
+          "outline": null,
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "center_line"
+      ]
+    },
+    {
+      "entity_id": "space-pong-left-paddle",
+      "name": "Left Paddle",
+      "enabled": true,
+      "layer": 2,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": -45.0,
+          "y": 0.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rounded_rectangle",
+          "width": 2.0,
+          "height": 12.0,
+          "radius": 0.8,
+          "fill": [
+            0.2,
+            0.85,
+            1.0,
+            1.0
+          ],
+          "outline": null,
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        },
+        {
+          "type": "collider",
+          "enabled": true,
+          "shape": "rectangle",
+          "width": 2.0,
+          "height": 12.0,
+          "radius": null,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "solid": true,
+          "trigger": false,
+          "layer": 1,
+          "mask": 1
+        }
+      ],
+      "tags": [
+        "left_paddle",
+        "paddle"
+      ]
+    },
+    {
+      "entity_id": "space-pong-right-paddle",
+      "name": "Right Paddle",
+      "enabled": true,
+      "layer": 2,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 45.0,
+          "y": 0.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rounded_rectangle",
+          "width": 2.0,
+          "height": 12.0,
+          "radius": 0.8,
+          "fill": [
+            1.0,
+            0.35,
+            0.75,
+            1.0
+          ],
+          "outline": null,
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        },
+        {
+          "type": "collider",
+          "enabled": true,
+          "shape": "rectangle",
+          "width": 2.0,
+          "height": 12.0,
+          "radius": null,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "solid": true,
+          "trigger": false,
+          "layer": 1,
+          "mask": 1
+        }
+      ],
+      "tags": [
+        "paddle",
+        "right_paddle"
+      ]
+    },
+    {
+      "entity_id": "space-pong-ball",
+      "name": "Ball",
+      "enabled": true,
+      "layer": 3,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 0.0,
+          "y": 0.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "circle",
+          "width": 2.0,
+          "height": 2.0,
+          "radius": 1.0,
+          "fill": [
+            0.95,
+            0.98,
+            1.0,
+            1.0
+          ],
+          "outline": [
+            0.4,
+            0.8,
+            1.0,
+            1.0
+          ],
+          "outline_width": 0.3,
+          "layer": 0,
+          "visible": true
+        },
+        {
+          "type": "collider",
+          "enabled": true,
+          "shape": "circle",
+          "width": 2.0,
+          "height": 2.0,
+          "radius": 1.0,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "solid": true,
+          "trigger": false,
+          "layer": 1,
+          "mask": 1
+        }
+      ],
+      "tags": [
+        "ball"
+      ]
+    },
+    {
+      "entity_id": "space-pong-score-left",
+      "name": "Left Score",
+      "enabled": true,
+      "layer": 5,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": -20.0,
+          "y": 24.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "text",
+          "enabled": true,
+          "text": "0",
+          "font": "default",
+          "size": 8.0,
+          "color": [
+            0.2,
+            0.85,
+            1.0,
+            1.0
+          ],
+          "max_width": null,
+          "align": "center",
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "hud",
+        "score_left"
+      ]
+    },
+    {
+      "entity_id": "space-pong-score-right",
+      "name": "Right Score",
+      "enabled": true,
+      "layer": 5,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 20.0,
+          "y": 24.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "text",
+          "enabled": true,
+          "text": "0",
+          "font": "default",
+          "size": 8.0,
+          "color": [
+            1.0,
+            0.35,
+            0.75,
+            1.0
+          ],
+          "max_width": null,
+          "align": "center",
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "hud",
+        "score_right"
+      ]
+    },
+    {
+      "entity_id": "space-pong-status",
+      "name": "Status",
+      "enabled": true,
+      "layer": 5,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 0.0,
+          "y": -25.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "text",
+          "enabled": true,
+          "text": "READY",
+          "font": "default",
+          "size": 3.0,
+          "color": [
+            0.7,
+            0.8,
+            0.95,
+            1.0
+          ],
+          "max_width": null,
+          "align": "center",
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "hud",
+        "status"
+      ]
+    },
+    {
+      "entity_id": "space-pong-controller",
+      "name": "Game Controller",
+      "enabled": true,
+      "layer": 6,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "script",
+          "enabled": true,
+          "script_id": "project://scripts/space_pong_behaviour.py",
+          "behaviour_class": "SpacePongBehaviour",
+          "exposed_values": {
+            "paddle_speed": 32.0,
+            "ball_speed": 34.0,
+            "winning_score": 3,
+            "ai_difficulty": 0.65
+          },
+          "order": 0
+        }
+      ],
+      "tags": [
+        "game_controller"
+      ]
+    }
+  ]
+}
