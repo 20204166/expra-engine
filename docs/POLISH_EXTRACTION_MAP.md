@@ -118,6 +118,27 @@ At audit time, no reference implementation has been copied into Expra.
   renderer/runtime suites. No reference implementation was copied; license
   status is therefore not applicable.
 
+### Task 5: Collider Authoring and Deterministic Physics Backend
+
+- **Source and destination:** Existing Expra `HitResult2D` and `TriggerEvent`
+  contracts in `runtime/physics.py`; new `ColliderComponent` and
+  `PhysicsWorld2D` in `runtime/`.
+- **Behavior preserved:** Backend-neutral hit/trigger result shapes, inclusive
+  contact, initial overlap, nearest ray hits, stable scene insertion ordering,
+  layer/mask filtering, disabled/removed collider exclusion, and entered/
+  stayed/exited lifecycle semantics.
+- **Coupling removed:** Collider serialization contains only validated scalar,
+  tuple, and bit-field data. Editor outline data is derived from the component
+  and is not serialized; the world imports no renderer or editor backend.
+- **Tests:** `tests/test_physics_world.py` covers validation, round-tripping,
+  exact rectangle contact, filtering, deterministic raycast ties, disabled /
+  removed colliders, and trigger lifecycle; `tests/test_runtime_physics.py`
+  preserves the existing result-contract suite; component schema tests verify
+  Task 1 metadata registration.
+- **License/provenance:** Rewritten from scratch from Expra contracts and test
+  intent; no reference implementation was copied, so license status is not
+  applicable.
+
 ## Final Acceptance Record
 
 Space-Pong-specific engine hacks: **MUST REMAIN NONE**.

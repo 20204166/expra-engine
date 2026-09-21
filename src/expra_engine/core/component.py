@@ -118,6 +118,7 @@ register_component_spec(
 def component_from_dict(data: dict[str, Any]) -> Component:
     """Deserialize a component from its dict representation."""
     _register_visual_components()
+    _register_physics_components()
     component_type = data.get("type", "")
     if component_type == "script":
         from expra_engine.runtime.script_component import (
@@ -150,6 +151,7 @@ def register_component_type(name: str, cls: type[Component]) -> None:
 def registered_component_types() -> tuple[tuple[str, type[Component]], ...]:
     """Return registered component types in registration order for editor tooling."""
     _register_visual_components()
+    _register_physics_components()
     return tuple(_COMPONENT_REGISTRY.items())
 
 
@@ -208,3 +210,24 @@ def _register_visual_components() -> None:
     for component_type, component_cls, fields in registrations:
         _COMPONENT_REGISTRY[component_type] = component_cls
         register_component_spec(ComponentTypeSpec(component_type, component_cls, fields))
+
+
+def _register_physics_components() -> None:
+    if "collider" in _COMPONENT_REGISTRY:
+        return
+    from expra_engine.runtime.collider import ColliderComponent
+
+    fields = (
+        PropertyDescriptor("shape", "Shape", str, "rectangle", enum_values=("rectangle", "circle")),
+        PropertyDescriptor("width", "Width", float, 1.0, minimum=0.0),
+        PropertyDescriptor("height", "Height", float, 1.0, minimum=0.0),
+        PropertyDescriptor("radius", "Radius", float, None, minimum=0.0),
+        PropertyDescriptor("offset", "Offset", tuple, (0.0, 0.0)),
+        PropertyDescriptor("solid", "Solid", bool, True),
+        PropertyDescriptor("trigger", "Trigger", bool, False),
+        PropertyDescriptor("enabled", "Enabled", bool, True),
+        PropertyDescriptor("layer", "Layer", int, 1, minimum=0),
+        PropertyDescriptor("mask", "Mask", int, 0xFFFFFFFF, minimum=0),
+    )
+    _COMPONENT_REGISTRY["collider"] = ColliderComponent
+    register_component_spec(ComponentTypeSpec("collider", ColliderComponent, fields))
