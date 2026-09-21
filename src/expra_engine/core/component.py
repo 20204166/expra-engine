@@ -9,6 +9,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from expra_engine.core.component_schema import (
+    ComponentTypeSpec,
+    PropertyDescriptor,
+    register_component_spec,
+)
+
 
 class Component:
     """Base class for all engine components.
@@ -91,6 +97,23 @@ _COMPONENT_REGISTRY: dict[str, type[Component]] = {
     "transform": TransformComponent,
 }
 
+register_component_spec(
+    ComponentTypeSpec(
+        "transform",
+        TransformComponent,
+        tuple(
+            PropertyDescriptor(name, label, float, default)
+            for name, label, default in (
+                ("x", "Position X", 0.0),
+                ("y", "Position Y", 0.0),
+                ("rotation", "Rotation", 0.0),
+                ("scale_x", "Scale X", 1.0),
+                ("scale_y", "Scale Y", 1.0),
+            )
+        ),
+    )
+)
+
 
 def component_from_dict(data: dict[str, Any]) -> Component:
     """Deserialize a component from its dict representation."""
@@ -115,6 +138,12 @@ def component_from_dict(data: dict[str, Any]) -> Component:
 def register_component_type(name: str, cls: type[Component]) -> None:
     """Register a custom component type for deserialization."""
     _COMPONENT_REGISTRY[name] = cls
+    from expra_engine.core.component_schema import component_type_spec
+
+    try:
+        component_type_spec(name)
+    except KeyError:
+        register_component_spec(ComponentTypeSpec(name, cls))
 
 
 def registered_component_types() -> tuple[tuple[str, type[Component]], ...]:

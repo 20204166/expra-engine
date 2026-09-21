@@ -3,12 +3,16 @@
 import unittest
 
 from expra_engine.core.entity import Entity
+from expra_engine.core.component import TransformComponent
 from expra_engine.core.scene import Scene
 from expra_engine.editor.commands import (
     Command,
     CommandStack,
     DeleteEntityCommand,
+    AddComponentCommand,
+    RemoveComponentCommand,
     RenameEntityCommand,
+    SetComponentPropertyCommand,
 )
 
 
@@ -157,6 +161,57 @@ class DeleteCommandTests(unittest.TestCase):
         stack.push(DeleteEntityCommand(scene, entity))
         stack.undo()
         self.assertIsNotNone(scene.find_entity(eid))
+
+
+class ComponentCommandTests(unittest.TestCase):
+    def test_component_property_add_remove_undo_and_redo(self) -> None:
+        scene = Scene("test")
+        entity = scene.create_entity("hero")
+        transform = TransformComponent()
+        entity.add_component(transform)
+        stack = CommandStack()
+
+        stack.push(SetComponentPropertyCommand(scene, entity.entity_id, TransformComponent, "x", 12.0))
+        self.assertEqual(transform.x, 12.0)
+        stack.undo()
+        self.assertEqual(transform.x, 0.0)
+        stack.redo()
+        self.assertEqual(transform.x, 12.0)
+
+        stack.push(RemoveComponentCommand(scene, entity.entity_id, transform))
+        self.assertNotIn(transform, entity.components)
+        stack.undo()
+        self.assertIn(transform, entity.components)
+
+        other = scene.create_entity("other")
+        stack.push(AddComponentCommand(scene, other.entity_id, TransformComponent))
+        self.assertEqual(len(other.get_components(TransformComponent)), 1)
+        stack.undo()
+        self.assertEqual(len(other.get_components(TransformComponent)), 0)
+
+    def test_component_commands_are_no_ops_for_stale_targets(self) -> None:
+        scene = Scene("test")
+        entity = scene.create_entity("hero")
+        transform = TransformComponent()
+        entity.add_component(transform)
+        stack = CommandStack()
+        command = SetComponentPropertyCommand(scene, entity.entity_id, TransformComponent, "x", 9.0)
+        scene.remove_entity(entity.entity_id)
+        stack.push(command)
+        self.assertEqual(transform.x, 0.0)
+        self.assertFalse(stack.undo() is None)
+
+    def test_property_command_does_not_edit_replaced_component(self) -> None:
+        scene = Scene("test")
+        entity = scene.create_entity("hero")
+        original = TransformComponent()
+        entity.add_component(original)
+        command = SetComponentPropertyCommand(scene, entity.entity_id, TransformComponent, "x", 9.0)
+        entity.remove_component(original)
+        replacement = TransformComponent()
+        entity.add_component(replacement)
+        CommandStack().push(command)
+        self.assertEqual(replacement.x, 0.0)
 
 
 if __name__ == "__main__":

@@ -13,7 +13,6 @@ Background work delivers results through TkDeliveryQueue → AppCoordinator
 """
 
 from __future__ import annotations
-
 import contextlib
 import json
 import logging
@@ -24,9 +23,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog
 from tkinter import ttk as tkttk
 from typing import Any
-
 import ttkbootstrap as ttk
-
 from expra_engine.coordinators.app_coordinator import AppCoordinator
 from expra_engine.coordinators.button_coordinator import ButtonCoordinator
 from expra_engine.coordinators.ui_coordinator import RenderIntent, UICoordinator
@@ -36,10 +33,15 @@ from expra_engine.core.project import Project
 from expra_engine.core.scene import Scene
 from expra_engine.editor.builtin_features import build_builtin_features
 from expra_engine.editor.commands import (
+    AddComponentCommand,
+    apply_component_change,
     CommandStack,
     DeleteEntityCommand,
     RenameEntityCommand,
     SetExposedValueCommand,
+    SetComponentPropertyCommand,
+    RemoveComponentCommand,
+    remove_component,
 )
 from expra_engine.editor.contributions import (
     ContributionRegistry,
@@ -70,7 +72,6 @@ from expra_engine.ui.styles import (
 from expra_engine.ui.timer_delivery import TimerDelivery
 from expra_engine.ui.toolbar import build_toolbar
 from expra_engine.ui.viewport import ViewportPanel
-
 LOGGER = logging.getLogger(__name__)
 _WINDOW_WIDTH = 1280
 _WINDOW_HEIGHT = 800
@@ -252,6 +253,8 @@ class EditorWindow:
             on_toggle_enabled=self._on_entity_toggle,
             on_script_value_change=self._on_script_value_change,
             on_add_component=self._on_add_component,
+            on_component_change=lambda *args: apply_component_change(self, *args),
+            on_remove_component=lambda *args: remove_component(self, *args),
         )
         self._inspector.pack(fill="both", expand=True)
         self._inspector_host = insp_frame
@@ -437,7 +440,6 @@ class EditorWindow:
             self._console.log("[Engine] Stopped — scene restored", level="info")
         self._update_play_pause_state()
         self._present_all()
-
     # ------------------------------------------------------------------
     # Project and scene actions
     # ------------------------------------------------------------------
@@ -647,7 +649,7 @@ class EditorWindow:
         if any(isinstance(component, component_type) for component in entity.components):
             return
         try:
-            entity.add_component(component_type())
+            self._command_stack.push(AddComponentCommand(scene, entity.entity_id, component_type))
         except TypeError as exc:
             messagebox.showerror("Add Component", str(exc), parent=self._root)
             return
@@ -671,7 +673,6 @@ class EditorWindow:
         self._present_all()
         self._hierarchy.select(entity.entity_id)
         self._on_hierarchy_select(entity.entity_id)
-
     def _on_hierarchy_delete(self, entity_id: str) -> None:
         if self._engine.run_state != EngineRunState.EDIT:
             return
@@ -689,7 +690,6 @@ class EditorWindow:
             self._actions.set_enabled("delete_entity", False)
         self._update_undo_redo_state()
         self._present_all()
-
     def _on_transform_change(self, entity_id: str, field: str, value: float) -> None:
         if self._engine.run_state != EngineRunState.EDIT:
             return

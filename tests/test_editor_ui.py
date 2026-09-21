@@ -6,6 +6,7 @@ from contextlib import suppress
 from pathlib import Path
 
 from expra_engine.core.component import TransformComponent
+from expra_engine.core.component_schema import PropertyDescriptor
 from expra_engine.core.engine import Engine
 from expra_engine.core.scene import Scene
 from expra_engine.editor.assets import AssetEntry
@@ -28,6 +29,12 @@ def _display_available() -> bool:
 
 
 DISPLAY_AVAILABLE = _display_available()
+
+
+def test_inspector_value_conversion_uses_descriptor_rejection_policy() -> None:
+    descriptor = PropertyDescriptor("x", "X", float, 0.0, minimum=-10.0, maximum=10.0)
+    assert InspectorPanel.convert_component_value(descriptor, "2.5", 1.0) == 2.5
+    assert InspectorPanel.convert_component_value(descriptor, "bad", 1.0) == 1.0
 
 
 @unittest.skipUnless(DISPLAY_AVAILABLE, "no display for real Tk editor tests")

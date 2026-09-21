@@ -13,12 +13,19 @@ from __future__ import annotations
 import abc
 from typing import Any
 
+from expra_engine.core.component_schema import component_type_spec
+
 __all__ = (
     "Command",
     "CommandStack",
     "DeleteEntityCommand",
     "RenameEntityCommand",
     "SetExposedValueCommand",
+    "SetComponentPropertyCommand",
+    "AddComponentCommand",
+    "RemoveComponentCommand",
+    "apply_component_change",
+    "remove_component",
 )
 
 
@@ -212,3 +219,143 @@ class SetExposedValueCommand(Command):
     @property
     def description(self) -> str:
         return f"Set {self._field}"
+
+
+class SetComponentPropertyCommand(Command):
+    """Set a registered component property, resolving the target on execution."""
+
+    def __init__(self, scene: Any, entity_id: str, component_type: type, field: str, value: Any):
+        self._scene = scene
+        self._entity_id = entity_id
+        self._component_type = component_type
+        self._field = field
+        self._new = value
+        entity = scene.find_entity(entity_id)
+        self._component_ref = entity.get_component(component_type) if entity else None
+        self._old: Any = None
+        self._captured = False
+
+    def _component(self) -> Any | None:
+        entity = self._scene.find_entity(self._entity_id)
+        if entity is None or self._component_ref is None:
+            return None
+        return next(
+            (component for component in entity.components if component is self._component_ref),
+            None,
+        )
+
+    def execute(self) -> None:
+        component = self._component()
+        if component is None or not hasattr(component, self._field):
+            return
+        if not self._captured:
+            self._old = getattr(component, self._field)
+            self._captured = True
+        setattr(component, self._field, self._new)
+
+    def undo(self) -> None:
+        component = self._component()
+        if component is not None and self._captured:
+            setattr(component, self._field, self._old)
+
+    @property
+    def description(self) -> str:
+        return f"Set {self._field}"
+
+
+class AddComponentCommand(Command):
+    def __init__(self, scene: Any, entity_id: str, component_type: type, component: Any = None):
+        self._scene = scene
+        self._entity_id = entity_id
+        self._component_type = component_type
+        self._component = component or component_type()
+        self._added = False
+
+    def execute(self) -> None:
+        entity = self._scene.find_entity(self._entity_id)
+        if entity is None or entity.get_component(self._component_type) is not None:
+            return
+        entity.add_component(self._component)
+        self._added = True
+
+    def undo(self) -> None:
+        entity = self._scene.find_entity(self._entity_id)
+        if entity is not None and self._added:
+            self._added = entity.remove_component(self._component)
+
+    @property
+    def description(self) -> str:
+        return f"Add {self._component_type.__name__}"
+
+
+class RemoveComponentCommand(Command):
+    def __init__(self, scene: Any, entity_id: str, component: Any):
+        self._scene = scene
+        self._entity_id = entity_id
+        self._component = component
+        self._index: int | None = None
+        self._removed = False
+
+    def execute(self) -> None:
+        entity = self._scene.find_entity(self._entity_id)
+        if entity is None or not any(component is self._component for component in entity.components):
+            return
+        from expra_engine.core.component_schema import registered_component_specs
+
+        if any(
+            self._component.__class__ in spec.required_types
+            and entity.get_component(spec.cls) is not None
+            for spec in registered_component_specs()
+        ):
+            return
+        self._index = entity._components.index(self._component)
+        self._removed = entity.remove_component(self._component)
+
+    def undo(self) -> None:
+        entity = self._scene.find_entity(self._entity_id)
+        if (
+            entity is None
+            or not self._removed
+            or any(component is self._component for component in entity.components)
+        ):
+            return
+        if self._index is None or self._index >= len(entity._components):
+            entity.add_component(self._component)
+        else:
+            entity._components.insert(self._index, self._component)
+
+    @property
+    def description(self) -> str:
+        return f"Remove {type(self._component).__name__}"
+
+
+def apply_component_change(window: Any, entity_id: str, component_name: str, field: str, value: Any) -> None:
+    if window._engine.run_state.name != "EDIT":
+        return
+    scene = window._engine.edit_scene
+    try:
+        spec = component_type_spec(component_name)
+    except KeyError:
+        return
+    if scene is None:
+        return
+    window._command_stack.push(SetComponentPropertyCommand(scene, entity_id, spec.cls, field, value))
+    window._present_all()
+
+
+def remove_component(window: Any, entity_id: str, component_name: str) -> None:
+    if window._engine.run_state.name != "EDIT":
+        return
+    scene = window._engine.edit_scene
+    if scene is None:
+        return
+    try:
+        spec = component_type_spec(component_name)
+    except KeyError:
+        return
+    entity = scene.find_entity(entity_id)
+    component = entity.get_component(spec.cls) if entity else None
+    if component is None:
+        return
+    window._command_stack.push(RemoveComponentCommand(scene, entity_id, component))
+    window._present_all()

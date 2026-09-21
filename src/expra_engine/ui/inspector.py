@@ -8,6 +8,11 @@ from tkinter import ttk
 from typing import Any
 
 from expra_engine.core.component import Component, TransformComponent, registered_component_types
+from expra_engine.core.component_schema import (
+    PropertyDescriptor,
+    component_type_spec,
+    registered_component_specs,
+)
 from expra_engine.core.entity import Entity
 from expra_engine.runtime.script_component import ScriptComponent
 from expra_engine.ui.layout import make_scrollable_frame
@@ -33,6 +38,8 @@ class InspectorPanel(tk.Frame):
         on_toggle_enabled: Callable[[str, bool], None] | None = None,
         on_script_value_change: Callable[[str, int, str, Any], None] | None = None,
         on_add_component: Callable[[str], None] | None = None,
+        on_component_change: Callable[[str, str, str, Any], None] | None = None,
+        on_remove_component: Callable[[str, str], None] | None = None,
     ) -> None:
         c = colors or COLORS
         super().__init__(parent, bg=c["panel_bg"])
@@ -42,6 +49,8 @@ class InspectorPanel(tk.Frame):
         self._on_toggle_enabled = on_toggle_enabled
         self._on_script_value_change = on_script_value_change
         self._on_add_component = on_add_component
+        self._on_component_change = on_component_change
+        self._on_remove_component = on_remove_component
         self._current_entity_id: str | None = None
         self._name_value = ""
         self._transform_vars: dict[str, tk.StringVar] = {}
@@ -98,12 +107,10 @@ class InspectorPanel(tk.Frame):
         self._entity_section(entity)
         self._add_component_section(entity)
         for index, component in enumerate(entity.components):
-            if isinstance(component, TransformComponent):
-                self._transform_section(component)
-            elif isinstance(component, ScriptComponent):
+            if isinstance(component, ScriptComponent):
                 self._script_section(entity, index, component)
             else:
-                self._component_section(component)
+                self._component_section(entity, component)
 
     def _empty_state(self) -> None:
         c = self._colors
@@ -178,19 +185,28 @@ class InspectorPanel(tk.Frame):
 
     def _add_component_section(self, entity: Entity) -> None:
         self._section_header("Components")
+        search = ttk.Entry(self._content, style=STYLE_ENTRY)
+        search.insert(0, "")
+        search.pack(fill="x", pady=(0, 4))
         menu_button = ttk.Menubutton(self._content, text="+ Add Component")
         menu = tk.Menu(menu_button, tearoff=0)
         existing = {type(component) for component in entity.components}
-        for name, component_type in registered_component_types():
-            if component_type in existing:
-                continue
-            label = name.replace("_", " ").title()
-            menu.add_command(
-                label=label,
-                command=lambda component_name=name: self._emit_add_component(component_name),
-            )
-        if menu.index("end") is None:
-            menu.add_command(label="No components available", state="disabled")
+        def rebuild(_event: Any = None) -> None:
+            query = search.get().strip().lower()
+            menu.delete(0, "end")
+            for name, component_type in registered_component_types():
+                if component_type in existing or query not in name.lower():
+                    continue
+                label = name.replace("_", " ").title()
+                menu.add_command(
+                    label=label,
+                    command=lambda component_name=name: self._emit_add_component(component_name),
+                )
+            if menu.index("end") is None:
+                menu.add_command(label="No components available", state="disabled")
+
+        search.bind("<KeyRelease>", rebuild)
+        rebuild()
         menu_button["menu"] = menu
         menu_button.pack(anchor="w", pady=(0, 4))
 
@@ -225,17 +241,56 @@ class InspectorPanel(tk.Frame):
 
         return handle
 
-    def _component_section(self, component: Component) -> None:
-        self._section_header(type(component).__name__.replace("Component", ""))
-        tk.Label(
-            self._content,
-            text="Component data is not editable in this inspector yet.",
-            font=FONTS["body"],
-            bg=self._colors["panel_bg"],
-            fg=self._colors["ink_2"],
-            wraplength=220,
-            justify="left",
-        ).pack(anchor="w", padx=4)
+    @staticmethod
+    def convert_component_value(descriptor: PropertyDescriptor, value: Any, original: Any) -> Any:
+        return descriptor.convert(value, original=original)
+
+    def _component_section(self, entity: Entity, component: Component) -> None:
+        try:
+            spec = next(spec for spec in registered_component_specs() if isinstance(component, spec.cls))
+        except (KeyError, StopIteration):
+            self._section_header(type(component).__name__.replace("Component", ""))
+            return
+        header = self._section_header(spec.name.replace("_", " "))
+        if self._on_remove_component is not None:
+            ttk.Button(
+                header,
+                text="Remove",
+                command=lambda name=spec.name: self._emit_remove_component(entity.entity_id, name),
+            ).pack(side="right")
+        form = self._form()
+        for row, descriptor in enumerate(spec.fields):
+            self._label(form, descriptor.label, row)
+            original = getattr(component, descriptor.name)
+            variable = tk.StringVar(value=str(original))
+            entry = ttk.Entry(form, textvariable=variable, style=STYLE_ENTRY)
+            entry.grid(row=row, column=1, sticky="ew", pady=3)
+            if not descriptor.editable:
+                entry.configure(state="disabled")
+            entry.bind(
+                "<Return>",
+                lambda _event, d=descriptor, v=variable, old=original, name=spec.name: self._emit_component_change(
+                    entity.entity_id, name, d, v.get(), old
+                ),
+            )
+            entry.bind(
+                "<FocusOut>",
+                lambda _event, d=descriptor, v=variable, old=original, name=spec.name: self._emit_component_change(
+                    entity.entity_id, name, d, v.get(), old
+                ),
+            )
+
+    def _emit_component_change(
+        self, entity_id: str, component_type: str, descriptor: PropertyDescriptor, value: Any, original: Any
+    ) -> None:
+        converted = self.convert_component_value(descriptor, value, original)
+        if converted == original or self._on_component_change is None:
+            return
+        self._on_component_change(entity_id, component_type, descriptor.name, converted)
+
+    def _emit_remove_component(self, entity_id: str, component_type: str) -> None:
+        if self._on_remove_component is not None:
+            self._on_remove_component(entity_id, component_type)
 
     def _script_section(self, entity: Entity, index: int, component: ScriptComponent) -> None:
         self._section_header(f"Script — {component.behaviour_class}")
