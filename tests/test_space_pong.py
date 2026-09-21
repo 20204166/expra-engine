@@ -100,6 +100,15 @@ def test_space_pong_runtime_covers_score_win_pause_restart_and_hit_feedback() ->
     engine.stop()
 
 
+def test_space_pong_uses_playable_default_ball_speed() -> None:
+    _, engine = _project_engine()
+    engine.play()
+    game = engine.behaviour_system.instances[0]
+
+    assert game.ball_velocity[0] == 18.0
+    engine.stop()
+
+
 def test_space_pong_ball_bounce_is_deterministic_at_the_arena_wall() -> None:
     _, engine = _project_engine()
     engine.play()

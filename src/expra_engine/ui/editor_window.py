@@ -57,6 +57,7 @@ from expra_engine.editor.project_workflow import ProjectWorkflow
 from expra_engine.editor.runtime_preview import RuntimePreviewLoop
 from expra_engine.editor.script_tools import attach_script, create_behaviour_script
 from expra_engine.editor.window_placement import WindowGeometry
+from expra_engine.runtime.input import PhysicalInput
 from expra_engine.runtime.script_component import ScriptComponent
 from expra_engine.runtime.script_registry import ScriptRegistry
 from expra_engine.ui.asset_browser import AssetBrowserPanel
@@ -112,6 +113,8 @@ class EditorWindow:
             self._root.geometry(saved_geometry.to_tk_geometry())
         self._root.minsize(_WINDOW_MIN_WIDTH, _WINDOW_MIN_HEIGHT)
         self._root.protocol("WM_DELETE_WINDOW", self._on_close)
+        self._root.bind("<KeyPress>", self._on_runtime_key_press, add="+")
+        self._root.bind("<KeyRelease>", self._on_runtime_key_release, add="+")
         self._colors = accent_theme_colors("cyan")
         self._style = tkttk.Style(self._root)
         configure_app_styles(self._style, colors=self._colors)
@@ -167,6 +170,22 @@ class EditorWindow:
     # ------------------------------------------------------------------
     # Layout
     # ------------------------------------------------------------------
+
+    def _on_runtime_key_press(self, event: Any) -> None:
+        self._forward_runtime_key("press", getattr(event, "keysym", ""))
+
+    def _on_runtime_key_release(self, event: Any) -> None:
+        self._forward_runtime_key("release", getattr(event, "keysym", ""))
+
+    def _forward_runtime_key(self, phase: str, key: object) -> None:
+        if self._engine.run_state not in (EngineRunState.PLAY, EngineRunState.PAUSED):
+            return
+        control = str(key).lower()
+        if not control:
+            return
+        transitions = getattr(self._engine.input_map, phase)(PhysicalInput("keyboard", control))
+        for action_event in transitions:
+            self._engine.signal(action_event)
 
     def _build_layout(self) -> None:
         self._build_menubar()

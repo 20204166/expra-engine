@@ -17,6 +17,9 @@ from expra_engine.ui.hierarchy import HierarchyPanel
 from expra_engine.ui.inspector import InspectorPanel
 from expra_engine.ui.styles import COLORS, configure_app_styles, editor_entity_kind
 from expra_engine.ui.viewport import ViewportPanel
+from expra_engine.runtime.rendering import Color
+from expra_engine.runtime.script_component import ScriptComponent
+from expra_engine.runtime.visual_components import TextComponent
 
 
 def _display_available() -> bool:
@@ -160,6 +163,30 @@ class EditorPanelTests(unittest.TestCase):
 
         panel.render(None)
         self.assertTrue(panel._canvas.find_withtag("all"))
+
+    def test_viewport_hides_nonvisual_entities_without_transforms(self) -> None:
+        panel = ViewportPanel(self.root)
+        panel.pack(fill="both", expand=True)
+        scene = Scene("Controller")
+        controller = scene.create_entity("Game Controller")
+        controller.add_component(ScriptComponent("project://controller.py", "Controller"))
+
+        panel.render(scene)
+        self.root.update_idletasks()
+
+        self.assertFalse(panel._canvas.find_withtag(f"entity:{controller.entity_id}"))
+
+    def test_viewport_accepts_float_text_sizes(self) -> None:
+        panel = ViewportPanel(self.root)
+        panel.pack(fill="both", expand=True)
+        scene = Scene("Text")
+        entity = scene.create_entity("Label")
+        entity.add_component(TextComponent("Score", size=8.0, color=Color(1.0, 1.0, 1.0)))
+
+        panel.render(scene)
+        self.root.update_idletasks()
+
+        self.assertTrue(panel._canvas.find_withtag(f"entity:{entity.entity_id}"))
 
     def test_viewport_uses_distinct_camera_and_player_shapes(self) -> None:
         panel = ViewportPanel(self.root)

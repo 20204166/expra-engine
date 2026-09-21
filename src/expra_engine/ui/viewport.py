@@ -57,6 +57,7 @@ def build_editor_render_target(
     *,
     viewport: tuple[int, int] = (400, 300),
     selected_id: str | None = None,
+    camera: Any | None = None,
 ) -> EditorRenderTarget:
     """Extract the runtime frame once and apply editor preview clipping."""
     if scene is None:
@@ -65,10 +66,13 @@ def build_editor_render_target(
     width, height = viewport
     if width <= 0 or height <= 0:
         return EditorRenderTarget(frame, (), None)
-    context = RenderContext(
-        Viewport(0, 0, width, height),
-        OrthographicCamera(width=20.0, height=20.0 * height / width),
-    )
+    preview_camera = OrthographicCamera(width=20.0, height=20.0 * height / width)
+    preview_camera.apply_dict(scene.camera)
+    if camera is not None:
+        preview_camera.position = camera.position
+        preview_camera.width = camera._camera.width
+        preview_camera.rotation = camera._camera.rotation
+    context = RenderContext(Viewport(0, 0, width, height), preview_camera)
     items = frame.visible_items(context)
     entity_ids = {entity.entity_id for entity in scene.entities}
     colliders: list[ColliderOutline] = []
@@ -204,12 +208,18 @@ class ViewportPanel(tk.Frame):
 
     def render(self, scene: Scene | None, selected_id: str | None = None) -> None:
         """Redraw the viewport for ``scene``. Called on the main thread."""
+        scene_changed = scene is not None and (
+            self._scene is None or self._scene.scene_id != scene.scene_id
+        )
         self._scene = scene
         self._selected_id = selected_id
+        if scene_changed and scene is not None:
+            self._camera.apply_dict(scene.camera)
         self._target = build_editor_render_target(
             scene,
             viewport=(max(1, self._canvas.winfo_width()), max(1, self._canvas.winfo_height())),
             selected_id=selected_id,
+            camera=self._camera,
         )
         self._redraw()
 
@@ -254,6 +264,7 @@ class ViewportPanel(tk.Frame):
             self._scene,
             viewport=(max(1, self._canvas.winfo_width()), max(1, self._canvas.winfo_height())),
             selected_id=self._selected_id,
+            camera=self._camera,
         )
         self._redraw()
 
@@ -306,6 +317,13 @@ class ViewportPanel(tk.Frame):
             if entity.entity_id in visual_ids:
                 continue
             transform = entity.get_component(TransformComponent)
+            kind = editor_entity_kind(entity.name)
+            has_script = any(
+                getattr(component, "component_type", None) == "script"
+                for component in entity.components
+            )
+            if transform is None and has_script:
+                continue
             ex, ey = self._camera.project(
                 (transform.x, transform.y) if transform else (0.0, 0.0)
             )
@@ -315,7 +333,6 @@ class ViewportPanel(tk.Frame):
             outline = c["accent_ink"] if is_selected else c["ink_2"]
 
             tag = f"entity:{entity.entity_id}"
-            kind = editor_entity_kind(entity.name)
             if kind in {"camera", "camera_compact"}:
                 marker_fill = c["camera_active"] if is_selected else c["camera"]
                 canvas.create_rectangle(
@@ -478,7 +495,8 @@ class ViewportPanel(tk.Frame):
             self._canvas.create_oval(ex - sx, ey - sy, ex + sx, ey + sy, fill=color, outline=outline, tags=tag)
         elif item.primitive.kind == "text":
             text = item.text.text if item.text else ""
-            self._canvas.create_text(ex, ey, text=text, fill=color, font=(item.text.font, item.text.size) if item.text else None, tags=tag)
+            font = (item.text.font, int(round(item.text.size))) if item.text else None
+            self._canvas.create_text(ex, ey, text=text, fill=color, font=font, tags=tag)
         elif transform.rotation or self._camera._camera.rotation:
             self._canvas.create_polygon(
                 *self._projected_corners(item), fill=color, outline=outline, tags=tag

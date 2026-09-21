@@ -409,7 +409,7 @@
           "behaviour_class": "SpacePongBehaviour",
           "exposed_values": {
             "paddle_speed": 32.0,
-            "ball_speed": 34.0,
+            "ball_speed": 18.0,
             "winning_score": 3,
             "ai_difficulty": 0.65
           },
@@ -420,5 +420,12 @@
         "game_controller"
       ]
     }
-  ]
+  ],
+  "camera": {
+    "position": [
+      0.0,
+      0.0
+    ],
+    "width": 100.0
+  }
 }

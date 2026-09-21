@@ -77,6 +77,9 @@ The full evidence record is maintained in
 `docs/SPACE_PONG_FINAL_REPORT.md`, and multi-engine extraction provenance is
 tracked in `docs/POLISH_EXTRACTION_MAP.md`.
 
+The current screenshot-based gameplay and engine-boundary evaluation is in
+`docs/SPACE_PONG_EVALUATION.md`.
+
 ## Change Policy
 
 Keep Space Pong small and focused on one polished game loop. Do not add content

@@ -17,7 +17,7 @@ class SpacePongBehaviour(Behaviour):
     """Own the sample's rules while scene data remains generic and editable."""
 
     paddle_speed = exposed(32.0, min=0.0, category="Movement")
-    ball_speed = exposed(34.0, min=0.0, category="Movement")
+    ball_speed = exposed(18.0, min=0.0, category="Movement")
     winning_score = exposed(3, min=1, category="Match")
     ai_difficulty = exposed(0.65, min=0.0, max=1.0, category="Match")
 

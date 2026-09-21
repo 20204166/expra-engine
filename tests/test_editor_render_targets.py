@@ -89,6 +89,16 @@ class EditorRenderTargetTests(unittest.TestCase):
 
         self.assertEqual(target.frame.modulation, Color(0.5, 0.4, 0.3, 1.0))
 
+    def test_target_uses_scene_camera_settings_for_large_worlds(self) -> None:
+        scene = Scene("wide", camera={"position": [0.0, 0.0], "width": 100.0})
+        paddle = scene.create_entity("paddle", entity_id="paddle")
+        paddle.add_component(TransformComponent(x=45.0))
+        paddle.add_component(PrimitiveComponent(width=2.0, height=12.0))
+
+        target = build_editor_render_target(scene, viewport=(400, 300))
+
+        self.assertEqual([item.key for item in target.items], ["paddle"])
+
     def test_target_clips_offscreen_items_and_clears_removed_selection(self) -> None:
         scene = Scene("preview")
         entity = scene.create_entity("visible", entity_id="visible")

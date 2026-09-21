@@ -7,7 +7,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+from expra_engine.core.engine import EngineRunState
 from expra_engine.core.scene import Scene
+from expra_engine.runtime.input import ActionId, InputMap, PhysicalInput
 from expra_engine.ui.editor_window import EditorWindow
 
 
@@ -67,6 +69,50 @@ class EditorWindowAutosaveTests(unittest.TestCase):
             window._last_save_path = None
             window._act_save_scene_silent()
             self.assertFalse(path.exists())
+
+    def test_runtime_key_events_forward_to_playing_engine_input(self) -> None:
+        window = object.__new__(EditorWindow)
+        input_map = InputMap()
+        input_map.bind(ActionId("left_up"), PhysicalInput("keyboard", "w"))
+        signal = MagicMock()
+        window._engine = SimpleNamespace(
+            run_state=EngineRunState.PLAY,
+            input_map=input_map,
+            signal=signal,
+        )
+
+        window._on_runtime_key_press(SimpleNamespace(keysym="W"))
+        window._on_runtime_key_press(SimpleNamespace(keysym="W"))
+
+        self.assertTrue(input_map.is_held("left_up"))
+        signal.assert_called_once()
+
+        window._on_runtime_key_release(SimpleNamespace(keysym="w"))
+
+        self.assertFalse(input_map.is_held("left_up"))
+        self.assertEqual(signal.call_count, 2)
+
+    def test_runtime_key_events_ignore_unconfigured_keys_and_edit_mode(self) -> None:
+        window = object.__new__(EditorWindow)
+        input_map = InputMap()
+        input_map.bind(ActionId("custom_action"), PhysicalInput("keyboard", "space"))
+        signal = MagicMock()
+        window._engine = SimpleNamespace(
+            run_state=EngineRunState.PLAY,
+            input_map=input_map,
+            signal=signal,
+        )
+
+        window._on_runtime_key_press(SimpleNamespace(keysym="F1"))
+
+        self.assertFalse(input_map.held_actions)
+        signal.assert_not_called()
+
+        window._engine.run_state = EngineRunState.EDIT
+        window._on_runtime_key_press(SimpleNamespace(keysym="space"))
+
+        self.assertFalse(input_map.is_held("custom_action"))
+        signal.assert_not_called()
 
 
 class RecentProjectsMenuTests(unittest.TestCase):
