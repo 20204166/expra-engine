@@ -80,6 +80,22 @@ At audit time, no reference implementation has been copied into Expra.
   scene, and renderer contract suites. No reference implementation was copied;
   license status is therefore not applicable.
 
+### Task 3: Text, Materials, Nine-Slice, and Pygame Draw Adapter
+
+- **Source and destination:** Existing `MaterialDescriptor`, `RenderItem`, and
+  `ui_model.nine_slice.NineSlice.resolve`; additive `TextDescriptor` and
+  `NineSliceDescriptor` in `runtime/rendering.py`, with translation in
+  `runtime/pygame_renderer.py`.
+- **Behavior preserved:** Legacy `RenderItem`/`RenderFrame` constructor
+  signatures and tag-based `PygameRenderer.on_render` behavior; equal-depth
+  ordering and existing nine-slice geometry remain unchanged.
+- **Coupling removed:** Text measurement/font lookup and texture lookup use
+  injected providers; descriptors contain no Pygame or Tk values. The adapter
+  consumes resolved nine-slice rectangles rather than reimplementing geometry.
+- **Tests:** `tests/test_runtime_rendering.py`, `tests/test_pygame_renderer.py`,
+  `tests/test_render_extractor.py`, and `tests/test_ui_model_nine_slice.py`.
+  No reference implementation was copied; license status is not applicable.
+
 ## Final Acceptance Record
 
 Space-Pong-specific engine hacks: **MUST REMAIN NONE**.

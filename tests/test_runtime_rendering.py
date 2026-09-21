@@ -8,6 +8,7 @@ import pytest
 from expra_engine.runtime.rendering import (
     Color,
     MaterialDescriptor,
+    NineSliceDescriptor,
     OrthographicCamera,
     PrimitiveDescriptor,
     RenderContext,
@@ -16,6 +17,7 @@ from expra_engine.runtime.rendering import (
     RenderFrame,
     RenderItem,
     RenderPhase,
+    TextDescriptor,
     Transform,
     Viewport,
 )
@@ -135,3 +137,40 @@ def test_camera_and_primitives_reject_non_finite_dimensions() -> None:
         OrthographicCamera(near=float("inf"))
     with pytest.raises(ValueError):
         PrimitiveDescriptor("circle", radius=float("nan"))
+
+
+def test_optional_material_and_draw_descriptors_validate_and_remain_immutable() -> None:
+    material = MaterialDescriptor(
+        texture_id="panel",
+        tint=Color(0.5, 0.5, 1.0, 0.5),
+        outline=Color(1.0, 0.0, 0.0),
+        outline_width=2.0,
+        blend_mode="add",
+    )
+    assert material.texture_id == "panel"
+    assert material.tint.alpha == 0.5
+    assert material.outline_width == 2.0
+    assert TextDescriptor("", size=12, align="center").text == ""
+    with pytest.raises(ValueError):
+        MaterialDescriptor(opacity=1.1)
+    with pytest.raises(ValueError):
+        MaterialDescriptor(outline_width=-1)
+    with pytest.raises(ValueError):
+        TextDescriptor("x", size=0)
+    with pytest.raises(ValueError):
+        TextDescriptor("x", max_width=0)
+    with pytest.raises(ValueError):
+        TextDescriptor("x", align="diagonal")
+
+
+def test_nine_slice_descriptor_is_backend_neutral_and_uses_existing_geometry() -> None:
+    from expra_engine.ui_model.geometry import Insets, Rect
+    from expra_engine.ui_model.nine_slice import NineSlice
+
+    descriptor = NineSliceDescriptor(
+        "panel",
+        Rect(0, 0, 100, 40),
+        NineSlice(Insets(4, 5, 6, 7)),
+    )
+    assert len(descriptor.geometry.resolve(descriptor.rect)) == 9
+    assert "pygame" not in NineSliceDescriptor.__module__

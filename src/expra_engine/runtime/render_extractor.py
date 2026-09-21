@@ -12,6 +12,7 @@ from expra_engine.runtime.rendering import (
     RenderItem,
     RenderPhase,
     Transform,
+    TextDescriptor,
 )
 from expra_engine.runtime.visual_components import PrimitiveComponent, SpriteComponent, TextComponent
 
@@ -44,6 +45,12 @@ def _item(entity: Entity, visual: object, transform: Transform) -> RenderItem:
             raise ValueError("invalid primitive dimensions")
         primitive = PrimitiveDescriptor(visual.kind, (visual.width, visual.height), visual.radius)
         color = visual.fill
+        material = MaterialDescriptor(
+            color=color,
+            outline=visual.outline,
+            outline_width=visual.outline_width,
+            tint=color,
+        )
         payload = visual.to_dict()
         layer = visual.layer
     elif isinstance(visual, SpriteComponent):
@@ -51,13 +58,15 @@ def _item(entity: Entity, visual: object, transform: Transform) -> RenderItem:
             raise ValueError("invalid sprite")
         primitive = PrimitiveDescriptor("sprite", (visual.width, visual.height))
         color = visual.tint
+        material = MaterialDescriptor(color=color, tint=color, texture_id=visual.asset)
         payload = visual.to_dict()
         layer = visual.layer
     elif isinstance(visual, TextComponent):
-        if not visual.text or visual.size <= 0 or (visual.max_width is not None and visual.max_width <= 0):
+        if visual.size <= 0 or (visual.max_width is not None and visual.max_width <= 0):
             raise ValueError("invalid text")
         primitive = PrimitiveDescriptor("text", (visual.size, visual.size))
         color = visual.color
+        material = MaterialDescriptor(color=color, tint=color)
         payload = visual.to_dict()
         layer = visual.layer
     else:
@@ -67,10 +76,18 @@ def _item(entity: Entity, visual: object, transform: Transform) -> RenderItem:
         entity.entity_id,
         primitive,
         transform,
-        material=MaterialDescriptor(color=color),
+        material=material,
         phase=phase,
         layer=entity.layer + layer,
         payload=payload,
+        text=TextDescriptor(
+            visual.text,
+            visual.font,
+            visual.size,
+            visual.color,
+            visual.max_width,
+            visual.align,
+        ) if isinstance(visual, TextComponent) else None,
     )
 
 

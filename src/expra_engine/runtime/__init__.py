@@ -34,6 +34,7 @@ from expra_engine.runtime.pygame_runtime import PygameRuntime
 from expra_engine.runtime.rendering import (
     Color,
     MaterialDescriptor,
+    NineSliceDescriptor,
     OrthographicCamera,
     PrimitiveDescriptor,
     RenderContext,
@@ -42,6 +43,7 @@ from expra_engine.runtime.rendering import (
     RenderItem,
     RenderPhase,
     Transform,
+    TextDescriptor,
     Viewport,
 )
 from expra_engine.runtime.rendering import (
@@ -71,6 +73,7 @@ __all__ = [
     "Func",
     "Idle",
     "MaterialDescriptor",
+    "NineSliceDescriptor",
     "OrthographicCamera",
     "PlatformerController2d",
     "PlatformerPhase",
@@ -104,6 +107,7 @@ __all__ = [
     "TrailPoint",
     "TrailRenderer",
     "Transform",
+    "TextDescriptor",
     "Tween",
     "UnresolvedScriptComponent",
     "Update",

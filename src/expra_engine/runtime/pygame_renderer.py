@@ -11,8 +11,10 @@ from expra_engine.core.component import TransformComponent
 from expra_engine.core.scene import Scene
 from expra_engine.runtime.rendering import (
     Color,
+    NineSliceDescriptor,
     RenderContext,
     RendererCapabilities,
+    TextDescriptor,
 )
 from expra_engine.runtime.rendering import RenderFrame as ContractRenderFrame
 
@@ -60,6 +62,8 @@ class PygameRenderer:
         world_bounds: tuple[float, float, float, float] = (0, 0, 100, 100),
         arena_bounds: tuple[int, int, int, int] | None = None,
         font_size: int = 24,
+        font_provider: Any | None = None,
+        resource_provider: Any | None = None,
     ) -> None:
         self.pygame = pygame_module
         self.surface = surface
@@ -68,14 +72,23 @@ class PygameRenderer:
         self.arena_bounds = arena_bounds if arena_bounds is not None else (0, 0, *screen_size)
         self._validate_bounds(self.world_bounds, "world_bounds")
         self._validate_bounds(self.arena_bounds, "arena_bounds")
+        self._font_provider = font_provider or self._default_font_provider
+        self._resource_provider = resource_provider
         try:
-            self.font = pygame_module.font.Font(None, font_size)
+            self.font = self._font_provider(None, font_size)
         except Exception:  # noqa: BLE001 - backend/font failures must not abort a frame
             self.font = None
         self._engine: Any = None
         self.context: RenderContext | None = None
         self.capabilities = RendererCapabilities(
-            primitive=True, text=True, resize=True, headless=True
+            primitive=True,
+            text=True,
+            texture=resource_provider is not None,
+            outline=True,
+            nine_slice=resource_provider is not None,
+            blend_mode=True,
+            resize=True,
+            headless=True,
         )
 
     def start(self, context: RenderContext) -> None:
@@ -116,8 +129,38 @@ class PygameRenderer:
             transform = item.world_transform
             center = context.camera.project(transform.position, context.viewport)
             position = (round(center[0]), round(center[1]))
-            color = self._color(item.material.color, item.material.opacity)
+            color = self._color(self._tint(item.material.color, item.material.tint), item.material.opacity)
             try:
+                if item.material.texture_id is not None:
+                    if self._resource_provider is None:
+                        continue
+                    texture = self._resource_provider(item.material.texture_id)
+                    if texture is None:
+                        continue
+                    width = round(
+                        abs(
+                            item.primitive.size[0]
+                            * transform.scale[0]
+                            / context.camera.width
+                            * context.viewport.width
+                        )
+                    )
+                    height = round(
+                        abs(
+                            item.primitive.size[1]
+                            * transform.scale[1]
+                            / context.camera.height
+                            * context.viewport.height
+                        )
+                    )
+                    self.surface.blit(texture, self._rect_from_center(position, width, height))
+                    continue
+                if item.text is not None:
+                    self.draw_text(item.text, position, item.material.opacity)
+                    continue
+                if item.nine_slice is not None:
+                    self.draw_nine_slice(item.nine_slice, item.material.tint)
+                    continue
                 if item.primitive.kind in ("rectangle", "rect"):
                     width = round(
                         abs(
@@ -136,6 +179,13 @@ class PygameRenderer:
                         )
                     )
                     draw.rect(self.surface, color, self._rect_from_center(position, width, height))
+                    if item.material.outline is not None and item.material.outline_width:
+                        draw.rect(
+                            self.surface,
+                            self._color(item.material.outline, item.material.opacity),
+                            self._rect_from_center(position, width, height),
+                            round(item.material.outline_width),
+                        )
                 elif item.primitive.kind == "circle":
                     radius = item.primitive.radius or item.primitive.size[0] / 2
                     pixels = round(
@@ -159,6 +209,73 @@ class PygameRenderer:
         values = tuple(round(value * 255) for value in (color.red, color.green, color.blue))
         alpha = round(color.alpha * opacity * 255)
         return (*values, alpha) if alpha < 255 else values
+
+    @staticmethod
+    def _tint(color: Color, tint: Color) -> Color:
+        return Color(
+            color.red * tint.red,
+            color.green * tint.green,
+            color.blue * tint.blue,
+            color.alpha * tint.alpha,
+        )
+
+    def _font(self, descriptor: TextDescriptor) -> Any:
+        return self._font_provider(descriptor.font, round(descriptor.size))
+
+    def _default_font_provider(self, name: str, size: int) -> Any:
+        return self.pygame.font.Font(None if name == "default" else name, size)
+
+    def measure_text(self, descriptor: TextDescriptor) -> tuple[int, int]:
+        font = self._font(descriptor)
+        return tuple(font.size(descriptor.text))
+
+    def draw_text(
+        self,
+        descriptor: TextDescriptor,
+        position: tuple[int, int],
+        opacity: float = 1.0,
+    ) -> None:
+        if self.surface is None or not descriptor.text:
+            return
+        font = self._font(descriptor)
+        lines: list[str] = []
+        for paragraph in descriptor.text.split("\n"):
+            words = paragraph.split()
+            if not words:
+                lines.append("")
+                continue
+            current = words[0]
+            for word in words[1:]:
+                candidate = f"{current} {word}"
+                if descriptor.max_width is not None and font.size(candidate)[0] > descriptor.max_width:
+                    lines.append(current)
+                    current = word
+                else:
+                    current = candidate
+            lines.append(current)
+        line_height = font.size("Ag")[1]
+        for index, line in enumerate(lines):
+            width = font.size(line)[0]
+            x = position[0]
+            if descriptor.align == "center":
+                x -= width // 2
+            elif descriptor.align == "right":
+                x -= width
+            rendered = font.render(line, True, self._color(descriptor.color, opacity))
+            self.surface.blit(rendered, (x, position[1] + index * line_height))
+
+    def draw_nine_slice(self, descriptor: NineSliceDescriptor, tint: Color) -> None:
+        if self.surface is None or self._resource_provider is None:
+            return
+        texture = self._resource_provider(descriptor.texture_id)
+        if texture is None:
+            return
+        for patch in descriptor.geometry.resolve(descriptor.rect):
+            rect = patch.rect
+            self.surface.blit(
+                texture,
+                self._rect((round(rect.x), round(rect.y), round(rect.width), round(rect.height))),
+            )
 
     def on_render(self, frame: RenderFrame) -> None:
         """Render one frame of scene primitives and HUD text."""

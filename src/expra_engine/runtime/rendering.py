@@ -7,9 +7,13 @@ from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Protocol, runtime_checkable
 
+from expra_engine.ui_model.geometry import Rect
+from expra_engine.ui_model.nine_slice import NineSlice
+
 __all__ = (
     "Color",
     "MaterialDescriptor",
+    "NineSliceDescriptor",
     "OrthographicCamera",
     "PrimitiveDescriptor",
     "RenderContext",
@@ -19,6 +23,7 @@ __all__ = (
     "Renderer",
     "RendererCapabilities",
     "Transform",
+    "TextDescriptor",
     "Viewport",
 )
 
@@ -45,6 +50,10 @@ class RendererCapabilities:
 
     primitive: bool = True
     text: bool = False
+    texture: bool = False
+    outline: bool = False
+    nine_slice: bool = False
+    blend_mode: bool = False
     resize: bool = True
     headless: bool = False
 
@@ -167,11 +176,52 @@ class Color:
 class MaterialDescriptor:
     color: Color = field(default_factory=lambda: Color(1.0, 1.0, 1.0))
     opacity: float = 1.0
+    texture_id: str | None = None
+    tint: Color = field(default_factory=lambda: Color(1.0, 1.0, 1.0))
+    outline: Color | None = None
+    outline_width: float = 0.0
+    blend_mode: str = "normal"
 
     def __post_init__(self) -> None:
         opacity = _finite(self.opacity, "opacity")
         if not 0.0 <= opacity <= 1.0:
             raise ValueError("opacity must be between 0 and 1")
+        if self.outline_width < 0.0:
+            raise ValueError("outline_width must not be negative")
+        _finite(self.outline_width, "outline_width")
+        if self.blend_mode not in {"normal", "add", "multiply"}:
+            raise ValueError("unsupported blend mode")
+
+
+@dataclass(frozen=True)
+class TextDescriptor:
+    """Backend-neutral text data; measurement and rasterization stay injected."""
+
+    text: str = ""
+    font: str = "default"
+    size: float = 16.0
+    color: Color = field(default_factory=lambda: Color(1.0, 1.0, 1.0))
+    max_width: float | None = None
+    align: str = "left"
+
+    def __post_init__(self) -> None:
+        size = _finite(self.size, "size")
+        if size <= 0:
+            raise ValueError("text size must be positive")
+        if self.max_width is not None and _finite(self.max_width, "max_width") <= 0:
+            raise ValueError("max_width must be positive")
+        if self.align not in {"left", "center", "right"}:
+            raise ValueError("unsupported text alignment")
+
+
+@dataclass(frozen=True)
+class NineSliceDescriptor:
+    """A texture and its existing logical nine-slice geometry."""
+
+    texture_id: str
+    rect: Rect
+    geometry: NineSlice
+    tint: Color = field(default_factory=lambda: Color(1.0, 1.0, 1.0))
 
 
 @dataclass(frozen=True)
@@ -210,6 +260,8 @@ class RenderItem:
     parent: Transform | None = None
     visible: bool = True
     payload: object | None = None
+    text: TextDescriptor | None = None
+    nine_slice: NineSliceDescriptor | None = None
 
     @property
     def world_transform(self) -> Transform:
