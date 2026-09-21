@@ -34,6 +34,7 @@ from expra_engine.core.scene import Scene
 from expra_engine.core.utils import get_time
 from expra_engine.runtime.behaviour import Behaviour, BehaviourFactory
 from expra_engine.runtime.input import ActionId, InputMap, PhysicalInput
+from expra_engine.runtime.transform_interpolation import TransformInterpolator
 
 if TYPE_CHECKING:
     from expra_engine.core.project import Project
@@ -89,6 +90,7 @@ class Engine:
 
         # Fixed-step clock
         self._clock: RuntimeClock | None = None  # type: ignore[name-defined]
+        self._transform_interpolator = TransformInterpolator()
 
         # Pluggable runtime systems
         self._systems: list[RuntimeSystem] = []
@@ -125,6 +127,16 @@ class Engine:
     @property
     def input_map(self) -> InputMap:
         return self._input_map
+
+    @property
+    def transform_interpolator(self) -> TransformInterpolator:
+        """Runtime-only fixed-tick transform snapshots for presentation."""
+        return self._transform_interpolator
+
+    @property
+    def interpolation_fraction(self) -> float:
+        """Return the active clock's render interpolation fraction."""
+        return self._clock.interpolation_fraction if self._clock is not None else 0.0
 
     @property
     def behaviour_system(self) -> BehaviourSystem:
@@ -214,6 +226,9 @@ class Engine:
             return True
         if self._state == EngineRunState.PAUSED:
             self._state = EngineRunState.PLAY
+            if self._clock is not None:
+                self._clock.resume()
+            self._transform_interpolator.reset_history()
             self._last_update = time.monotonic()
             return True
         return False
@@ -222,6 +237,9 @@ class Engine:
         """Enter PAUSED state. Returns True if state changed."""
         if self._state == EngineRunState.PLAY:
             self._state = EngineRunState.PAUSED
+            if self._clock is not None:
+                self._clock.pause()
+            self._transform_interpolator.reset_history()
             return True
         return False
 
@@ -296,6 +314,8 @@ class Engine:
 
             if self._quit_requested:
                 self.stop()
+            else:
+                self._transform_interpolator.prune_scene(self.active_scene)
 
         return dt
 
@@ -467,6 +487,7 @@ class Engine:
         else:
             self._scene_stack = []
 
+        self._transform_interpolator.clear()
         self._clock = RuntimeClock()
         self._eq = EventQueue(self._build_dispatch_root())
 
@@ -495,6 +516,7 @@ class Engine:
 
         if self._clock:
             self._clock.reset()
+        self._transform_interpolator.clear()
         self._eq = None
         self._clock = None
 
@@ -596,6 +618,7 @@ class Engine:
             clock=self._clock,
             systems=list(self._systems),
             scene=self._scene_stack[-1] if self._scene_stack else None,
+            interpolator=self._transform_interpolator,
         )
 
     @staticmethod
@@ -632,11 +655,25 @@ class _DispatchRoot:
         clock: RuntimeClock | None,
         systems: list[RuntimeSystem],
         scene: Scene | None,
+        interpolator: TransformInterpolator,
     ) -> None:
         self._engine = engine
         self._clock = clock
         self._systems = systems
         self._scene = scene
+        self._interpolator = interpolator
+
+    def on_scene_started(self, event: object, signal: object) -> None:
+        self._interpolator.capture_scene(self._scene)
+
+    def on_scene_stopped(self, event: object, signal: object) -> None:
+        self._interpolator.clear()
+
+    def on_scene_continued(self, event: object, signal: object) -> None:
+        self._interpolator.capture_scene(self._scene)
+
+    def on_update_complete(self, event: object) -> None:
+        self._interpolator.capture_scene(self._scene)
 
     @property
     def children(self) -> list[object]:

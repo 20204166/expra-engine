@@ -32,7 +32,12 @@ def create_runtime(pygame_module: Any) -> PygameRuntime:
         size=(960, 640),
         camera=__import__("expra_engine.runtime.rendering", fromlist=["OrthographicCamera"]).OrthographicCamera(width=100.0, height=60.0),
         ui_root=behaviour.ui,
-        frame_factory=lambda current, dt: extract_render_frame(current.active_scene, elapsed=dt),
+        frame_factory=lambda current, dt: extract_render_frame(
+            current.active_scene,
+            elapsed=dt,
+            interpolator=current.transform_interpolator,
+            interpolation_fraction=current.interpolation_fraction,
+        ),
     )
 
 

@@ -6,7 +6,8 @@ from expra_engine.core.component import TransformComponent, component_from_dict,
 from expra_engine.core.component_schema import component_type_spec
 from expra_engine.core.scene import Scene
 from expra_engine.runtime.render_extractor import extract_render_frame
-from expra_engine.runtime.rendering import Color, RenderPhase
+from expra_engine.runtime.rendering import Color, RenderPhase, Transform
+from expra_engine.runtime.transform_interpolation import TransformInterpolator
 from expra_engine.runtime.visual_components import PrimitiveComponent, SpriteComponent, TextComponent
 
 
@@ -77,6 +78,24 @@ def test_extractor_composes_transforms_and_orders_phase_layer_and_entity_stably(
     child_item = next(item for item in frame.items if item.key == "child")
     assert child_item.world_transform.position == (10.0, 7.0, 0.0)
     assert child_item.phase is RenderPhase.OPAQUE
+
+
+def test_extractor_can_sample_runtime_interpolated_world_transforms() -> None:
+    scene = Scene("animated")
+    entity = scene.create_entity("moving", entity_id="moving")
+    entity.add_component(TransformComponent(x=10.0))
+    entity.add_component(PrimitiveComponent("rectangle"))
+    interpolator = TransformInterpolator()
+    interpolator.begin_tick()
+    interpolator.capture("moving", Transform())
+    interpolator.end_tick()
+    interpolator.begin_tick()
+    interpolator.capture("moving", Transform(position=(10.0, 0.0, 0.0)))
+    interpolator.end_tick()
+
+    frame = extract_render_frame(scene, interpolator=interpolator, interpolation_fraction=0.5)
+
+    assert frame.items[0].transform.position == pytest.approx((5.0, 0.0, 0.0))
 
 
 def test_extractor_skips_disabled_hidden_and_malformed_visuals_deterministically() -> None:

@@ -14,15 +14,30 @@ from expra_engine.runtime.rendering import (
     Transform,
     TextDescriptor,
 )
+from expra_engine.runtime.transform_interpolation import TransformInterpolator
 from expra_engine.runtime.visual_components import PrimitiveComponent, SpriteComponent, TextComponent
 
 __all__ = ("extract_render_frame",)
 
 
-def _transform(entity: Entity, entities: dict[str, Entity], active: set[str]) -> Transform:
+def _transform(
+    entity: Entity,
+    entities: dict[str, Entity],
+    active: set[str],
+    interpolator: TransformInterpolator | None = None,
+    interpolation_fraction: float = 0.0,
+) -> Transform:
     if entity.entity_id in active:
         raise ValueError("cyclic entity hierarchy")
     active.add(entity.entity_id)
+    if interpolator is not None:
+        try:
+            result = interpolator.sample_world(entity.entity_id, interpolation_fraction)
+        except KeyError:
+            pass
+        else:
+            active.remove(entity.entity_id)
+            return result
     local = entity.get_component(TransformComponent)
     result = Transform(
         position=(local.x, local.y, 0.0),
@@ -32,7 +47,13 @@ def _transform(entity: Entity, entities: dict[str, Entity], active: set[str]) ->
     if entity.parent_id is not None:
         parent = entities.get(entity.parent_id)
         if parent is not None:
-            result = _transform(parent, entities, active).compose(result)
+            result = _transform(
+                parent,
+                entities,
+                active,
+                interpolator,
+                interpolation_fraction,
+            ).compose(result)
     active.remove(entity.entity_id)
     return result
 
@@ -91,7 +112,13 @@ def _item(entity: Entity, visual: object, transform: Transform) -> RenderItem:
     )
 
 
-def extract_render_frame(scene: Scene, *, elapsed: float = 0.0) -> RenderFrame:
+def extract_render_frame(
+    scene: Scene,
+    *,
+    elapsed: float = 0.0,
+    interpolator: TransformInterpolator | None = None,
+    interpolation_fraction: float = 0.0,
+) -> RenderFrame:
     """Convert registered scene visuals into backend-neutral render data."""
     entities = {entity.entity_id: entity for entity in scene.entities}
     items: list[RenderItem] = []
@@ -99,7 +126,13 @@ def extract_render_frame(scene: Scene, *, elapsed: float = 0.0) -> RenderFrame:
         if not entity.enabled:
             continue
         try:
-            transform = _transform(entity, entities, set())
+            transform = _transform(
+                entity,
+                entities,
+                set(),
+                interpolator,
+                interpolation_fraction,
+            )
         except (TypeError, ValueError, OverflowError):
             continue
         for visual in entity.components:

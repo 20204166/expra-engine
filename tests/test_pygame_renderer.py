@@ -21,6 +21,7 @@ from expra_engine.runtime import (
     Viewport,
 )
 from expra_engine.runtime.rendering import MaterialDescriptor, NineSliceDescriptor, TextDescriptor
+from expra_engine.runtime.transform_interpolation import TransformInterpolator
 from expra_engine.ui_model.geometry import Insets, Rect
 from expra_engine.ui_model.nine_slice import NineSlice
 from expra_engine.runtime.ui import Button, GameCanvas, LayoutSpec, UIEvent, Viewport as UIViewport
@@ -266,6 +267,29 @@ class TestPygameRenderer(unittest.TestCase):
 
         player_rect = renderer.pygame.draw.rects[1][2]
         self.assertEqual(player_rect.center, (60, 70))
+
+    def test_legacy_renderer_can_consume_sampled_runtime_transform(self) -> None:
+        scene = Scene("Arena")
+        player = scene.create_entity("Player", entity_id="player")
+        player.add_tag("player")
+        player.add_component(TransformComponent(x=10.0))
+        interpolator = TransformInterpolator()
+        interpolator.begin_tick()
+        interpolator.capture("player", Transform())
+        interpolator.end_tick()
+        interpolator.begin_tick()
+        interpolator.capture("player", Transform(position=(10.0, 0.0, 0.0)))
+        interpolator.end_tick()
+        renderer = PygameRenderer(
+            _FakePygame(_FakeFont()),
+            _FakeSurface(),
+            world_bounds=(0, 0, 100, 100),
+            arena_bounds=(0, 0, 100, 100),
+        )
+
+        renderer.on_render(RenderFrame(scene, interpolator=interpolator, interpolation_fraction=0.5))
+
+        assert renderer.pygame.draw.rects[1][2].center == (5, 0)
 
     def test_legacy_scene_entities_use_active_camera_projection(self) -> None:
         scene = Scene("Camera")

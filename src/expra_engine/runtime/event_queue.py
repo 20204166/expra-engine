@@ -171,6 +171,10 @@ class EventQueue:
                     callback(event)
                 else:
                     callback(event, self.signal)
+        if isinstance(event, Update):
+            callback = getattr(self._root, "on_update_complete", None)
+            if callable(callback):
+                callback(event)
 
     def flush(self) -> None:
         """Discard all pending events.

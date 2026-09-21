@@ -26,7 +26,11 @@ def run_project(project_dir: Path | str = ".") -> None:
     def frame_factory(current_engine: Engine, dt: float) -> RenderFrame:
         return RenderFrame(
             elapsed=dt,
-            payload=PygameRenderFrame(active_scene=current_engine.active_scene),
+            payload=PygameRenderFrame(
+                active_scene=current_engine.active_scene,
+                interpolator=current_engine.transform_interpolator,
+                interpolation_fraction=current_engine.interpolation_fraction,
+            ),
         )
 
     runtime = PygameRuntime(

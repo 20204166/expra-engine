@@ -15,8 +15,10 @@ from expra_engine.runtime.rendering import (
     RenderContext,
     RendererCapabilities,
     TextDescriptor,
+    Transform,
 )
 from expra_engine.runtime.rendering import RenderFrame as ContractRenderFrame
+from expra_engine.runtime.transform_interpolation import TransformInterpolator
 from expra_engine.ui_model.geometry import Rect
 
 __all__ = ("PygameRenderFrame", "PygameRenderer", "RenderFrame")
@@ -29,6 +31,8 @@ class RenderFrame:
     active_scene: Scene | None
     score: int = 0
     status: str = ""
+    interpolator: TransformInterpolator | None = None
+    interpolation_fraction: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -407,28 +411,43 @@ class PygameRenderer:
                 transform = entity.get_component(TransformComponent)
                 if transform is None or not transform.enabled:
                     continue
+                sampled = Transform(
+                    position=(transform.x, transform.y, 0.0),
+                    rotation=transform.rotation,
+                    scale=(transform.scale_x, transform.scale_y, 1.0),
+                )
+                if frame.interpolator is not None:
+                    try:
+                        sampled_transform = frame.interpolator.sample_world(
+                            entity.entity_id,
+                            frame.interpolation_fraction,
+                        )
+                    except KeyError:
+                        pass
+                    else:
+                        sampled = sampled_transform
                 try:
-                    position = self._legacy_project(transform.x, transform.y)
+                    position = self._legacy_project(sampled.position[0], sampled.position[1])
                 except (OverflowError, ValueError, TypeError):
                     continue
                 if not all(
                     math.isfinite(value)
-                    for value in (*position, transform.scale_x, transform.scale_y)
+                    for value in (*position, sampled.scale[0], sampled.scale[1])
                 ):
                     continue
-                if transform.scale_x == 0 or transform.scale_y == 0:
+                if sampled.scale[0] == 0 or sampled.scale[1] == 0:
                     continue
                 if entity.has_tag("player") or entity.name.lower() == "player":
                     try:
                         self._draw_legacy_box(
-                            (48, 224, 255), transform.x, transform.y,
-                            20 * abs(transform.scale_x), 20 * abs(transform.scale_y),
-                            transform.rotation,
+                            (48, 224, 255), sampled.position[0], sampled.position[1],
+                            20 * abs(sampled.scale[0]), 20 * abs(sampled.scale[1]),
+                            sampled.rotation,
                         )
-                        angle = math.radians(transform.rotation)
+                        angle = math.radians(sampled.rotation)
                         direction = self._legacy_project(
-                            transform.x + math.cos(angle) * 16,
-                            transform.y + math.sin(angle) * 16,
+                            sampled.position[0] + math.cos(angle) * 16,
+                            sampled.position[1] + math.sin(angle) * 16,
                         )
                         draw.line(self.surface, (255, 255, 255), position, direction)
                     except Exception:  # noqa: BLE001 - backend draw failures are frame-local
@@ -436,19 +455,19 @@ class PygameRenderer:
                 elif entity.has_tag("enemy"):
                     with suppress(Exception):
                         self._draw_legacy_box(
-                            (255, 72, 178), transform.x, transform.y,
-                            20 * abs(transform.scale_x), 20 * abs(transform.scale_y),
-                            transform.rotation,
+                            (255, 72, 178), sampled.position[0], sampled.position[1],
+                            20 * abs(sampled.scale[0]), 20 * abs(sampled.scale[1]),
+                            sampled.rotation,
                         )
                 elif entity.has_tag("target") or entity.name.lower() == "target":
                     radius = self._legacy_radius(
-                        8 * (abs(transform.scale_x) + abs(transform.scale_y)) / 2
+                        8 * (abs(sampled.scale[0]) + abs(sampled.scale[1])) / 2
                     )
                     with suppress(Exception):
                         draw.circle(self.surface, (255, 72, 178), position, radius)
                 elif entity.has_tag("projectile"):
                     radius = self._legacy_radius(
-                        8 * (abs(transform.scale_x) + abs(transform.scale_y)) / 2
+                        8 * (abs(sampled.scale[0]) + abs(sampled.scale[1])) / 2
                     )
                     with suppress(Exception):
                         draw.circle(self.surface, (245, 248, 255), position, radius)

@@ -69,6 +69,11 @@ class RuntimeClock:
     def paused(self) -> bool:
         return self._paused
 
+    @property
+    def interpolation_fraction(self) -> float:
+        """Return the clamped fixed-step remainder for render sampling."""
+        return min(max(self._accumulated / self.time_step, 0.0), 1.0)
+
     def pause(self) -> None:
         """Pause scaled simulation updates without clearing the accumulator."""
         self._paused = True

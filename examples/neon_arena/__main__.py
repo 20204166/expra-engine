@@ -146,6 +146,8 @@ def main() -> None:
                     current_engine.active_scene,
                     score=game.score if game is not None else _scripted_state(current_engine)[0],
                     status=game.status if game is not None else _scripted_state(current_engine)[1],
+                    interpolator=current_engine.transform_interpolator,
+                    interpolation_fraction=current_engine.interpolation_fraction,
                 ),
             )
 

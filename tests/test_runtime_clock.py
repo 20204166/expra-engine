@@ -69,6 +69,19 @@ class TestRuntimeClockFixed(unittest.TestCase):
         updates = [e for e in c2.events if isinstance(e, Update)]
         self.assertEqual(len(updates), 1)
 
+    def test_interpolation_fraction_reports_remainder(self) -> None:
+        clock = RuntimeClock(time_step=0.1)
+        self._idle(clock, 0.05)
+        self.assertAlmostEqual(clock.interpolation_fraction, 0.5)
+
+    def test_interpolation_fraction_is_zero_after_reset_and_update_boundary(self) -> None:
+        clock = RuntimeClock(time_step=0.1)
+        self._idle(clock, 0.1)
+        self.assertAlmostEqual(clock.interpolation_fraction, 0.0)
+        self._idle(clock, 0.03)
+        clock.reset()
+        self.assertAlmostEqual(clock.interpolation_fraction, 0.0)
+
     def test_zero_dt_safe(self) -> None:
         clock = self._make()
         c = self._idle(clock, 0.0)

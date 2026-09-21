@@ -57,6 +57,7 @@ from expra_engine.runtime.sequence import Func, Sequence, Wait
 from expra_engine.runtime.smooth_follow import SmoothFollow
 from expra_engine.runtime.system import RuntimeSystem
 from expra_engine.runtime.trail import TrailPoint, TrailRenderer
+from expra_engine.runtime.transform_interpolation import TransformInterpolator
 from expra_engine.runtime.tween import Tween
 from expra_engine.runtime.ui import (
     Button as RuntimeButton,
@@ -121,6 +122,7 @@ __all__ = [
     "TrailPoint",
     "TrailRenderer",
     "Transform",
+    "TransformInterpolator",
     "TextDescriptor",
     "Tween",
     "GameCanvas",
