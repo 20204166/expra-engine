@@ -86,7 +86,7 @@ class PygameRenderer:
             texture=resource_provider is not None,
             outline=True,
             nine_slice=resource_provider is not None,
-            blend_mode=True,
+            blend_mode=False,
             resize=True,
             headless=True,
         )
