@@ -262,7 +262,10 @@ _RUNTIME_CORE_MODULES = (
     "project.py",
     "persistence.py",
     "safe_expression.py",
-    "scene.py",
+    "camera.py",
+    "scene/__init__.py",
+    "scene/camera.py",
+    "scene/scene.py",
     "string_utils.py",
     "utils.py",
 )
@@ -288,7 +291,9 @@ def _stage_pygame_runtime(site_packages: Path) -> None:
         encoding="utf-8",
     )
     for module in _RUNTIME_CORE_MODULES:
-        shutil.copy2(source_root / "core" / module, core_root / module)
+        destination = core_root / module
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source_root / "core" / module, destination)
 
     # Project Behaviours need the renderer-neutral logical-ID contract, but the
     # full editor filesystem package imports editor-only persistence helpers.

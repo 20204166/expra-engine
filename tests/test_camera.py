@@ -23,6 +23,12 @@ import unittest
 from math import inf, isclose, nan
 
 from expra_engine.core.camera import Camera2D
+from expra_engine.core.scene.camera import Camera2D as SceneCamera2D
+
+
+class TestScenePackageLayout(unittest.TestCase):
+    def test_camera_implementation_lives_with_scene_package(self) -> None:
+        self.assertIs(Camera2D, SceneCamera2D)
 
 
 class TestCamera2DCreation(unittest.TestCase):
