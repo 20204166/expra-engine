@@ -22,6 +22,7 @@ from expra_engine.runtime import (
 from expra_engine.runtime.rendering import MaterialDescriptor, NineSliceDescriptor, TextDescriptor
 from expra_engine.ui_model.geometry import Insets, Rect
 from expra_engine.ui_model.nine_slice import NineSlice
+from expra_engine.runtime.ui import Button, GameCanvas, LayoutSpec, UIEvent, Viewport as UIViewport
 
 
 class _FakeSurface:
@@ -67,6 +68,19 @@ class _FakePygame:
 
 
 class TestPygameRenderer(unittest.TestCase):
+    def test_draws_renderer_neutral_runtime_ui_commands(self) -> None:
+        font = _FakeFont()
+        surface = _FakeSurface()
+        renderer = PygameRenderer(_FakePygame(font), surface, font_provider=lambda name, size: font)
+        canvas = GameCanvas()
+        canvas.add(Button("play", text="Play", layout=LayoutSpec(size=(80, 30))))
+        canvas.layout(UIViewport(200, 100))
+
+        renderer.draw_ui_commands(canvas.draw_commands())
+
+        self.assertEqual(font.texts, ["Play"])
+        self.assertTrue(surface.blits)
+
     def test_injected_font_provider_draws_empty_multiline_wrapped_aligned_text(self) -> None:
         font = _FakeFont()
         surface = _FakeSurface()

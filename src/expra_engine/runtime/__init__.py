@@ -56,6 +56,15 @@ from expra_engine.runtime.smooth_follow import SmoothFollow
 from expra_engine.runtime.system import RuntimeSystem
 from expra_engine.runtime.trail import TrailPoint, TrailRenderer
 from expra_engine.runtime.tween import Tween
+from expra_engine.runtime.ui import (
+    Button as RuntimeButton,
+    GameCanvas,
+    Label as RuntimeLabel,
+    Panel as RuntimePanel,
+    UIElement,
+    UIEvent,
+    UIDrawCommand,
+)
 
 __all__ = [
     "HANDLED",
@@ -109,6 +118,13 @@ __all__ = [
     "Transform",
     "TextDescriptor",
     "Tween",
+    "GameCanvas",
+    "RuntimeButton",
+    "RuntimeLabel",
+    "RuntimePanel",
+    "UIElement",
+    "UIEvent",
+    "UIDrawCommand",
     "UnresolvedScriptComponent",
     "Update",
     "Viewport",

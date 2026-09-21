@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from expra_engine.runtime import PygameRuntime, RenderContext, RenderContractFrame, Viewport
+from expra_engine.runtime.ui import Button, GameCanvas, LayoutSpec, Viewport as UIViewport
 
 
 class _FakeSurface:
@@ -38,6 +39,9 @@ class _FakePygame:
     QUIT = 1
     KEYDOWN = 2
     KEYUP = 3
+    MOUSEMOTION = 5
+    MOUSEBUTTONDOWN = 6
+    MOUSEBUTTONUP = 7
 
     def __init__(self, frames: list[list[Any]]) -> None:
         self.event = SimpleNamespace(get=lambda: frames.pop(0))
@@ -57,11 +61,15 @@ class _FakeEngine:
         self.dts: list[float] = []
         self.run_state = SimpleNamespace(value="play")
         self.stop_after_tick = False
+        self.signals: list[object] = []
 
     def tick(self, dt: float) -> None:
         self.dts.append(dt)
         if self.stop_after_tick:
             self.run_state.value = "edit"
+
+    def signal(self, event: object) -> None:
+        self.signals.append(event)
 
 
 class _RecordingRenderer:
@@ -90,6 +98,32 @@ class _FailingStopRenderer(_RecordingRenderer):
 
 
 class TestPygameRuntime(unittest.TestCase):
+    def test_ui_owns_pointer_events_before_gameplay_input(self) -> None:
+        pygame = _FakePygame(
+            [
+                [
+                    SimpleNamespace(type=_FakePygame.MOUSEMOTION, pos=(10, 10)),
+                    SimpleNamespace(type=_FakePygame.MOUSEBUTTONDOWN, pos=(10, 10), button=1),
+                    SimpleNamespace(type=_FakePygame.MOUSEBUTTONUP, pos=(10, 10), button=1),
+                ],
+                [SimpleNamespace(type=_FakePygame.QUIT)],
+            ]
+        )
+        canvas = GameCanvas()
+        canvas.add(Button("play", layout=LayoutSpec(size=(100, 50))))
+        canvas.layout(UIViewport(200, 100))
+        engine = _FakeEngine()
+        runtime = PygameRuntime(
+            engine,
+            pygame_module=pygame,
+            clock=_FakeClock([16, 16]),
+            surface_factory=pygame.display.set_mode,
+            ui_root=canvas,
+        )
+
+        runtime.run()
+
+        self.assertEqual(engine.signals, [])
     def test_runtime_stops_when_engine_returns_to_edit(self) -> None:
         pygame = _FakePygame([[], []])
         engine = _FakeEngine()

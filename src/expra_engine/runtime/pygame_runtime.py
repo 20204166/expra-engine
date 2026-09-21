@@ -14,6 +14,7 @@ from expra_engine.runtime.rendering import (
     RenderFrame,
     Viewport,
 )
+from expra_engine.runtime.ui import GameCanvas, UIEvent
 
 __all__ = ("PygameRuntime",)
 
@@ -38,6 +39,7 @@ class PygameRuntime:
         render_callback: Callable[[Any, Any], None] | None = None,
         frame_factory: Callable[[Any, float], RenderFrame] | None = None,
         camera: OrthographicCamera | None = None,
+        ui_root: GameCanvas | None = None,
     ) -> None:
         if frame_rate <= 0:
             raise ValueError("frame_rate must be positive")
@@ -53,6 +55,7 @@ class PygameRuntime:
         self.render_callback = render_callback
         self.frame_factory = frame_factory
         self.camera = camera or OrthographicCamera()
+        self.ui_root = ui_root
         self.surface: Any | None = None
         self._keys: set[Any] = set()
         self._running = False
@@ -79,6 +82,10 @@ class PygameRuntime:
                 init()
             self.surface = self._surface_factory(self.size)
             self._context = RenderContext(Viewport(0, 0, *self.size), self.camera)
+            if self.ui_root is not None:
+                from expra_engine.runtime.ui import Viewport as UIViewport
+
+                self.ui_root.layout(UIViewport(*self.size))
             if self.renderer is not None:
                 set_surface = getattr(self.renderer, "set_surface", None)
                 if set_surface is not None:
@@ -98,6 +105,10 @@ class PygameRuntime:
                         else RenderFrame(elapsed=dt)
                     )
                     self.renderer.render(frame)
+                    if self.ui_root is not None:
+                        draw_ui = getattr(self.renderer, "draw_ui_commands", None)
+                        if draw_ui is not None:
+                            draw_ui(self.ui_root.draw_commands())
                 elif self.render_callback is not None:
                     self.render_callback(self.surface, self.engine)
                 self.pygame.display.flip()
@@ -128,12 +139,44 @@ class PygameRuntime:
                     if set_surface is not None:
                         set_surface(self.surface)
                     self.renderer.resize(self._context.viewport)
+                if self.ui_root is not None:
+                    from expra_engine.runtime.ui import Viewport as UIViewport
+
+                    self.ui_root.layout(UIViewport(width, height))
             elif event_type == self.pygame.KEYDOWN:
                 self._keys.add(event.key)
-                self._signal_input("press", event.key)
+                handled = self.ui_root is not None and self.ui_root.dispatch(
+                    UIEvent("key_down", key=self._key_name(event.key))
+                ) is not None
+                if not handled:
+                    self._signal_input("press", event.key)
             elif event_type == self.pygame.KEYUP:
                 self._keys.discard(event.key)
-                self._signal_input("release", event.key)
+                handled = self.ui_root is not None and self.ui_root.dispatch(
+                    UIEvent("key_up", key=self._key_name(event.key))
+                ) is not None
+                if not handled:
+                    self._signal_input("release", event.key)
+            elif event_type == getattr(self.pygame, "MOUSEMOTION", object()):
+                if self.ui_root is not None:
+                    self.ui_root.dispatch(UIEvent("pointer_move", position=tuple(event.pos)))
+            elif event_type == getattr(self.pygame, "MOUSEBUTTONDOWN", object()):
+                handled = self.ui_root is not None and self.ui_root.dispatch(
+                    UIEvent("pointer_down", position=tuple(event.pos), button=str(event.button))
+                ) is not None
+                if not handled:
+                    self._signal_input("press", event.button)
+            elif event_type == getattr(self.pygame, "MOUSEBUTTONUP", object()):
+                handled = self.ui_root is not None and self.ui_root.dispatch(
+                    UIEvent("pointer_up", position=tuple(event.pos), button=str(event.button))
+                ) is not None
+                if not handled:
+                    self._signal_input("release", event.button)
+
+    def _key_name(self, key: Any) -> str:
+        key_api = getattr(self.pygame, "key", None)
+        name = getattr(key_api, "name", None)
+        return str(name(key)) if callable(name) else str(key)
 
     def _signal_input(self, phase: str, key: Any) -> None:
         """Translate a backend key event into the engine's semantic input map."""

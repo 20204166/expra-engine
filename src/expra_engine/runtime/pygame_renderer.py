@@ -17,6 +17,7 @@ from expra_engine.runtime.rendering import (
     TextDescriptor,
 )
 from expra_engine.runtime.rendering import RenderFrame as ContractRenderFrame
+from expra_engine.ui_model.geometry import Rect
 
 __all__ = ("PygameRenderFrame", "PygameRenderer", "RenderFrame")
 
@@ -227,7 +228,25 @@ class PygameRenderer:
 
     def measure_text(self, descriptor: TextDescriptor) -> tuple[int, int]:
         font = self._font(descriptor)
-        return tuple(font.size(descriptor.text))
+        lines: list[str] = []
+        for paragraph in descriptor.text.split("\n"):
+            words = paragraph.split()
+            if not words:
+                lines.append("")
+                continue
+            current = words[0]
+            for word in words[1:]:
+                candidate = f"{current} {word}"
+                if descriptor.max_width is not None and font.size(candidate)[0] > descriptor.max_width:
+                    lines.append(current)
+                    current = word
+                else:
+                    current = candidate
+            lines.append(current)
+        if not lines:
+            return (0, 0)
+        line_height = font.size("Ag")[1]
+        return (max((font.size(line)[0] for line in lines), default=0), line_height * len(lines))
 
     def draw_text(
         self,
@@ -270,12 +289,99 @@ class PygameRenderer:
         texture = self._resource_provider(descriptor.texture_id)
         if texture is None:
             return
-        for patch in descriptor.geometry.resolve(descriptor.rect):
+        destination = descriptor.geometry.resolve(descriptor.rect)
+        source = None
+        get_size = getattr(texture, "get_size", None)
+        if callable(get_size):
+            width, height = get_size()
+            source = descriptor.geometry.resolve(Rect(0, 0, width, height))
+        for index, patch in enumerate(destination):
             rect = patch.rect
-            self.surface.blit(
-                texture,
-                self._rect((round(rect.x), round(rect.y), round(rect.width), round(rect.height))),
+            destination_rect = self._rect(
+                (round(rect.x), round(rect.y), round(rect.width), round(rect.height))
             )
+            try:
+                if source is None:
+                    self.surface.blit(texture, destination_rect)
+                else:
+                    source_rect = source[index].rect
+                    self.surface.blit(
+                        texture,
+                        destination_rect,
+                        self._rect(
+                            (
+                                round(source_rect.x),
+                                round(source_rect.y),
+                                round(source_rect.width),
+                                round(source_rect.height),
+                            )
+                        ),
+                    )
+            except TypeError:
+                self.surface.blit(texture, destination_rect)
+
+    def draw_ui_commands(self, commands: tuple[Any, ...]) -> None:
+        """Translate pure UI draw commands without exposing backend objects to models."""
+        draw = getattr(self.pygame, "draw", None)
+        if self.surface is None or draw is None:
+            return
+        for command in commands:
+            if command.kind == "label":
+                self.draw_text(
+                    TextDescriptor(
+                        command.text,
+                        font=command.font,
+                        size=command.font_size,
+                        align=command.align,
+                        max_width=command.rect.width or None,
+                    ),
+                    (round(command.rect.x), round(command.rect.y)),
+                )
+            elif command.kind == "button":
+                palette = {
+                    "normal": (55, 65, 90),
+                    "hover": (75, 95, 135),
+                    "pressed": (35, 45, 70),
+                    "focused": (70, 110, 160),
+                    "disabled": (45, 45, 50),
+                }
+                with suppress(Exception):
+                    draw.rect(
+                        self.surface,
+                        palette.get(command.state, palette["normal"]),
+                        self._rect(
+                            (
+                                round(command.rect.x),
+                                round(command.rect.y),
+                                round(command.rect.width),
+                                round(command.rect.height),
+                            )
+                        ),
+                    )
+                self.draw_text(
+                    TextDescriptor(command.text, size=16, align="center"),
+                    (
+                        round(command.rect.x + command.rect.width / 2),
+                        round(command.rect.y + command.rect.height / 2),
+                    ),
+                )
+            elif command.kind == "panel":
+                if isinstance(command.nine_slice, NineSliceDescriptor):
+                    self.draw_nine_slice(command.nine_slice, command.nine_slice.tint)
+                else:
+                    with suppress(Exception):
+                        draw.rect(
+                            self.surface,
+                            (25, 30, 48),
+                            self._rect(
+                                (
+                                    round(command.rect.x),
+                                    round(command.rect.y),
+                                    round(command.rect.width),
+                                    round(command.rect.height),
+                                )
+                            ),
+                        )
 
     def on_render(self, frame: RenderFrame) -> None:
         """Render one frame of scene primitives and HUD text."""

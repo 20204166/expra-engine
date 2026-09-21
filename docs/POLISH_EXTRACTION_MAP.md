@@ -96,6 +96,28 @@ At audit time, no reference implementation has been copied into Expra.
   `tests/test_render_extractor.py`, and `tests/test_ui_model_nine_slice.py`.
   No reference implementation was copied; license status is not applicable.
 
+### Task 4: Runtime UI Tree, Layout, and Interaction
+
+- **Source and destination:** Existing Expra `ui_model.geometry.RectTransform`,
+  `ui_model.controls.Button`, `ui_model.focus` lifecycle contracts, and
+  `ui_model.nine_slice.NineSlice.resolve` informed the pure `runtime.ui` tree
+  (`GameCanvas`, `UIElement`, `Panel`, `Label`, `Button`, `UIEvent`) and the
+  Pygame runtime/renderer adapters.
+- **Behavior preserved:** normalized anchors, safe-area/reference-resolution
+  scaling, minimum/preferred sizing, deterministic z/order hit testing, control
+  visual states, focus invalidation, pointer capture, modal/focused ownership,
+  renderer-neutral draw commands, multiline wrapping, and nine-slice destination
+  plus source patch mapping.
+- **Coupling removed:** runtime UI models import neither Tk nor Pygame; Pygame
+  receives injected modules/surfaces/fonts/resources and gameplay input is
+  signalled only after UI dispatch declines ownership. Nine-slice mapping consumes
+  `NineSlice.resolve()` results and does not duplicate its geometry algorithm.
+- **Tests:** `tests/test_runtime_ui.py`, new UI adapter cases in
+  `tests/test_pygame_renderer.py` and `tests/test_pygame_runtime.py`, plus the
+  existing UI-model geometry/control/focus/pointer/nine-slice and legacy Pygame
+  renderer/runtime suites. No reference implementation was copied; license
+  status is therefore not applicable.
+
 ## Final Acceptance Record
 
 Space-Pong-specific engine hacks: **MUST REMAIN NONE**.
