@@ -1,137 +1,186 @@
-# Space Pong Task 7 Final Report
+# Space Pong Final Report
 
-**Scope:** Task 7 only, after `44b0fa7`. Task 8 release/build work was not
-performed.
+**Scope:** Task 8 after `ed0fc68`. This report audits Tasks 1-7 and records
+release verification. No reference repository was modified.
 
-## Delivered
+## POLISH / MULTI-ENGINE EXTRACTION AUDIT
 
-- `examples/space_pong/project.json` is a schema 1 project with project-owned
-  input bindings and `__main__.py` entry point.
-- `examples/space_pong/scenes/main.json` contains only generic transforms,
-  primitives, text, colliders, and a project-owned `ScriptComponent`.
-- `examples/space_pong/scripts/space_pong_behaviour.py` uses `PhysicsWorld2D`,
-  `Timeline`, `Tween`, and renderer-neutral runtime UI. Paddle speed, ball
-  speed, winning score, AI difficulty, colors, positions, and labels are project
-  data or script data.
-- `examples/space_pong/__main__.py` assembles the normal `Engine`,
-  `ScriptRegistry`, `PygameRenderer`, `PygameRuntime`, render extractor, camera,
-  and UI path.
+Space Pong uses generic Expra components and services. The project owns scene
+data, labels, colors, tunables, input bindings, and `SpacePongBehaviour`; Expra
+owns component registration, extraction, rendering contracts, runtime UI,
+physics queries, lifecycle, editor commands, and export. No engine module
+branches on Space Pong names.
+
+### INSPECTOR
+
+`PropertyDescriptor`, `ComponentTypeSpec`, `CommandStack`, and the inspector
+metadata controls support typed fields, invalid-input rejection, required and
+duplicate policies, stale-target no-ops, and undo/redo. The real-Tk evidence
+selected `space-pong-controller`, changed `winning_score` 3 to 5 and a left
+collider height 12 to 14, undid both, and saved the original scene.
+
+### VISUAL COMPONENTS
+
+`PrimitiveComponent`, `SpriteComponent`, and `TextComponent` serialize only
+backend-neutral values. `extract_render_frame` composes transforms and orders
+phase/layer/entity deterministically while skipping disabled, hidden, or
+malformed visuals. The Space Pong scene contains generic primitives and text;
+there is no Space-Pong extraction branch.
+
+### PHYSICS / COLLISION EDITING
+
+`ColliderComponent` validates rectangle/circle geometry and serializes scalar
+data. `PhysicsWorld2D` provides deterministic overlap, nearest raycast,
+layer/mask filtering, and trigger enter/stay/exit using the existing
+`HitResult2D` and `TriggerEvent` contracts. Editor outlines are derived data,
+not serialized preview state.
+
+### RUNTIME HUD/UI
+
+`GameCanvas`, `Panel`, `Label`, `Button`, layout resolution, focus, pointer
+capture, and renderer-neutral draw commands are adapted by the Pygame runtime.
+Space Pong builds its HUD from project-owned script data, covers score/win,
+pause/resume, restart, hit feedback, and resize-stable reference-resolution
+layout. The test path uses an injected backend because this environment has no
+installed `pygame` module.
+
+### NEON / VISUAL EFFECTS
+
+The implementation uses generic colors, layered primitives, text, material
+opacity/tint, outline/glow approximation, and existing timeline/tween
+contracts. Particles and trails were not added; layered primitives are the
+deliberate Space Pong fallback. Unsupported blend modes are reported rather
+than silently emulated.
+
+### EDITOR PREVIEW
+
+`build_editor_render_target` and `ViewportPanel` consume the same
+`RenderFrame` extraction data as runtime rendering. Tk-only grid, axes, labels,
+selection, collider outlines, pan/zoom, frame-selected, and frame-scene remain
+editor overlays. Real Tk tests under `xvfb-run` passed; no screenshot artifact
+was generated.
+
+### SOURCE MATURITY
+
+The source checkouts were used for contract and test-intent comparison:
+System Analyzer (`UNLICENSED`), Ursina (MIT), PPB (Artistic License 2.0), and
+MiniPyEngine (MIT). Expra implementations were rewritten around existing Expra
+ownership boundaries. Bundled reference assets were not copied.
+
+### implementations substantially copied/adapted
+
+None. No source implementation was copied. Ursina, PPB, and System Analyzer
+symbols are recorded in `docs/POLISH_EXTRACTION_MAP.md` as behavior/test-intent
+references only. MiniPyEngine was considered for narrow object/material
+patterns but contributed no copied code or assets.
+
+### tests ported/adapted
+
+No test file was copied. Adapted intent is covered by new Expra tests for typed
+editing and stale targets, deterministic render ordering and malformed data,
+UI states/layout/focus/pointer capture, collider contacts/raycast/trigger
+lifecycle, editor preview clipping/selection/camera behavior, and the complete
+Space Pong workflow.
+
+### provenance/license updates
+
+The parity map now records source symbols, behavior retained, coupling removed,
+Expra destinations, tests, evidence, and license status for Tasks 1-7. There is
+no copied third-party implementation or asset requiring an additional notice;
+the System Analyzer source is explicitly marked `UNLICENSED` and was not copied.
+
+### REWRITTEN FROM SCRATCH DESPITE PROVEN SOURCE IMPLEMENTATION
+
+`PhysicsWorld2D`, collider serialization, runtime UI models, render extraction,
+editor preview adaptation, and Space Pong project code were written from
+scratch despite proven source behavior or test intent. This preserves Expra's
+`Engine`/`Scene`/`Entity`/`Component`, renderer, command, and Tk/Pygame adapter
+boundaries instead of importing another engine's ownership model.
+
+### SPACE-PONG-SPECIFIC ENGINE HACKS
+
+**None.** Project-specific behavior is confined to
+`examples/space_pong/`; generic engine code does not inspect project, entity,
+label, or script names.
 
 ## Verification
 
-Focused project/runtime suite:
+### Focused suites
+
+Command:
 
 ```text
-PYTHONPATH=src python3.12 -m pytest -q tests/test_space_pong.py
-7 passed
+PYTHONPATH=src python3.12 -m pytest -q tests/test_component_schema.py tests/test_editor_ui.py tests/test_editor_commands.py tests/test_render_extractor.py tests/test_runtime_rendering.py tests/test_pygame_renderer.py tests/test_runtime_ui.py tests/test_pygame_runtime.py tests/test_physics_world.py tests/test_runtime_physics.py tests/test_editor_render_targets.py tests/test_project_workflow.py tests/test_export.py tests/test_export_exporter.py tests/test_space_pong.py
 ```
 
-Related regression suites:
+Result: `204 passed in 70.11s`.
+
+### xvfb real-Tk tests
+
+Command:
 
 ```text
-PYTHONPATH=src python3.12 -m pytest -q \
-  tests/test_project_workflow.py tests/test_neon_arena.py tests/test_runtime_ui.py \
-  tests/test_render_extractor.py tests/test_physics_world.py tests/test_export.py \
-  tests/test_export_exporter.py
-97 passed
+xvfb-run -a env PYTHONPATH=src python3.12 -m pytest -q tests/test_editor_ui.py tests/test_editor_render_targets.py tests/test_editor_window_autosave.py
 ```
 
-The first TDD run was intentionally red before project creation:
-`tests/test_space_pong.py` reported 5 failures because
-`examples/space_pong/project.json` did not exist.
+Result: `34 passed in 4.31s`.
 
-## Editor Evidence
+### Full suite and static checks
 
-Real Tk interaction was available through `/usr/bin/xvfb-run`.
+`PYTHONPATH=src python3.12 -m pytest -q` resulted in `1194 passed, 2
+ warnings, 147 subtests passed in 71.75s`. Warnings were the existing editor
+window soft line-count warning and an intentional duplicate zip member test.
 
-Open, edit, undo, play, pause, resume, stop, save, and reopen command:
+`python3.12 -m compileall -q src tests examples` passed. `git diff --check`
+passed. Ruff, Pyright, and Mypy were not run; they are not treated as passes.
 
-```text
-xvfb-run -a env PYTHONPATH=src python3.12 - <<'PY'
-... EditorWindow(Project.load("examples/space_pong")) ...
-PY
-```
+### Editor, export, and runtime evidence
 
-Observed output:
+The xvfb editor workflow reported:
 
 ```json
 {"entities": 9, "opened": "Space Pong", "paused": "paused", "reopened": ["Space Pong", 9], "resumed": "play", "saved": true, "stopped": "edit"}
 ```
 
-Inspector-specific interaction selected `space-pong-controller`, changed the
-exposed `winning_score` from 3 to 5, changed the left collider height from 12
-to 14, verified both changes were undoable, then restored and saved the original
-scene. Observed output:
-
-```json
-{"collider_height": 14.0, "restored_and_saved": true, "script_value": 5, "selected": "space-pong-controller", "undo_available": true}
-```
-
-The editor preview consumes the existing shared `extract_render_frame` path;
-the project scene contains primitive, text, and collider data for that preview.
-
-## Runtime And Export Evidence
-
-The standalone source entry point was exercised by
-`test_space_pong_standalone_entry_point_runs_the_standard_runtime_path` with an
-injected backend. It ran `create_runtime`, `PygameRuntime.run`, renderer start,
-one frame, UI draw commands, display flip, and quit handling without opening a
-real display.
-
-The real export CLI was run with no bytecode and no external runtime profile:
+The real export command was:
 
 ```text
-PYTHONPATH=src python3.12 -m expra_engine.export.cli examples/space_pong \
-  --target linux --output /tmp/opencode/space-pong-export \
-  --no-bytecode --no-debug-launcher --runtime-profile none
+PYTHONPATH=src python3.12 -m expra_engine.export.cli examples/space_pong --target linux --output /tmp/opencode/space-pong-export --no-bytecode --no-debug-launcher --runtime-profile none
 ```
 
-Result:
+Result: `Export complete: /tmp/opencode/space-pong-export/space_pong_linux`.
+The standalone entry point ran through `create_runtime`, `PygameRuntime.run`,
+one frame, UI draw, flip, and quit with an injected backend.
+
+### Release build
+
+Command:
 
 ```text
-Export complete: /tmp/opencode/space-pong-export/space_pong_linux
+./scripts/build-wheel.sh
+./scripts/verify-wheel.sh dist/expra_engine-0.2.7.0-py3-none-any.whl
 ```
 
-The export contains the project manifest, scene, script, entry point, manifests,
-and Linux runtime bundle. The focused export test also verifies the staged
-project files with an injected packager.
+Results: build and embedded wheel verification passed; `verify-wheel.sh`
+reported `contents OK: 134 members; no forbidden paths` and `SHA256SUMS OK`.
+The generated wheel is `dist/expra_engine-0.2.7.0-py3-none-any.whl` and its
+SHA-256 is
+`b67cef07b0b85c06a11af9d10b97f248dcd9c63de87a3e3d1131ea606d9fa88b`.
 
-## POLISH / MULTI-ENGINE EXTRACTION AUDIT
+## FINAL POLISH ASSESSMENT
 
-### Boundary
+All completion criteria have concrete automated or xvfb evidence for generic
+authoring, visual extraction, collision editing, HUD/pause/win, resize,
+save/reopen, export, and the standard standalone assembly path. The result is
+polished at the tested contract level, but the following claims remain
+intentionally unmade:
 
-Space Pong-specific behavior is project-owned. Expra owns only generic project
-loading, component registration, rendering extraction, runtime UI layout and
-input routing, deterministic collider queries, engine lifecycle, and export
-orchestration. No reference repository was modified.
+- No real physical display run or screenshot comparison was completed.
+- The environment lacks installed `pygame`, so standalone rendering used an
+  injected backend rather than a real display.
+- Export used `RuntimeProfile.NONE`; an installed dependency-bundled packaged
+  Pygame executable was not verified.
+- No packaged-runtime smoke test was possible beyond export staging and the
+  injected standard runtime path.
 
-### Provenance
-
-This patch contains no copied reference implementation or bundled reference
-assets. Existing Expra contracts and the previously recorded parity map informed
-the project integration. License status for the new project-owned code is not
-applicable.
-
-### Acceptance Record
-
-| Criterion | Evidence | Status |
-|---|---|---|
-| Create/open generic project | `Project.load`, editor xvfb output, 9-entity scene | Pass |
-| Generic visuals/colliders/scripts | Scene inventory test and Inspector output | Pass |
-| Runtime HUD and score/win | Runtime test, text components, UI draw path | Pass |
-| Pause/resume/restart | Runtime test and editor output | Pass |
-| Deterministic bounce and hit feedback | Focused behavior tests | Pass |
-| Resize-stable UI | `GameCanvas` reference-resolution test | Pass |
-| Save/reopen | Project workflow test and editor output | Pass |
-| Export | Real Linux CLI output and export test | Pass |
-| Standalone runtime path | Injected-backend standard runtime test | Pass, headless |
-
-### Residual Gaps
-
-- A real display run was not claimed; the standalone test uses the supported
-  injected backend because this environment has no installed `pygame` module.
-- The real export used `RuntimeProfile.NONE`, so an installed packaged Pygame
-  executable was not claimed. The project entry point and source runtime path
-  are covered; full dependency-bundled release verification belongs to Task 8.
-- Visual screenshot artifacts were not generated. Concrete command output and
-  test evidence are recorded above.
+The release wheel and checksum are committed in `dist/SHA256SUMS`.

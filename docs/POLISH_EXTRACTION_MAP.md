@@ -53,7 +53,7 @@ useful behavior or test intent.
 
 ## Implementation Record
 
-This section will be completed per staged patch with:
+This section records the completed staged patches with:
 
 - source file and symbol;
 - behavior and edge cases preserved;
@@ -63,26 +63,70 @@ This section will be completed per staged patch with:
 - license/provenance status;
 - rendered evidence and Space Pong result.
 
-At audit time, no reference implementation has been copied into Expra.
+No reference implementation has been copied into Expra. The source repositories
+were used for architecture and test-intent comparison only.
+
+### Task 1: Component Metadata and Generic Inspector Authoring
+
+- **Source symbols and destination:** System Analyzer `maintenance/ui/layout.py`
+  and `action_coordinator.py` informed stale-delivery and edit-refresh concerns;
+  Expra destinations are `PropertyDescriptor.convert`,
+  `ComponentTypeSpec`, `registered_component_specs` in
+  `core/component_schema.py`, `register_component_type` metadata in
+  `core/component.py`, `CommandStack`/`SetComponentPropertyCommand`/
+  `AddComponentCommand`/`RemoveComponentCommand` in `editor/commands.py`, and
+  `InspectorPanel` metadata controls in `ui/inspector.py`.
+- **Behavior preserved:** Typed float/int/bool/enum/color conversion rejects
+  invalid and non-finite input without silent clamping; immutable metadata,
+  required-component protection, duplicate rejection, stale target no-op, and
+  undo/redo are preserved while existing component JSON and registry behavior
+  remain compatible.
+- **Coupling removed:** Inspector editing resolves the entity/component again
+  at command execution rather than retaining a Tk selection or widget as the
+  mutation target; field metadata is engine data, not control-specific code.
+- **Expra destination:** Generic registry metadata and command-backed inspector
+  authoring; no source-engine coordinator or widget was imported.
+- **Tests:** `tests/test_component_schema.py` (conversion, rejection,
+  immutability, required types, registry compatibility),
+  `tests/test_editor_commands.py` (add/remove/property undo-redo and stale
+  targets), and `tests/test_editor_ui.py` (inspector conversion) are the new or
+  adapted Expra coverage; real Tk coverage also ran in the xvfb suite.
+- **License/provenance:** System Analyzer checkout declares `UNLICENSED`;
+  behavior and test intent only, no code copied or adapted. No third-party
+  license notice is required for this implementation.
+- **Evidence:** Commit `cc38d88`; focused tests and full suite passed. The
+  Space Pong editor evidence changed script and collider values, undid them,
+  and restored the scene (`docs/SPACE_PONG_FINAL_REPORT.md`).
 
 ### Task 2: Renderer-Neutral Visual Components and Extraction
 
-- **Source and destination:** Existing Expra `RenderItem`/`RenderFrame` contracts in
-  `runtime/rendering.py`; new `PrimitiveComponent`, `SpriteComponent`,
-  `TextComponent`, and `extract_render_frame` in `runtime/`.
+- **Source symbols and destination:** PPB `systems/renderer.py`, `sprites.py`,
+  and `tests/test_camera.py` informed renderer-neutral ordering and camera/test
+  intent; Expra destinations are `PrimitiveComponent`, `SpriteComponent`,
+  `TextComponent` in `runtime/visual_components.py`, `extract_render_frame`
+  plus `_transform`/`_item` in `runtime/render_extractor.py`, and the existing
+  `RenderItem`/`RenderFrame` contracts in `runtime/rendering.py`.
 - **Behavior preserved:** JSON round-tripping, component enabled/visible gates,
   transform hierarchy composition, phase/layer ordering, stable entity order,
   and deterministic skipping of malformed visuals.
 - **Coupling removed:** Scene visuals contain only finite scalar data, Expra
   colors, and asset/text identifiers; no Tk/Pygame objects enter serialization
   or extraction.
-- **Tests:** `tests/test_render_extractor.py`, plus existing component, entity,
-  scene, and renderer contract suites. No reference implementation was copied;
-  license status is therefore not applicable.
+- **Tests:** `tests/test_render_extractor.py` covers round-trip payloads,
+  metadata, finite values, transform composition, ordering, visibility, and
+  malformed data; existing component/entity/scene suites cover compatibility.
+  No reference implementation was copied; license status is therefore not
+  applicable.
+- **Evidence:** Commit `f49f8d7`; focused extraction/rendering tests passed and
+  the Space Pong scene renders through this extractor without project-name
+  branches.
 
 ### Task 3: Text, Materials, Nine-Slice, and Pygame Draw Adapter
 
-- **Source and destination:** Existing `MaterialDescriptor`, `RenderItem`, and
+- **Source symbols and destination:** Ursina `text.py`,
+  `models/procedural/nine_slice.py`, and `prefabs/window_panel.py` informed
+  text/panel behavior; Expra destinations are existing `MaterialDescriptor`,
+  `RenderItem`,
   `ui_model.nine_slice.NineSlice.resolve`; additive `TextDescriptor` and
   `NineSliceDescriptor` in `runtime/rendering.py`, with translation in
   `runtime/pygame_renderer.py`.
@@ -95,14 +139,17 @@ At audit time, no reference implementation has been copied into Expra.
 - **Tests:** `tests/test_runtime_rendering.py`, `tests/test_pygame_renderer.py`,
   `tests/test_render_extractor.py`, and `tests/test_ui_model_nine_slice.py`.
   No reference implementation was copied; license status is not applicable.
+- **Evidence:** Commits `fab3fd0` and `2d2d9da`; renderer contracts, text,
+  nine-slice, alpha, layer, and unsupported-blend reporting tests passed.
 
 ### Task 4: Runtime UI Tree, Layout, and Interaction
 
-- **Source and destination:** Existing Expra `ui_model.geometry.RectTransform`,
-  `ui_model.controls.Button`, `ui_model.focus` lifecycle contracts, and
-  `ui_model.nine_slice.NineSlice.resolve` informed the pure `runtime.ui` tree
-  (`GameCanvas`, `UIElement`, `Panel`, `Label`, `Button`, `UIEvent`) and the
-  Pygame runtime/renderer adapters.
+- **Source symbols and destination:** Ursina `prefabs/button.py`, `text.py`,
+  and `prefabs/window_panel.py`, plus PPB `camera.py` and `tests/test_camera.py`,
+  informed state/layout intent; Expra destinations are
+  `runtime.ui.elements.UIElement`, `GameCanvas`, `Panel`, `Label`, `Button`,
+  `runtime.ui.layout.LayoutSpec`/`LayoutResult`, `runtime.ui.events.UIEvent`,
+  `PygameRenderer.draw_ui_commands`, and `PygameRuntime` input/resize routing.
 - **Behavior preserved:** normalized anchors, safe-area/reference-resolution
   scaling, minimum/preferred sizing, deterministic z/order hit testing, control
   visual states, focus invalidation, pointer capture, modal/focused ownership,
@@ -117,12 +164,16 @@ At audit time, no reference implementation has been copied into Expra.
   existing UI-model geometry/control/focus/pointer/nine-slice and legacy Pygame
   renderer/runtime suites. No reference implementation was copied; license
   status is therefore not applicable.
+- **Evidence:** Commit `726d774` (with the narrow unsupported-blend fix in
+  `2d2d9da`); runtime UI, renderer/runtime, pointer/focus/geometry, and
+  nine-slice suites passed. Pure UI modules contain no Tk/Pygame imports.
 
 ### Task 5: Collider Authoring and Deterministic Physics Backend
 
-- **Source and destination:** Existing Expra `HitResult2D` and `TriggerEvent`
-  contracts in `runtime/physics.py`; new `ColliderComponent` and
-  `PhysicsWorld2D` in `runtime/`.
+- **Source symbols and destination:** Ursina `raycast.py` and hit-result test
+  intent, plus Expra `HitResult2D` and `TriggerEvent` in `runtime/physics.py`,
+  informed the boundary; Expra destinations are `ColliderComponent` and
+  `PhysicsWorld2D.overlap`, `raycast`, and `step_triggers` in `runtime/`.
 - **Behavior preserved:** Backend-neutral hit/trigger result shapes, inclusive
   contact, initial overlap, nearest ray hits, stable scene insertion ordering,
   layer/mask filtering, disabled/removed collider exclusion, and entered/
@@ -138,12 +189,18 @@ At audit time, no reference implementation has been copied into Expra.
 - **License/provenance:** Rewritten from scratch from Expra contracts and test
   intent; no reference implementation was copied, so license status is not
   applicable.
+- **Evidence:** Commit `e6fb2f6`; collider validation, exact contact, filtering,
+  deterministic ray ties, disabled/removed bodies, and enter/stay/exit tests
+  passed. No solver or source-engine physics code was copied.
 
 ### Task 6: Shared Editor Viewport Preview
 
-- **Source and destination:** Existing renderer-neutral `RenderFrame`/
-  `RenderItem` contracts and `extract_render_frame` feed
-  `build_editor_render_target` and `ViewportPanel`; existing `Camera2D`
+- **Source symbols and destination:** System Analyzer
+  `tests/test_live_tk_resize.py` and Ursina `editor/level_editor.py` informed
+  lifecycle/editor interaction intent; Expra destinations are
+  `build_editor_render_target`, `ViewportPanel`, and camera interaction methods
+  in `ui/viewport.py`, consuming existing renderer-neutral `RenderFrame`/
+  `RenderItem` contracts and `extract_render_frame`; existing `Camera2D`
   projection owns editor pan, zoom, resize, and frame operations.
 - **Behavior preserved:** Runtime visual colors, text payloads, phase/layer
   ordering, visibility/clipping, malformed-visual skipping, no-scene state,
@@ -161,13 +218,18 @@ At audit time, no reference implementation has been copied into Expra.
 - **License/provenance:** Rewritten from Expra contracts and existing camera
   behavior; no reference implementation was copied, so license status is not
   applicable.
+- **Evidence:** Commit `44b0fa7`; editor render-target tests and real-Tk xvfb
+  tests passed for extraction, colors, ordering, clipping, malformed visuals,
+  selection, collider outlines, pan/zoom/frame, and resize.
 
 ### Task 7: Space Pong Through the Real Workflow
 
-- **Source and destination:** Existing `Project`, `ProjectWorkflow`, `Engine`,
-  `ScriptRegistry`, `BehaviourSystem`, `GameCanvas`, `PygameRuntime`, generic
-  visual/collider components, and `GameExporter`; destination is the project-owned
-  `examples/space_pong/` manifest, scene, script, and standalone entry point.
+- **Source symbols and destination:** Existing Expra `Project`,
+  `ProjectWorkflow`, `Engine`, `ScriptRegistry`, `BehaviourSystem`,
+  `GameCanvas`, `PygameRuntime`, generic visual/collider components, and
+  `GameExporter`; destination is `SpacePongBehaviour` methods `on_start`,
+  `on_fixed_update`, `score_point`, `toggle_pause`, `restart`, `resize`, and
+  `examples/space_pong/` project data and entry point.
 - **Behavior preserved:** Project-relative scene/script loading, edit/runtime
   scene isolation, play/pause/stop lifecycle, deterministic wall bounce and
   scoring, win state, restart, HUD layout under resize, hit feedback, generic
@@ -190,6 +252,12 @@ At audit time, no reference implementation has been copied into Expra.
 - **License/provenance:** Rewritten project content using Expra contracts; no
   reference repository or bundled asset was copied. License status is not
   applicable to the new project-owned code.
+- **Evidence:** Commit `ed0fc68`; `tests/test_space_pong.py` passed 7 tests,
+  including generic inventory, lifecycle, deterministic bounce, HUD resize,
+  save/reopen, export, and standard runtime assembly. The xvfb editor command
+  reported open/edit/undo/play/pause/resume/stop/save/reopen; export completed
+  to `/tmp/opencode/space-pong-export/space_pong_linux`. Runtime execution used
+  an injected backend, not a real display.
 
 ## Final Acceptance Record
 
