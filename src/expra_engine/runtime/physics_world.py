@@ -8,8 +8,9 @@ from dataclasses import dataclass
 from expra_engine.core.entity import Entity
 from expra_engine.core.scene import Scene
 from expra_engine.core.component import TransformComponent
+from expra_engine.runtime.area import AreaComponent, SpaceOverride
 from expra_engine.runtime.collider import ColliderComponent
-from expra_engine.runtime.physics import HitResult2D, TriggerEvent
+from expra_engine.runtime.physics import AreaEffect2D, HitResult2D, TriggerEvent
 
 __all__ = ("PhysicsWorld2D",)
 
@@ -29,14 +30,18 @@ class PhysicsWorld2D:
         self._trigger_pairs: set[tuple[str, str]] = set()
         self._entity_order: dict[str, int] = {}
 
-    def _colliders(self) -> tuple[_Collider, ...]:
+    def _colliders(self, *, include_area_volumes: bool = False) -> tuple[_Collider, ...]:
         result: list[_Collider] = []
         for index, entity in enumerate(self.scene.entities):
             self._entity_order.setdefault(entity.entity_id, index)
             if not entity.enabled:
                 continue
             component = entity.get_component(ColliderComponent)
-            if component is None or not component.enabled or not (component.solid or component.trigger):
+            area = entity.get_component(AreaComponent)
+            if component is None or not component.enabled or (
+                not (component.solid or component.trigger)
+                and not (include_area_volumes and area is not None and area.enabled)
+            ):
                 continue
             transform = entity.get_component(TransformComponent)
             position = (transform.x, transform.y) if transform is not None else (0.0, 0.0)
@@ -87,6 +92,109 @@ class PhysicsWorld2D:
             and (include_triggers or not item.component.trigger)
             and self._filtered(body, item)
             and self._overlaps(body, item)
+        )
+
+    @staticmethod
+    def _apply_vector(
+        current: tuple[float, float], value: tuple[float, float], mode: SpaceOverride
+    ) -> tuple[tuple[float, float], bool]:
+        if mode is SpaceOverride.DISABLED:
+            return current, True
+        if mode in {SpaceOverride.REPLACE, SpaceOverride.REPLACE_COMBINE}:
+            result = value
+        else:
+            result = (current[0] + value[0], current[1] + value[1])
+        return result, mode in {SpaceOverride.COMBINE, SpaceOverride.REPLACE_COMBINE}
+
+    @staticmethod
+    def _apply_scalar(current: float, value: float, mode: SpaceOverride) -> tuple[float, bool]:
+        if mode is SpaceOverride.DISABLED:
+            return current, True
+        result = value if mode in {SpaceOverride.REPLACE, SpaceOverride.REPLACE_COMBINE} else current + value
+        return result, mode in {SpaceOverride.COMBINE, SpaceOverride.REPLACE_COMBINE}
+
+    @staticmethod
+    def _area_gravity(area_item: _Collider, body: _Collider, area: AreaComponent) -> tuple[float, float]:
+        if not area.gravity_point:
+            return (
+                area.gravity * area.gravity_direction[0],
+                area.gravity * area.gravity_direction[1],
+            )
+        area_transform = area_item.entity.get_component(TransformComponent)
+        body_transform = body.entity.get_component(TransformComponent)
+        area_position = (area_item.center[0], area_item.center[1])
+        body_position = body.center
+        if area_transform is not None:
+            angle = math.radians(area_transform.rotation)
+            local_x, local_y = area.gravity_point_center
+            area_position = (
+                area_transform.x + local_x * math.cos(angle) - local_y * math.sin(angle),
+                area_transform.y + local_x * math.sin(angle) + local_y * math.cos(angle),
+            )
+        if body_transform is not None:
+            body_position = (body_transform.x, body_transform.y)
+        dx, dy = area_position[0] - body_position[0], area_position[1] - body_position[1]
+        distance = math.hypot(dx, dy)
+        if distance == 0.0:
+            return (0.0, 0.0)
+        scale = 1.0
+        if area.gravity_point_unit_distance > 0.0:
+            scale = (area.gravity_point_unit_distance / distance) ** 2
+        magnitude = area.gravity * scale / distance
+        return (dx * magnitude, dy * magnitude)
+
+    def resolve_area_effect(
+        self,
+        body_id: str,
+        *,
+        gravity: tuple[float, float] = (0.0, 0.0),
+        linear_damp: float = 0.0,
+        angular_damp: float = 0.0,
+    ) -> AreaEffect2D:
+        """Resolve active area fields affecting one collider-backed entity."""
+        if len(gravity) != 2 or not all(math.isfinite(float(value)) for value in gravity):
+            raise ValueError("gravity must contain two finite numbers")
+        base_linear = float(linear_damp)
+        base_angular = float(angular_damp)
+        if not all(math.isfinite(value) and value >= 0.0 for value in (base_linear, base_angular)):
+            raise ValueError("damping values must be finite and non-negative")
+        colliders = self._colliders(include_area_volumes=True)
+        body = next((item for item in colliders if item.entity.entity_id == body_id), None)
+        if body is None:
+            return AreaEffect2D(gravity=(float(gravity[0]), float(gravity[1])), linear_damp=base_linear, angular_damp=base_angular)
+        candidates: list[tuple[_Collider, AreaComponent]] = []
+        for item in colliders:
+            area = item.entity.get_component(AreaComponent)
+            if area is None or not area.enabled or not self._filtered(item, body) or not self._overlaps(item, body):
+                continue
+            candidates.append((item, area))
+        candidates.sort(key=lambda pair: (-pair[1].priority, self._entity_order[pair[0].entity.entity_id]))
+        resolved_gravity = (float(gravity[0]), float(gravity[1]))
+        resolved_linear = base_linear
+        resolved_angular = base_angular
+        gravity_active = linear_active = angular_active = True
+        area_ids: list[str] = []
+        for item, area in candidates:
+            area_ids.append(item.entity.entity_id)
+            if gravity_active:
+                resolved_gravity, gravity_active = self._apply_vector(
+                    resolved_gravity,
+                    self._area_gravity(item, body, area),
+                    area.gravity_mode,
+                )
+            if linear_active:
+                resolved_linear, linear_active = self._apply_scalar(
+                    resolved_linear, area.linear_damp, area.linear_damp_mode
+                )
+            if angular_active:
+                resolved_angular, angular_active = self._apply_scalar(
+                    resolved_angular, area.angular_damp, area.angular_damp_mode
+                )
+        return AreaEffect2D(
+            gravity=resolved_gravity,
+            linear_damp=resolved_linear,
+            angular_damp=resolved_angular,
+            area_ids=tuple(area_ids),
         )
 
     def raycast(

@@ -1,6 +1,7 @@
 """Expra game runtime subsystem."""
 
 from expra_engine.runtime.animator import AnimatorStateMachine
+from expra_engine.runtime.area import AreaComponent, SpaceOverride
 from expra_engine.runtime.behaviour import (
     HANDLED,
     PASS,
@@ -27,6 +28,7 @@ from expra_engine.runtime.events import (
     StopScene,
     Update,
 )
+from expra_engine.runtime.physics import AreaEffect2D
 from expra_engine.runtime.invoke import Repeater, after, every, invoke
 from expra_engine.runtime.platformer import PlatformerController2d, PlatformerPhase
 from expra_engine.runtime.pygame_renderer import PygameRenderer, PygameRenderFrame, RenderFrame
@@ -70,6 +72,8 @@ __all__ = [
     "HANDLED",
     "PASS",
     "AnimatorStateMachine",
+    "AreaComponent",
+    "AreaEffect2D",
     "Behaviour",
     "BehaviourContext",
     "BehaviourFactory",
@@ -111,6 +115,7 @@ __all__ = [
     "ScriptRegistry",
     "Sequence",
     "SmoothFollow",
+    "SpaceOverride",
     "StartScene",
     "StopScene",
     "TrailPoint",

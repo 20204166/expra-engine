@@ -15,12 +15,23 @@ from dataclasses import dataclass
 from math import isfinite
 
 __all__ = (
+    "AreaEffect2D",
     "HitResult2D",
     "TriggerEvent",
     "TriggerPhase",
 )
 
 TriggerPhase = str  # "entered" | "stayed" | "exited"
+
+
+@dataclass(frozen=True)
+class AreaEffect2D:
+    """Resolved environmental values for one physics query target."""
+
+    gravity: tuple[float, float] = (0.0, 0.0)
+    linear_damp: float = 0.0
+    angular_damp: float = 0.0
+    area_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

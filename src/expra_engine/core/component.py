@@ -213,21 +213,42 @@ def _register_visual_components() -> None:
 
 
 def _register_physics_components() -> None:
-    if "collider" in _COMPONENT_REGISTRY:
-        return
-    from expra_engine.runtime.collider import ColliderComponent
+    if "collider" not in _COMPONENT_REGISTRY:
+        from expra_engine.runtime.collider import ColliderComponent
 
-    fields = (
-        PropertyDescriptor("shape", "Shape", str, "rectangle", enum_values=("rectangle", "circle")),
-        PropertyDescriptor("width", "Width", float, 1.0, minimum=0.0),
-        PropertyDescriptor("height", "Height", float, 1.0, minimum=0.0),
-        PropertyDescriptor("radius", "Radius", float, None, minimum=0.0),
-        PropertyDescriptor("offset", "Offset", tuple, (0.0, 0.0)),
-        PropertyDescriptor("solid", "Solid", bool, True),
-        PropertyDescriptor("trigger", "Trigger", bool, False),
-        PropertyDescriptor("enabled", "Enabled", bool, True),
-        PropertyDescriptor("layer", "Layer", int, 1, minimum=0),
-        PropertyDescriptor("mask", "Mask", int, 0xFFFFFFFF, minimum=0),
-    )
-    _COMPONENT_REGISTRY["collider"] = ColliderComponent
-    register_component_spec(ComponentTypeSpec("collider", ColliderComponent, fields))
+        fields = (
+            PropertyDescriptor("shape", "Shape", str, "rectangle", enum_values=("rectangle", "circle")),
+            PropertyDescriptor("width", "Width", float, 1.0, minimum=0.0),
+            PropertyDescriptor("height", "Height", float, 1.0, minimum=0.0),
+            PropertyDescriptor("radius", "Radius", float, None, minimum=0.0),
+            PropertyDescriptor("offset", "Offset", tuple, (0.0, 0.0)),
+            PropertyDescriptor("solid", "Solid", bool, True),
+            PropertyDescriptor("trigger", "Trigger", bool, False),
+            PropertyDescriptor("enabled", "Enabled", bool, True),
+            PropertyDescriptor("layer", "Layer", int, 1, minimum=0),
+            PropertyDescriptor("mask", "Mask", int, 0xFFFFFFFF, minimum=0),
+        )
+        _COMPONENT_REGISTRY["collider"] = ColliderComponent
+        register_component_spec(ComponentTypeSpec("collider", ColliderComponent, fields))
+
+    if "area" not in _COMPONENT_REGISTRY:
+        from expra_engine.runtime.area import AreaComponent, SpaceOverride
+        from expra_engine.runtime.collider import ColliderComponent
+
+        modes = tuple(mode.value for mode in SpaceOverride)
+        fields = (
+            PropertyDescriptor("priority", "Priority", int, 0),
+            PropertyDescriptor("gravity_mode", "Gravity Mode", str, "disabled", enum_values=modes),
+            PropertyDescriptor("gravity", "Gravity", float, 0.0),
+            PropertyDescriptor("gravity_direction", "Gravity Direction", tuple, (0.0, -1.0)),
+            PropertyDescriptor("gravity_point", "Point Gravity", bool, False),
+            PropertyDescriptor("gravity_point_center", "Point Center", tuple, (0.0, 0.0)),
+            PropertyDescriptor("gravity_point_unit_distance", "Point Unit Distance", float, 0.0, minimum=0.0),
+            PropertyDescriptor("linear_damp_mode", "Linear Damp Mode", str, "disabled", enum_values=modes),
+            PropertyDescriptor("linear_damp", "Linear Damp", float, 0.0, minimum=0.0),
+            PropertyDescriptor("angular_damp_mode", "Angular Damp Mode", str, "disabled", enum_values=modes),
+            PropertyDescriptor("angular_damp", "Angular Damp", float, 0.0, minimum=0.0),
+            PropertyDescriptor("enabled", "Enabled", bool, True),
+        )
+        _COMPONENT_REGISTRY["area"] = AreaComponent
+        register_component_spec(ComponentTypeSpec("area", AreaComponent, fields, (ColliderComponent,)))
