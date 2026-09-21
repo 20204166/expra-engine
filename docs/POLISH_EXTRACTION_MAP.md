@@ -1,0 +1,74 @@
+# Polish / Multi-Engine Extraction Map
+
+**Audit date:** 2026-09-21
+
+This map records repository evidence before implementation. `A` means Expra is
+already sufficient. `B` means adapt a source behavior. `C` means combine
+source behavior with existing Expra contracts. `D` means add a missing seam
+using source contracts. `E` means reject the source mechanism while retaining
+useful behavior or test intent.
+
+## Reference and License Boundary
+
+| Source | Evidence | License/provenance decision |
+|---|---|---|
+| System Analyzer (`/home/btn17/Downloads/exp`) | `maintenance/ui/layout.py`, `render_coordinator.py`, `action_coordinator.py`, `tests/test_ui_primitives.py`, `tests/test_render_coordinator.py`, `tests/test_live_tk_resize.py` | Checkout declares `UNLICENSED`; behavior and test intent only, no code copying. |
+| Ursina (`/home/btn17/Downloads/ursina-master`) | `ursina/prefabs/button.py`, `text.py`, `prefabs/window_panel.py`, `models/procedural/nine_slice.py`, `editor/level_editor.py`, `raycast.py`, `sequence.py` | MIT; adapt decoupled behavior and test intent, retain attribution if code is substantially reused. |
+| PPB (`/home/btn17/Downloads/pursuedpybear-canon`) | `src/ppb/engine.py`, `camera.py`, `sprites.py`, `systems/renderer.py`, `assetlib.py`, `systems/clocks.py`, `tests/test_camera.py`, `tests/test_assets.py` | Artistic License 2.0; preserve test intent/contracts and record any substantial adaptation. |
+| MiniPyEngine (`/home/btn17/Downloads/MiniPyEngine-main`) | `Engine/objects/GameObjectBase.py`, `GameObjects.py`, `GMMKR.py`, `maths/Material.py`, `StartGame.py` | MIT; use narrowly. Bundled asset rights are not established, so do not copy assets. |
+
+## Capability Parity
+
+| Capability | Current Expra state | Analyzer | Ursina | PPB | MiniPyEngine | Chosen owner/classification |
+|---|---|---|---|---|---|---|
+| Inspector/property editing | Transform and script fields; other components display read-only | Typed controls, validation, refresh | Level Inspector patterns | Component data contracts | Map object fields | `InspectorPanel` + registry metadata, B |
+| Add/remove components | Add menu exists; no generic remove or field schema | Stable actions and stale delivery | Add/remove editor patterns | Object lifecycle | Append-only map editor | `ComponentRegistry` + `CommandStack`, D |
+| Stale selection/action safety | Coordinator and editor command seams exist | Strongest reference | Editor has global-state caveats | Targeted event caveats | No tests | Existing coordinators + tests, A/B |
+| Primitive visuals | Renderer primitives exist outside scene components | N/A | Quad/entity primitives | Shape assets | SimpleCube primitives | `PrimitiveComponent` + extractor, C |
+| Sprite visuals/assets | Resource service exists; no scene visual component | N/A | Sprite/PPU/aspect behavior | Sprite/image lifecycle | Textured objects | `SpriteComponent` + asset adapter, C |
+| Text | Pygame sample HUD only | Widget measurement/state patterns | `Text` wrapping/alignment | Text asset/font lifecycle | Menu text only | `TextComponent` + renderer text command, C |
+| Nine-slice | Pure geometry model and tests | Panel layout patterns | `NineSlice` geometry | N/A | N/A | Existing nine-slice owner + draw adapter, C |
+| Runtime panels/buttons | Control state models only; no render tree | Action/state patterns | Button/window/pause semantics | N/A | Menu buttons | Runtime UI tree + Pygame adapter, C |
+| Layout/anchors/resize | Geometry contracts, no runtime tree | Resize/hysteresis patterns | Origins/grid layout | Camera scaling | Resolution menu | Runtime layout resolver, C |
+| Focus/pointer | Pure models and pointer contracts | Lifecycle safety | Hover/pressed/focus behavior | Input event contracts | Mouse menu | Runtime UI input router, C |
+| Collision configuration | Hit/trigger vocabulary only | N/A | Collider/raycast/hit result | No general collision | Weak AABB | `ColliderComponent` + deterministic backend, D/E |
+| Physics edge cases | No solver/backend | N/A | Raycast semantics | Camera/geometry tests | Collision defects | Expra tests informed by contracts, D/E |
+| Materials/colors | Color and opacity only | Semantic styling | Color/gradient helpers | Tint/opacity/blend | Material container | Extend `MaterialDescriptor` minimally, C |
+| Animation/tween feedback | Pure runtime contracts already exist | Transition lifecycle | Sequence/curves/animator | Fixed/update timing | No animation system | Existing timeline/tween/animation, A/B |
+| Particles/trails | Trail contract exists; no particle renderer | N/A | Trail/particle behavior | N/A | No particles | Defer; use layered primitives for Pong, E |
+| Editor viewport | Tk markers/grid/selection; not runtime visuals | Real-widget resize evidence | Editor camera/gizmos | Camera math | Tk map editor | Shared extraction + Tk overlays, C |
+| Camera/pan/zoom/frame | Camera projection exists; viewport controls incomplete | Resize patterns | EditorCamera controls | Camera round-trip tests | Camera math | Existing camera + editor adapter, C |
+| Assets/project workflow | Strong logical IDs, mounts, export | N/A | Asset folder conventions | Cache/lifecycle contracts | CWD-based paths | Existing resource/export owners, A/C |
+| Pause/win/game flow | Behaviour/runtime lifecycle exists; no runtime UI | Lifecycle/action patterns | Pause/menu patterns | Scene transitions | Menu state | Project scripts + runtime UI, C |
+
+## Test Extraction Plan
+
+| Area | Source test intent | New Expra regression tests |
+|---|---|---|
+| Inspector | Analyzer invalid values, refresh suppression, stale node delivery | Stale selected entity, removed component, invalid property type, undo/redo, duplicate add |
+| Runtime UI | Ursina state transitions and PPB camera/asset edge cases | Resize/extreme aspect, hidden UI, destroyed focus target, rapid text changes, safe-area anchors |
+| Rendering | PPB layer/order/visibility and camera round trips | Off-screen/partial primitives, zero-size rejection, alpha, deterministic equal-depth order |
+| Collision | Ursina hit result fields and Expra trigger vocabulary | Exact contact, initial overlap, disabled/removed collider, trigger enter/stay/exit, deterministic order |
+| Preview | Analyzer real resize/lifecycle and Ursina editor controls | Removed selection, malformed visual component, collider outline, pan/zoom/frame selection |
+
+## Implementation Record
+
+This section will be completed per staged patch with:
+
+- source file and symbol;
+- behavior and edge cases preserved;
+- coupling removed;
+- Expra destination;
+- adapted source tests and new regression tests;
+- license/provenance status;
+- rendered evidence and Space Pong result.
+
+At audit time, no reference implementation has been copied into Expra.
+
+## Final Acceptance Record
+
+Space-Pong-specific engine hacks: **MUST REMAIN NONE**.
+
+The final report must provide concrete evidence for editor construction,
+Inspector visual/collider/script editing, preview parity, runtime HUD/pause/win,
+resize behavior, save/reopen, export, and standalone execution.
