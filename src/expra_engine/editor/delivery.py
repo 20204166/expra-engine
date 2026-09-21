@@ -90,7 +90,9 @@ class TkDeliveryQueue:
                 callback = self._callbacks.get_nowait()
             except Empty:
                 break
-            with contextlib.suppress(RuntimeError, tk.TclError):
+            # A faulty callback must not stop delivery of later callbacks or
+            # the periodic poll; callbacks are application-owned code.
+            with contextlib.suppress(Exception):
                 callback()
         try:
             self._after_id = self._widget.after(25, self._drain)

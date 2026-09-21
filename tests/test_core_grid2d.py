@@ -139,6 +139,8 @@ class PasteTests(unittest.TestCase):
         dst = Grid2D(3, 3, default_factory=int)
         with self.assertRaises(ValueError):
             dst.paste(src, 2, 2)
+        self.assertEqual(dst.get(2, 2), 0)
+        self.assertEqual(dst.get(2, 1), 0)
 
     def test_paste_with_clip_skips_out_of_bounds(self) -> None:
         src = Grid2D(3, 3, data=[[1, 2, 3], [4, 5, 6], [7, 8, 9]])

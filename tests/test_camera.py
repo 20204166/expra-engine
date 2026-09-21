@@ -20,7 +20,7 @@ Tests cover:
 """
 
 import unittest
-from math import isclose
+from math import inf, isclose, nan
 
 from expra_engine.core.camera import Camera2D
 
@@ -42,6 +42,9 @@ class TestCamera2DCreation(unittest.TestCase):
     def test_invalid_target_width_raises(self) -> None:
         with self.assertRaises(ValueError):
             Camera2D(viewport=(800, 600), target_width=0.0)
+        for target_width in (nan, inf):
+            with self.subTest(target_width=target_width), self.assertRaises(ValueError):
+                Camera2D(viewport=(800, 600), target_width=target_width)
 
     def test_invalid_viewport_raises(self) -> None:
         with self.assertRaises(ValueError):

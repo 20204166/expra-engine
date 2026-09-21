@@ -50,6 +50,13 @@ class PointerTracker:
     ) -> PointerEvent:
         return PointerEvent(kind, position, float(timestamp), target, button)
 
+    @staticmethod
+    def _timestamp(timestamp: float) -> float:
+        value = float(timestamp)
+        if not isfinite(value):
+            raise ValueError("pointer timestamp must be finite")
+        return value
+
     def move(
         self,
         position: tuple[float, float],
@@ -57,6 +64,7 @@ class PointerTracker:
         target: str | None,
         timestamp: float,
     ) -> tuple[PointerEvent, ...]:
+        timestamp = self._timestamp(timestamp)
         position = self._position(position)
         events: list[PointerEvent] = []
         if target != self.hovered:
@@ -80,6 +88,7 @@ class PointerTracker:
         button: str = "primary",
         timestamp: float,
     ) -> tuple[PointerEvent, ...]:
+        timestamp = self._timestamp(timestamp)
         target = self.hovered
         self.captured = target
         self.held = self.held | {button}
@@ -93,10 +102,13 @@ class PointerTracker:
         button: str = "primary",
         timestamp: float,
     ) -> tuple[PointerEvent, ...]:
+        timestamp = self._timestamp(timestamp)
         position = self._position(position)
         owner = self.captured
         events = [self._event("release", position, timestamp, owner, button)]
-        if not self.dragging:
+        if self.dragging and len(self.held) == 1:
+            events.append(self._event("drop", position, timestamp, owner, button))
+        elif len(self.held) == 1:
             if (
                 self._last_click_target == owner
                 and self._last_click_time is not None
@@ -109,15 +121,15 @@ class PointerTracker:
                 events.append(self._event("click", position, timestamp, owner, button))
                 self._last_click_target = owner
                 self._last_click_time = float(timestamp)
-        else:
-            events.append(self._event("drop", position, timestamp, owner, button))
         self.held = self.held - {button}
-        self.captured = None
-        self.dragging = False
+        if not self.held:
+            self.captured = None
+            self.dragging = False
         self._last_position = position
         return tuple(events)
 
     def focus_lost(self, *, timestamp: float) -> tuple[PointerEvent, ...]:
+        timestamp = self._timestamp(timestamp)
         self.held = frozenset()
         self.captured = None
         self.dragging = False

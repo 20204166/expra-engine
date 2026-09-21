@@ -62,6 +62,11 @@ class ObservabilityWatcherTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             watcher.record("app:scan", 0.1, outcome=cast(Outcome, "unknown"))
 
+        with self.assertRaises(ValueError):
+            watcher.record("app:scan", float("nan"))
+        with self.assertRaises(ValueError):
+            watcher.record("app:scan", float("inf"))
+
     def test_reset_discards_previous_runtime_session(self) -> None:
         watcher = ObservabilityWatcher()
         watcher.record("app:scan", 0.1)

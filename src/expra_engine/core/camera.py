@@ -26,6 +26,8 @@ Coordinate convention (same as PPB):
 
 from __future__ import annotations
 
+import math
+
 __all__ = ("Camera2D",)
 
 Vec2 = tuple[float, float]
@@ -218,9 +220,15 @@ class Camera2D:
 
         vw, vh = self._viewport
         if target_width is not None:
+            if not math.isfinite(target_width) or target_width <= 0.0:
+                raise ValueError(f"target_width must be finite and positive, got {target_width!r}")
             self._pixel_ratio = vw / target_width
         else:
             assert target_height is not None
+            if not math.isfinite(target_height) or target_height <= 0.0:
+                raise ValueError(
+                    f"target_height must be finite and positive, got {target_height!r}"
+                )
             self._pixel_ratio = vh / target_height
 
         self._width = vw / self._pixel_ratio

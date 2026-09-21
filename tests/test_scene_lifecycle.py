@@ -19,6 +19,12 @@ class DummyComponent(Component):
 
 
 class RecursiveDeleteTests(unittest.TestCase):
+    def test_duplicate_entity_ids_are_rejected(self) -> None:
+        scene = Scene("test")
+        scene.create_entity("first", entity_id="same")
+        with self.assertRaises(ValueError):
+            scene.create_entity("second", entity_id="same")
+
     def _tree(self) -> tuple[Scene, str, str, str]:
         s = Scene("test")
         parent = s.create_entity("parent")

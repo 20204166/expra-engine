@@ -18,6 +18,10 @@ class ConstructionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             PixelPerfectSettings(320, 180, pixels_per_unit=float("inf"))
 
+    def test_non_integral_reference_dimensions_are_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            PixelPerfectSettings(320.5, 180)  # type: ignore[arg-type]
+
 
 class FitTests(unittest.TestCase):
     def test_320x180_to_1280x720_scale_4(self) -> None:
@@ -80,6 +84,11 @@ class FitTests(unittest.TestCase):
         cfg = PixelPerfectSettings(320, 180)
         with self.assertRaises(ValueError):
             cfg.fit(0, 720)
+
+    def test_non_integral_target_dimensions_are_rejected(self) -> None:
+        cfg = PixelPerfectSettings(320, 180)
+        with self.assertRaises(ValueError):
+            cfg.fit(1280.5, 720)  # type: ignore[arg-type]
 
     def test_repeated_fit_deterministic(self) -> None:
         cfg = PixelPerfectSettings(320, 180)

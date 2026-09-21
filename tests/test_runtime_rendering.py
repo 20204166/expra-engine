@@ -126,3 +126,12 @@ def test_viewport_rejects_non_finite_or_non_integral_coordinates() -> None:
         Viewport(float("nan"), 0, 100, 100)  # type: ignore[arg-type]
     with pytest.raises(ValueError):
         Viewport(0.5, 0, 100, 100)  # type: ignore[arg-type]
+
+
+def test_camera_and_primitives_reject_non_finite_dimensions() -> None:
+    with pytest.raises(ValueError):
+        OrthographicCamera(width=float("nan"))
+    with pytest.raises(ValueError):
+        OrthographicCamera(near=float("inf"))
+    with pytest.raises(ValueError):
+        PrimitiveDescriptor("circle", radius=float("nan"))

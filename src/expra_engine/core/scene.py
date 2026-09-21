@@ -39,11 +39,13 @@ class Scene:
     def create_entity(self, name: str, **kwargs: Any) -> Entity:
         """Create and register a new entity, returning it."""
         entity = Entity(name, **kwargs)
-        self._entities.append(entity)
+        self.add_entity(entity)
         return entity
 
     def add_entity(self, entity: Entity) -> None:
         """Register an already-constructed entity."""
+        if self.find_entity(entity.entity_id) is not None:
+            raise ValueError(f"Entity ID already exists in scene: {entity.entity_id!r}")
         self._entities.append(entity)
 
     def remove_entity(self, entity_id: str, *, recursive: bool = False) -> bool:

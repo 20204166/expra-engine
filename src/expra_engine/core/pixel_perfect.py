@@ -45,6 +45,8 @@ class PixelPerfectSettings:
     nearest_filter: bool = True
 
     def __post_init__(self) -> None:
+        if type(self.reference_width) is not int or type(self.reference_height) is not int:
+            raise ValueError("reference resolution dimensions must be integers")
         if self.reference_width <= 0 or self.reference_height <= 0:
             raise ValueError("reference resolution must have positive dimensions")
         if not math.isfinite(self.pixels_per_unit) or self.pixels_per_unit <= 0.0:
@@ -56,6 +58,8 @@ class PixelPerfectSettings:
         The integer scale is at least 1 even when the target is smaller
         than the reference, so the result is always renderable.
         """
+        if type(target_width) is not int or type(target_height) is not int:
+            raise ValueError("target dimensions must be integers")
         if target_width <= 0 or target_height <= 0:
             raise ValueError("target dimensions must be positive")
         scale_x = target_width // self.reference_width

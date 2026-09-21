@@ -1,6 +1,7 @@
 """Tests for backend-neutral, instance-scoped pointer interaction."""
 
 import unittest
+from math import inf
 
 from expra_engine.runtime.pointer import PointerEvent, PointerTracker
 
@@ -71,6 +72,22 @@ if __name__ == "__main__":
 
 
 class PointerTrackerEdgeTests(unittest.TestCase):
+    def test_non_finite_timestamps_are_rejected(self) -> None:
+        tracker = PointerTracker()
+        with self.assertRaises(ValueError):
+            tracker.move((0.0, 0.0), target=None, timestamp=inf)
+
+    def test_capture_survives_release_of_one_of_multiple_buttons(self) -> None:
+        tracker = PointerTracker()
+        tracker.move((0.0, 0.0), target="widget", timestamp=0.0)
+        tracker.press(button="primary", timestamp=0.1)
+        tracker.press(button="secondary", timestamp=0.2)
+        events = tracker.release((1.0, 1.0), target=None, button="primary", timestamp=0.3)
+
+        self.assertEqual(kinds(events), ["release"])
+        self.assertEqual(tracker.captured, "widget")
+        self.assertEqual(tracker.held, frozenset({"secondary"}))
+
     def test_pointer_exits_while_pressed_does_not_lose_capture(self) -> None:
         from expra_engine.runtime.pointer import PointerTracker
 

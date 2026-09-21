@@ -12,6 +12,7 @@ import time
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from math import isfinite
 from typing import Literal
 
 Outcome = Literal["success", "failure", "cancelled"]
@@ -163,8 +164,8 @@ class ObservabilityWatcher:
         with self._lock:
             if token.identifier not in self._active_tokens:
                 raise ValueError("observation token was already finished")
-            if duration < 0:
-                raise ValueError("duration_seconds cannot be negative")
+            if not isfinite(duration) or duration < 0:
+                raise ValueError("duration_seconds must be finite and non-negative")
             self._active_tokens.remove(token.identifier)
             metric = self._metric(token.target)
             metric.in_flight = max(metric.in_flight - 1, 0)
@@ -179,8 +180,8 @@ class ObservabilityWatcher:
         detail: str | None = None,
     ) -> None:
         self._validate_target(target)
-        if duration_seconds < 0:
-            raise ValueError("duration_seconds cannot be negative")
+        if not isfinite(duration_seconds) or duration_seconds < 0:
+            raise ValueError("duration_seconds must be finite and non-negative")
         if outcome not in ("success", "failure", "cancelled"):
             raise ValueError(f"invalid outcome: {outcome}")
         with self._lock:

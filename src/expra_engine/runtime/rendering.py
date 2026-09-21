@@ -187,8 +187,10 @@ class PrimitiveDescriptor:
         object.__setattr__(self, "size", size)
         if size[0] <= 0 or size[1] <= 0:
             raise ValueError("primitive size must be positive")
-        if self.radius is not None and _finite(self.radius, "radius") <= 0:
-            raise ValueError("primitive radius must be positive")
+        if self.radius is not None:
+            radius = _finite(self.radius, "radius")
+            if radius <= 0:
+                raise ValueError("primitive radius must be positive")
 
 
 class RenderPhase(IntEnum):

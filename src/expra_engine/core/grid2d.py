@@ -126,14 +126,21 @@ class Grid2D[T]:
         skipped.  Otherwise, a ValueError is raised for any out-of-bounds
         paste.
         """
-        for (sx, sy), value in source:
+        source_cells = list(source)
+        if not clip:
+            for (sx, sy), _value in source_cells:
+                tx, ty = dest_x + sx, dest_y + sy
+                if not (0 <= tx < self._width and 0 <= ty < self._height):
+                    raise ValueError(
+                        f"paste target ({tx}, {ty}) is outside the grid "
+                        f"({self._width}x{self._height})"
+                    )
+
+        for (sx, sy), value in source_cells:
             tx, ty = dest_x + sx, dest_y + sy
             if not (0 <= tx < self._width and 0 <= ty < self._height):
                 if clip:
                     continue
-                raise ValueError(
-                    f"paste target ({tx}, {ty}) is outside the grid ({self._width}x{self._height})"
-                )
             self._cells[tx][ty] = copy.copy(value)
 
     def copy(self) -> Grid2D[T]:
