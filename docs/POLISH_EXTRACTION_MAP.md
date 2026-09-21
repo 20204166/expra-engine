@@ -139,6 +139,29 @@ At audit time, no reference implementation has been copied into Expra.
   intent; no reference implementation was copied, so license status is not
   applicable.
 
+### Task 6: Shared Editor Viewport Preview
+
+- **Source and destination:** Existing renderer-neutral `RenderFrame`/
+  `RenderItem` contracts and `extract_render_frame` feed
+  `build_editor_render_target` and `ViewportPanel`; existing `Camera2D`
+  projection owns editor pan, zoom, resize, and frame operations.
+- **Behavior preserved:** Runtime visual colors, text payloads, phase/layer
+  ordering, visibility/clipping, malformed-visual skipping, no-scene state,
+  entity selection callbacks, and removed-selection safety. Grid, axes, entity
+  labels, selection highlights, and collider outlines remain Tk-only overlays.
+- **Coupling removed:** The preview does not duplicate scene extraction and
+  does not make Tk Canvas the exported/runtime renderer; it consumes the same
+  backend-neutral frame as runtime adapters. Collider outlines are derived
+  editor data and never serialized as preview state.
+- **Tests:** `tests/test_editor_render_targets.py` covers primitive/sprite/text
+  extraction, colors, stable layer order, off-screen clipping, malformed
+  visuals, removed selection, collider outlines, and bounded pan/zoom/frame/
+  resize camera behavior. Existing `tests/test_editor_ui.py` covers real Tk
+  no-scene, selection, resize, and marker callback regressions.
+- **License/provenance:** Rewritten from Expra contracts and existing camera
+  behavior; no reference implementation was copied, so license status is not
+  applicable.
+
 ## Final Acceptance Record
 
 Space-Pong-specific engine hacks: **MUST REMAIN NONE**.

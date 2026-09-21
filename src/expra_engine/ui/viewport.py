@@ -13,12 +13,121 @@ pyglet, moderngl, etc. The seam is the ``render_scene`` method.
 from __future__ import annotations
 
 import tkinter as tk
+from collections.abc import Iterable
+from dataclasses import dataclass
 from typing import Any
 
+from expra_engine.core.camera import Camera2D
 from expra_engine.core.component import TransformComponent
 from expra_engine.core.scene import Scene
+from expra_engine.runtime.collider import ColliderComponent
+from expra_engine.runtime.render_extractor import extract_render_frame
+from expra_engine.runtime.rendering import (
+    OrthographicCamera,
+    RenderContext,
+    RenderFrame,
+    RenderItem,
+    Viewport,
+)
 from expra_engine.ui.layout import resize_aware
 from expra_engine.ui.styles import COLORS, editor_entity_kind
+
+
+@dataclass(frozen=True)
+class ColliderOutline:
+    entity_id: str
+    outline: dict[str, Any]
+    position: tuple[float, float]
+
+
+@dataclass(frozen=True)
+class EditorRenderTarget:
+    """Renderer-neutral preview data plus editor-only overlay inputs."""
+
+    frame: RenderFrame
+    items: tuple[RenderItem, ...]
+    selected_id: str | None
+    colliders: tuple[ColliderOutline, ...] = ()
+
+
+def build_editor_render_target(
+    scene: Scene | None,
+    *,
+    viewport: tuple[int, int] = (400, 300),
+    selected_id: str | None = None,
+) -> EditorRenderTarget:
+    """Extract the runtime frame once and apply editor preview clipping."""
+    if scene is None:
+        return EditorRenderTarget(RenderFrame(), (), None)
+    frame = extract_render_frame(scene)
+    width, height = viewport
+    if width <= 0 or height <= 0:
+        return EditorRenderTarget(frame, (), None)
+    context = RenderContext(
+        Viewport(0, 0, width, height),
+        OrthographicCamera(width=20.0, height=20.0 * height / width),
+    )
+    items = frame.visible_items(context)
+    entity_ids = {entity.entity_id for entity in scene.entities}
+    colliders: list[ColliderOutline] = []
+    for entity in scene.entities:
+        collider = entity.get_component(ColliderComponent)
+        transform = entity.get_component(TransformComponent)
+        if entity.enabled and collider is not None and collider.enabled and transform is not None:
+            colliders.append(
+                ColliderOutline(
+                    entity.entity_id,
+                    collider.editor_outline,
+                    (transform.x + collider.offset[0], transform.y + collider.offset[1]),
+                )
+            )
+    return EditorRenderTarget(frame, items, selected_id if selected_id in entity_ids else None, tuple(colliders))
+
+
+class ViewportCamera:
+    """Small editor camera adapter backed by the existing Camera2D contract."""
+
+    def __init__(self, viewport: tuple[int, int] = (400, 300)) -> None:
+        self._viewport = viewport
+        self._camera = Camera2D(viewport=viewport, target_width=20.0)
+        self.zoom_level = 1.0
+
+    @property
+    def position(self) -> tuple[float, float]:
+        return self._camera.position
+
+    def pan(self, x: float, y: float) -> None:
+        self._camera.position = (self.position[0] + x, self.position[1] + y)
+
+    def zoom(self, percent: float) -> None:
+        self.zoom_level = min(4.0, max(0.25, self.zoom_level * (1.0 + percent / 100.0)))
+        self._camera.width = 20.0 / self.zoom_level
+
+    def resize(self, viewport: tuple[int, int]) -> None:
+        if viewport[0] <= 0 or viewport[1] <= 0:
+            return
+        self._viewport = viewport
+        position = self.position
+        self._camera = Camera2D(position=position, viewport=viewport, target_width=self._camera.width)
+
+    def frame_selected(self, point: tuple[float, float] | None) -> bool:
+        if point is None:
+            return False
+        self._camera.position = point
+        return True
+
+    def frame_scene(self, points: Iterable[tuple[float, float]]) -> bool:
+        values = tuple(points)
+        if not values:
+            return False
+        self._camera.position = (
+            (min(point[0] for point in values) + max(point[0] for point in values)) / 2,
+            (min(point[1] for point in values) + max(point[1] for point in values)) / 2,
+        )
+        return True
+
+    def project(self, point: tuple[float, float]) -> tuple[float, float]:
+        return self._camera.translate_to_screen(point)
 
 
 class ViewportPanel(tk.Frame):
@@ -45,6 +154,9 @@ class ViewportPanel(tk.Frame):
         self._colors = c
         self._scene: Scene | None = None
         self._selected_id: str | None = None
+        self._target = EditorRenderTarget(RenderFrame(), (), None)
+        self._camera = ViewportCamera()
+        self._pan_anchor: tuple[float, float] | None = None
 
         # Canvas fills the frame
         self._canvas = tk.Canvas(
@@ -54,12 +166,60 @@ class ViewportPanel(tk.Frame):
         )
         self._canvas.pack(fill="both", expand=True)
         self._canvas.bind("<Button-1>", self._on_click)
-        resize_aware(self, lambda _w: self._redraw())
+        self._canvas.bind("<ButtonPress-2>", self._on_pan_start)
+        self._canvas.bind("<B2-Motion>", self._on_pan_motion)
+        self._canvas.bind("<MouseWheel>", self._on_wheel)
+        resize_aware(self, lambda _w: self._on_resize())
 
     def render(self, scene: Scene | None, selected_id: str | None = None) -> None:
         """Redraw the viewport for ``scene``. Called on the main thread."""
         self._scene = scene
         self._selected_id = selected_id
+        self._target = build_editor_render_target(
+            scene,
+            viewport=(max(1, self._canvas.winfo_width()), max(1, self._canvas.winfo_height())),
+            selected_id=selected_id,
+        )
+        self._redraw()
+
+    def pan(self, x: float, y: float) -> None:
+        self._camera.pan(x, y)
+        self._redraw()
+
+    def zoom(self, percent: float) -> None:
+        self._camera.zoom(percent)
+        self._redraw()
+
+    def frame_selected(self) -> bool:
+        if self._scene is None or self._target.selected_id is None:
+            return False
+        entity = self._scene.find_entity(self._target.selected_id)
+        transform = entity.get_component(TransformComponent) if entity else None
+        framed = self._camera.frame_selected((transform.x, transform.y) if transform else None)
+        if framed:
+            self._redraw()
+        return framed
+
+    def frame_scene(self) -> bool:
+        if self._scene is None:
+            return False
+        points = []
+        for entity in self._scene.entities:
+            transform = entity.get_component(TransformComponent)
+            if entity.enabled and transform:
+                points.append((transform.x, transform.y))
+        framed = self._camera.frame_scene(points)
+        if framed:
+            self._redraw()
+        return framed
+
+    def _on_resize(self) -> None:
+        self._camera.resize((max(1, self._canvas.winfo_width()), max(1, self._canvas.winfo_height())))
+        self._target = build_editor_render_target(
+            self._scene,
+            viewport=(max(1, self._canvas.winfo_width()), max(1, self._canvas.winfo_height())),
+            selected_id=self._selected_id,
+        )
         self._redraw()
 
     def _redraw(self) -> None:
@@ -85,8 +245,9 @@ class ViewportPanel(tk.Frame):
             canvas.create_line(0, gy, w, gy, fill=major_grid_color, width=1)
 
         # Axis lines
-        canvas.create_line(cx, 0, cx, h, fill=c["accent"], width=1)
-        canvas.create_line(0, cy, w, cy, fill=c["accent"], width=1)
+        axis_x, axis_y = self._camera.project((0.0, 0.0))
+        canvas.create_line(axis_x, 0, axis_x, h, fill=c["accent"], width=1)
+        canvas.create_line(0, axis_y, w, axis_y, fill=c["accent"], width=1)
 
         if self._scene is None:
             canvas.create_text(
@@ -98,13 +259,21 @@ class ViewportPanel(tk.Frame):
             )
             return
 
+        visual_ids = {item.key for item in self._target.items}
+        for item in self._target.items:
+            self._draw_render_item(item)
+        self._draw_colliders()
+
         r = self._ENTITY_RADIUS
         for entity in self._scene.entities:
             if not entity.enabled:
                 continue
+            if entity.entity_id in visual_ids:
+                continue
             transform = entity.get_component(TransformComponent)
-            ex = cx + (transform.x if transform else 0)
-            ey = cy - (transform.y if transform else 0)
+            ex, ey = self._camera.project(
+                (transform.x, transform.y) if transform else (0.0, 0.0)
+            )
 
             is_selected = entity.entity_id == self._selected_id
             fill = c["accent"] if is_selected else c["surface"]
@@ -258,8 +427,68 @@ class ViewportPanel(tk.Frame):
                 lambda _e, eid=entity.entity_id: self._click_entity(eid),  # type: ignore[misc]
             )
 
+    def _draw_render_item(self, item: RenderItem) -> None:
+        transform = item.world_transform
+        ex, ey = self._camera.project((transform.position[0], transform.position[1]))
+        sx = abs(item.primitive.size[0] * transform.scale[0]) * self._camera._camera.pixel_ratio / 2
+        sy = abs(item.primitive.size[1] * transform.scale[1]) * self._camera._camera.pixel_ratio / 2
+        tag = f"entity:{item.key}"
+        color = self._tk_color(item.material.color)
+        outline = self._tk_color(item.material.outline) if item.material.outline else color
+        if item.primitive.kind == "circle":
+            self._canvas.create_oval(ex - sx, ey - sy, ex + sx, ey + sy, fill=color, outline=outline, tags=tag)
+        elif item.primitive.kind == "text":
+            text = item.text.text if item.text else ""
+            self._canvas.create_text(ex, ey, text=text, fill=color, font=(item.text.font, item.text.size) if item.text else None, tags=tag)
+        else:
+            self._canvas.create_rectangle(ex - sx, ey - sy, ex + sx, ey + sy, fill=color, outline=outline, tags=tag)
+        self._canvas.tag_bind(tag, "<Button-1>", lambda _e, eid=item.key: self._click_entity(eid))
+        entity = self._scene.find_entity(item.key) if self._scene is not None else None
+        if entity is not None:
+            self._canvas.create_text(
+                ex,
+                ey + sy + 8,
+                text=entity.name,
+                fill=self._colors["accent_ink"] if item.key == self._target.selected_id else self._colors["ink_3"],
+                font=("Helvetica", 9),
+                tags=tag,
+            )
+        if item.key == self._target.selected_id:
+            self._canvas.create_rectangle(ex - sx - 4, ey - sy - 4, ex + sx + 4, ey + sy + 4, outline=self._colors["accent"], width=2, tags="selection")
+
+    def _draw_colliders(self) -> None:
+        for collider in self._target.colliders:
+            ex, ey = self._camera.project(collider.position)
+            data = collider.outline
+            if data["shape"] == "circle":
+                radius = float(data["radius"]) * self._camera._camera.pixel_ratio
+                self._canvas.create_oval(ex - radius, ey - radius, ex + radius, ey + radius, outline=self._colors["warning"], dash=(4, 2), tags="collider")
+            else:
+                width = float(data["width"]) * self._camera._camera.pixel_ratio / 2
+                height = float(data["height"]) * self._camera._camera.pixel_ratio / 2
+                self._canvas.create_rectangle(ex - width, ey - height, ex + width, ey + height, outline=self._colors["warning"], dash=(4, 2), tags="collider")
+
+    @staticmethod
+    def _tk_color(color: Any) -> str:
+        return "#%02x%02x%02x" % (round(color.red * 255), round(color.green * 255), round(color.blue * 255))
+
     def _on_click(self, event: Any) -> None:
         pass
+
+    def _on_pan_start(self, event: Any) -> None:
+        self._pan_anchor = (float(event.x), float(event.y))
+
+    def _on_pan_motion(self, event: Any) -> None:
+        if self._pan_anchor is None:
+            return
+        previous_x, previous_y = self._pan_anchor
+        ratio = self._camera._camera.pixel_ratio or 1.0
+        self._camera.pan((previous_x - event.x) / ratio, (event.y - previous_y) / ratio)
+        self._pan_anchor = (float(event.x), float(event.y))
+        self._redraw()
+
+    def _on_wheel(self, event: Any) -> None:
+        self.zoom(10.0 if event.delta > 0 else -10.0)
 
     def _click_entity(self, entity_id: str) -> None:
         if self._on_entity_click:

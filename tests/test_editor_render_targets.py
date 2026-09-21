@@ -7,6 +7,16 @@ from typing import Any
 
 from expra_engine.coordinators.ui_coordinator import RenderIntent, UICoordinator
 from expra_engine.editor.contributions import RenderTargetRegistry
+from expra_engine.core.component import TransformComponent
+from expra_engine.core.scene import Scene
+from expra_engine.runtime.collider import ColliderComponent
+from expra_engine.runtime.rendering import Color
+from expra_engine.runtime.visual_components import (
+    PrimitiveComponent,
+    SpriteComponent,
+    TextComponent,
+)
+from expra_engine.ui.viewport import ViewportCamera, build_editor_render_target
 
 
 class RenderTargetRegistryTests(unittest.TestCase):
@@ -49,6 +59,78 @@ class RenderTargetRegistryTests(unittest.TestCase):
         coordinator.request(RenderIntent(target="panel"), targets.callback_for("panel"))
 
         self.assertEqual(coordinator.render_failures, 1)
+
+
+class EditorRenderTargetTests(unittest.TestCase):
+    def test_target_uses_extracted_visuals_and_preserves_colors_and_layer_order(self) -> None:
+        scene = Scene("preview")
+        primitive = scene.create_entity("primitive", entity_id="primitive", layer=2)
+        primitive.add_component(TransformComponent(x=-2.0, y=1.0))
+        primitive.add_component(PrimitiveComponent(fill=Color(1.0, 0.0, 0.0), layer=1))
+        sprite = scene.create_entity("sprite", entity_id="sprite", layer=0)
+        sprite.add_component(SpriteComponent("ship", tint=Color(0.0, 1.0, 0.0), layer=2))
+        text = scene.create_entity("text", entity_id="text", layer=0)
+        text.add_component(TextComponent("Hello", color=Color(0.0, 0.0, 1.0), layer=3))
+
+        target = build_editor_render_target(scene, viewport=(200, 100))
+
+        self.assertEqual([item.key for item in target.items], ["sprite", "primitive", "text"])
+        self.assertEqual(target.items[1].material.color, Color(1.0, 0.0, 0.0))
+        self.assertEqual(target.items[2].text.text, "Hello")  # type: ignore[union-attr]
+
+    def test_target_clips_offscreen_items_and_clears_removed_selection(self) -> None:
+        scene = Scene("preview")
+        entity = scene.create_entity("visible", entity_id="visible")
+        entity.add_component(TransformComponent(x=100.0))
+        entity.add_component(PrimitiveComponent())
+
+        target = build_editor_render_target(scene, viewport=(200, 100), selected_id="removed")
+
+        self.assertEqual(target.items, ())
+        self.assertIsNone(target.selected_id)
+
+    def test_target_exposes_collider_outlines_without_mutating_scene(self) -> None:
+        scene = Scene("preview")
+        entity = scene.create_entity("body", entity_id="body")
+        entity.add_component(TransformComponent(x=2.0, y=-1.0))
+        collider = ColliderComponent(width=4.0, height=2.0)
+        entity.add_component(collider)
+
+        target = build_editor_render_target(scene, viewport=(200, 100), selected_id=entity.entity_id)
+
+        self.assertEqual(target.selected_id, "body")
+        self.assertEqual(target.colliders[0].entity_id, "body")
+        self.assertEqual(target.colliders[0].outline, collider.editor_outline)
+        self.assertEqual(entity.get_component(TransformComponent).x, 2.0)  # type: ignore[union-attr]
+
+    def test_target_skips_malformed_visuals_without_losing_valid_items(self) -> None:
+        scene = Scene("preview")
+        malformed = scene.create_entity("bad", entity_id="bad")
+        malformed.add_component(PrimitiveComponent(kind="unknown"))
+        valid = scene.create_entity("good", entity_id="good")
+        valid.add_component(PrimitiveComponent(fill=Color(0.2, 0.3, 0.4)))
+
+        target = build_editor_render_target(scene, viewport=(200, 100))
+
+        self.assertEqual([item.key for item in target.items], ["good"])
+
+
+class ViewportCameraTests(unittest.TestCase):
+    def test_pan_zoom_frame_and_resize_keep_camera_bounded(self) -> None:
+        camera = ViewportCamera((200, 100))
+        camera.pan(3.0, -2.0)
+        camera.zoom(100.0)
+        camera.resize((400, 200))
+
+        self.assertGreaterEqual(camera.zoom_level, 0.25)
+        self.assertLessEqual(camera.zoom_level, 4.0)
+        camera.frame_scene(((10.0, 5.0), (-2.0, -3.0)))
+        self.assertEqual(camera.position, (4.0, 1.0))
+
+    def test_frame_selected_ignores_missing_entity(self) -> None:
+        camera = ViewportCamera((200, 100))
+
+        self.assertFalse(camera.frame_selected(None))
 
 
 if __name__ == "__main__":
