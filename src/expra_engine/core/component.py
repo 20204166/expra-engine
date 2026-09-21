@@ -117,6 +117,7 @@ register_component_spec(
 
 def component_from_dict(data: dict[str, Any]) -> Component:
     """Deserialize a component from its dict representation."""
+    _register_visual_components()
     component_type = data.get("type", "")
     if component_type == "script":
         from expra_engine.runtime.script_component import (
@@ -148,4 +149,62 @@ def register_component_type(name: str, cls: type[Component]) -> None:
 
 def registered_component_types() -> tuple[tuple[str, type[Component]], ...]:
     """Return registered component types in registration order for editor tooling."""
+    _register_visual_components()
     return tuple(_COMPONENT_REGISTRY.items())
+
+
+def _register_visual_components() -> None:
+    if "primitive" in _COMPONENT_REGISTRY:
+        return
+    from expra_engine.runtime.visual_components import (
+        PrimitiveComponent,
+        SpriteComponent,
+        TextComponent,
+    )
+
+    registrations = (
+        (
+            PrimitiveComponent.component_type,
+            PrimitiveComponent,
+            (
+                PropertyDescriptor("kind", "Kind", str, "rectangle"),
+                PropertyDescriptor("width", "Width", float, 1.0),
+                PropertyDescriptor("height", "Height", float, 1.0),
+                PropertyDescriptor("radius", "Radius", float, None),
+                PropertyDescriptor("fill", "Fill", tuple, (1.0, 1.0, 1.0, 1.0)),
+                PropertyDescriptor("outline", "Outline", tuple, None),
+                PropertyDescriptor("outline_width", "Outline Width", float, 0.0),
+                PropertyDescriptor("layer", "Layer", int, 0),
+                PropertyDescriptor("visible", "Visible", bool, True),
+            ),
+        ),
+        (
+            SpriteComponent.component_type,
+            SpriteComponent,
+            (
+                PropertyDescriptor("asset", "Asset", str, ""),
+                PropertyDescriptor("tint", "Tint", tuple, (1.0, 1.0, 1.0, 1.0)),
+                PropertyDescriptor("width", "Width", float, 1.0),
+                PropertyDescriptor("height", "Height", float, 1.0),
+                PropertyDescriptor("layer", "Layer", int, 0),
+                PropertyDescriptor("visible", "Visible", bool, True),
+            ),
+        ),
+        (
+            TextComponent.component_type,
+            TextComponent,
+            (
+                PropertyDescriptor("text", "Text", str, ""),
+                PropertyDescriptor("font", "Font", str, "default"),
+                PropertyDescriptor("size", "Size", float, 16.0),
+                PropertyDescriptor("color", "Color", tuple, (1.0, 1.0, 1.0, 1.0)),
+                PropertyDescriptor("max_width", "Max Width", float, None),
+                PropertyDescriptor("align", "Align", str, "left", enum_values=("left", "center", "right")),
+                PropertyDescriptor("layer", "Layer", int, 0),
+                PropertyDescriptor("visible", "Visible", bool, True),
+            ),
+        ),
+    )
+    for component_type, component_cls, fields in registrations:
+        _COMPONENT_REGISTRY[component_type] = component_cls
+        register_component_spec(ComponentTypeSpec(component_type, component_cls, fields))

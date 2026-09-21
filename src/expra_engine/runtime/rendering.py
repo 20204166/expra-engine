@@ -209,6 +209,7 @@ class RenderItem:
     layer: int = 0
     parent: Transform | None = None
     visible: bool = True
+    payload: object | None = None
 
     @property
     def world_transform(self) -> Transform:

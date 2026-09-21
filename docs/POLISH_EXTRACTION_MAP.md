@@ -65,6 +65,21 @@ This section will be completed per staged patch with:
 
 At audit time, no reference implementation has been copied into Expra.
 
+### Task 2: Renderer-Neutral Visual Components and Extraction
+
+- **Source and destination:** Existing Expra `RenderItem`/`RenderFrame` contracts in
+  `runtime/rendering.py`; new `PrimitiveComponent`, `SpriteComponent`,
+  `TextComponent`, and `extract_render_frame` in `runtime/`.
+- **Behavior preserved:** JSON round-tripping, component enabled/visible gates,
+  transform hierarchy composition, phase/layer ordering, stable entity order,
+  and deterministic skipping of malformed visuals.
+- **Coupling removed:** Scene visuals contain only finite scalar data, Expra
+  colors, and asset/text identifiers; no Tk/Pygame objects enter serialization
+  or extraction.
+- **Tests:** `tests/test_render_extractor.py`, plus existing component, entity,
+  scene, and renderer contract suites. No reference implementation was copied;
+  license status is therefore not applicable.
+
 ## Final Acceptance Record
 
 Space-Pong-specific engine hacks: **MUST REMAIN NONE**.
