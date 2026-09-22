@@ -153,7 +153,9 @@ class EditorRenderTargetTests(unittest.TestCase):
         collider = ColliderComponent(width=4.0, height=2.0)
         entity.add_component(collider)
 
-        target = build_editor_render_target(scene, viewport=(200, 100), selected_id=entity.entity_id)
+        target = build_editor_render_target(
+            scene, viewport=(200, 100), selected_id=entity.entity_id
+        )
 
         self.assertEqual(target.selected_id, "body")
         self.assertEqual(target.colliders[0].entity_id, "body")
@@ -199,29 +201,36 @@ class ViewportCameraTests(unittest.TestCase):
         camera.zoom(100.0)
         camera.resize((400, 200))
 
-        self.assertGreaterEqual(camera.zoom_level, 0.25)
-        self.assertLessEqual(camera.zoom_level, 4.0)
-        self.assertAlmostEqual(camera._camera.zoom, camera.zoom_level)
+        # zoom_level is the canonical zoom state; _camera.zoom is always 1.0
+        # in the new BASE_PPU model (zoom encoded in target_width).
+        self.assertGreater(camera.zoom_level, 0.0)
+        self.assertGreater(camera._camera.pixel_ratio, 0.0)
         camera.frame_scene(((10.0, 5.0), (-2.0, -3.0)))
         self.assertEqual(camera.position, (4.0, 1.0))
 
     def test_zoom_clamps_at_both_edges_using_camera_zoom(self) -> None:
+        from expra_engine.ui.viewport import _MAX_ZOOM, _MIN_ZOOM
+
         camera = ViewportCamera((200, 100))
 
         camera.zoom(-100.0)
-        self.assertEqual(camera.zoom_level, 0.25)
-        self.assertEqual(camera._camera.zoom, 0.25)
-        camera.zoom(10_000.0)
-        self.assertEqual(camera.zoom_level, 4.0)
-        self.assertEqual(camera._camera.zoom, 4.0)
+        self.assertAlmostEqual(camera.zoom_level, _MIN_ZOOM)
+        # Zoom in enough to guarantee we hit the upper clamp
+        camera.zoom((_MAX_ZOOM / _MIN_ZOOM - 1) * 100.0 * 2)
+        self.assertAlmostEqual(camera.zoom_level, _MAX_ZOOM)
+        # pixel_ratio must remain finite and positive at both extremes
+        self.assertGreater(camera._camera.pixel_ratio, 0.0)
 
     def test_resize_preserves_camera_zoom_state(self) -> None:
         camera = ViewportCamera((200, 100))
-        camera.zoom(100.0)
+        camera.zoom(100.0)  # zoom_level becomes 2.0
+        zoom_before = camera.zoom_level
+        ppu_before = camera._camera.pixel_ratio
         camera.resize((400, 200))
 
-        self.assertEqual(camera._camera.zoom, 2.0)
-        self.assertAlmostEqual(camera._camera.width, 10.0)
+        # zoom_level and pixel_ratio must be unchanged; only visible area grows.
+        self.assertAlmostEqual(camera.zoom_level, zoom_before)
+        self.assertAlmostEqual(camera._camera.pixel_ratio, ppu_before)
 
     def test_editor_camera_rotation_and_inverse_projection(self) -> None:
         camera = ViewportCamera((200, 100))

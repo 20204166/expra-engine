@@ -84,11 +84,17 @@ def build_editor_render_target(
     width, height = viewport
     if width <= 0 or height <= 0:
         return EditorRenderTarget(frame, (), None)
-    preview_camera = OrthographicCamera(width=20.0, height=20.0 * height / width)
+    # Use the editor camera's actual visible width so culling matches rendering.
+    if camera is not None:
+        cam_width = camera._camera.width
+        cam_height = cam_width * height / width
+    else:
+        cam_width = 20.0
+        cam_height = 20.0 * height / width
+    preview_camera = OrthographicCamera(width=cam_width, height=cam_height)
     preview_camera.apply_dict(scene.camera)
     if camera is not None:
         preview_camera.position = camera.position
-        preview_camera.width = camera._camera.width
         preview_camera.rotation = camera._camera.rotation
     context = RenderContext(Viewport(0, 0, width, height), preview_camera)
     items = frame.visible_items(context)
@@ -105,7 +111,9 @@ def build_editor_render_target(
                     (transform.x + collider.offset[0], transform.y + collider.offset[1]),
                 )
             )
-    return EditorRenderTarget(frame, items, selected_id if selected_id in entity_ids else None, tuple(colliders))
+    return EditorRenderTarget(
+        frame, items, selected_id if selected_id in entity_ids else None, tuple(colliders)
+    )
 
 
 class ViewportCamera:
@@ -216,7 +224,9 @@ class ViewportCamera:
         raw_zoom = self._camera.zoom
         saved_position = self.position
         saved_rotation = self._camera.rotation
-        self.zoom_level = max(_MIN_ZOOM, min(_MAX_ZOOM, raw_zoom if math.isfinite(raw_zoom) and raw_zoom > 0 else 1.0))
+        self.zoom_level = max(
+            _MIN_ZOOM, min(_MAX_ZOOM, raw_zoom if math.isfinite(raw_zoom) and raw_zoom > 0 else 1.0)
+        )
         vw, vh = self._viewport
         self._camera = Camera2D(
             position=saved_position,
@@ -261,6 +271,8 @@ class ViewportPanel(tk.Frame):
         if camera_state:
             self._camera.apply_dict(camera_state)
         self._pan_anchor: tuple[float, float] | None = None
+        self._space_held = False
+        self._space_pan_anchor: tuple[float, float] | None = None
 
         # Canvas fills the frame
         self._canvas = tk.Canvas(
@@ -272,10 +284,29 @@ class ViewportPanel(tk.Frame):
         self._canvas.bind("<Button-1>", self._on_click)
         self._canvas.bind("<ButtonPress-2>", self._on_pan_start)
         self._canvas.bind("<B2-Motion>", self._on_pan_motion)
+        # Wheel zoom — covers Windows/macOS (<MouseWheel>) and Linux X11 (<Button-4/5>)
         self._canvas.bind("<MouseWheel>", self._on_wheel)
+        self._canvas.bind("<Button-4>", self._on_wheel)
+        self._canvas.bind("<Button-5>", self._on_wheel)
+        # Camera rotation (existing)
         self._canvas.bind("<KeyPress-q>", lambda _event: self._rotate_camera(-15.0))
         self._canvas.bind("<KeyPress-e>", lambda _event: self._rotate_camera(15.0))
         self._canvas.bind("<KeyPress-r>", lambda _event: self._reset_camera())
+        # Keyboard zoom: Ctrl++ / Ctrl+- / Ctrl+0
+        self._canvas.bind("<Control-equal>", lambda _e: self._kb_zoom(1.25))
+        self._canvas.bind("<Control-minus>", lambda _e: self._kb_zoom(0.8))
+        self._canvas.bind("<Control-0>", lambda _e: self._reset_camera())
+        self._canvas.bind("<Control-KP_Add>", lambda _e: self._kb_zoom(1.25))
+        self._canvas.bind("<Control-KP_Subtract>", lambda _e: self._kb_zoom(0.8))
+        # Frame commands: F = frame selected, Home = frame scene
+        self._canvas.bind("<f>", lambda _e: self._frame_selected_key())
+        self._canvas.bind("<F>", lambda _e: self._frame_selected_key())
+        self._canvas.bind("<Home>", lambda _e: self._frame_scene_key())
+        # Space + left-drag pan
+        self._canvas.bind("<KeyPress-space>", self._on_space_down)
+        self._canvas.bind("<KeyRelease-space>", self._on_space_up)
+        self._canvas.bind("<ButtonPress-1>", self._on_lmb_press_for_pan)
+        self._canvas.bind("<B1-Motion>", self._on_lmb_motion_for_pan)
         resize_aware(self, lambda _w: self._on_resize())
 
     def render(
@@ -333,6 +364,12 @@ class ViewportPanel(tk.Frame):
         return framed
 
     def frame_scene(self) -> bool:
+        """Centre and zoom the editor camera to fit all enabled entities.
+
+        This is an explicit user command — it is the ONLY place where an
+        automatic zoom-to-fit is applied.  Normal panel resize must NOT call
+        this method.
+        """
         if self._scene is None:
             return False
         points = []
@@ -340,14 +377,38 @@ class ViewportPanel(tk.Frame):
             transform = entity.get_component(TransformComponent)
             if entity.enabled and transform:
                 points.append((transform.x, transform.y))
-        framed = self._camera.frame_scene(points)
-        if framed:
-            self._notify_camera_change()
-            self._redraw()
-        return framed
+        if not points:
+            return False
+        min_x = min(p[0] for p in points)
+        max_x = max(p[0] for p in points)
+        min_y = min(p[1] for p in points)
+        max_y = max(p[1] for p in points)
+        center_x = (min_x + max_x) / 2.0
+        center_y = (min_y + max_y) / 2.0
+        padding = 4.0
+        world_w = max(padding, max_x - min_x + padding)
+        world_h = max(padding, max_y - min_y + padding)
+        vw = max(1, self._canvas.winfo_width())
+        vh = max(1, self._canvas.winfo_height())
+        fit_ppu_w = vw / world_w
+        fit_ppu_h = vh / world_h
+        new_zoom = max(
+            _MIN_ZOOM, min(_MAX_ZOOM, min(fit_ppu_w, fit_ppu_h) / self._camera._base_ppu * 0.9)
+        )
+        self._camera.zoom_level = new_zoom
+        self._camera._camera = Camera2D(
+            position=(center_x, center_y),
+            viewport=(vw, vh),
+            target_width=vw / (self._camera._base_ppu * new_zoom),
+        )
+        self._notify_camera_change()
+        self._redraw()
+        return True
 
     def _on_resize(self) -> None:
-        self._camera.resize((max(1, self._canvas.winfo_width()), max(1, self._canvas.winfo_height())))
+        self._camera.resize(
+            (max(1, self._canvas.winfo_width()), max(1, self._canvas.winfo_height()))
+        )
         self._target = build_editor_render_target(
             self._scene,
             viewport=(max(1, self._canvas.winfo_width()), max(1, self._canvas.winfo_height())),
@@ -574,7 +635,9 @@ class ViewportPanel(tk.Frame):
                 )
 
     def _draw_render_item(self, item: RenderItem, *, editor_overlays: bool = True) -> None:
-        transform = item.sprite_transform if item.primitive.kind == "sprite" else item.world_transform
+        transform = (
+            item.sprite_transform if item.primitive.kind == "sprite" else item.world_transform
+        )
         ex, ey = self._camera.project((transform.position[0], transform.position[1]))
         sx = abs(item.primitive.size[0] * transform.scale[0]) * self._camera._camera.pixel_ratio / 2
         sy = abs(item.primitive.size[1] * transform.scale[1]) * self._camera._camera.pixel_ratio / 2
@@ -586,7 +649,9 @@ class ViewportPanel(tk.Frame):
             else color
         )
         if item.primitive.kind == "circle":
-            self._canvas.create_oval(ex - sx, ey - sy, ex + sx, ey + sy, fill=color, outline=outline, tags=tag)
+            self._canvas.create_oval(
+                ex - sx, ey - sy, ex + sx, ey + sy, fill=color, outline=outline, tags=tag
+            )
         elif item.primitive.kind == "text":
             text = item.text.text if item.text else ""
             font = (item.text.font, round(item.text.size)) if item.text else "TkDefaultFont"
@@ -596,7 +661,9 @@ class ViewportPanel(tk.Frame):
                 *self._projected_corners(item), fill=color, outline=outline, tags=tag
             )
         else:
-            self._canvas.create_rectangle(ex - sx, ey - sy, ex + sx, ey + sy, fill=color, outline=outline, tags=tag)
+            self._canvas.create_rectangle(
+                ex - sx, ey - sy, ex + sx, ey + sy, fill=color, outline=outline, tags=tag
+            )
         if editor_overlays:
             self._canvas.tag_bind(
                 tag,
@@ -609,15 +676,27 @@ class ViewportPanel(tk.Frame):
                 ex,
                 ey + sy + 8,
                 text=entity.name,
-                fill=self._colors["accent_ink"] if item.key == self._target.selected_id else self._colors["ink_3"],
+                fill=self._colors["accent_ink"]
+                if item.key == self._target.selected_id
+                else self._colors["ink_3"],
                 font=("Helvetica", 9),
                 tags=tag,
             )
         if item.key == self._target.selected_id and editor_overlays:
-            self._canvas.create_rectangle(ex - sx - 4, ey - sy - 4, ex + sx + 4, ey + sy + 4, outline=self._colors["accent"], width=2, tags="selection")
+            self._canvas.create_rectangle(
+                ex - sx - 4,
+                ey - sy - 4,
+                ex + sx + 4,
+                ey + sy + 4,
+                outline=self._colors["accent"],
+                width=2,
+                tags="selection",
+            )
 
     def _projected_corners(self, item: RenderItem) -> tuple[float, ...]:
-        transform = item.sprite_transform if item.primitive.kind == "sprite" else item.world_transform
+        transform = (
+            item.sprite_transform if item.primitive.kind == "sprite" else item.world_transform
+        )
         half_width = abs(item.primitive.size[0] * transform.scale[0]) / 2
         half_height = abs(item.primitive.size[1] * transform.scale[1]) / 2
         angle = math.radians(transform.rotation)
@@ -641,11 +720,27 @@ class ViewportPanel(tk.Frame):
             data = collider.outline
             if data["shape"] == "circle":
                 radius = float(data["radius"]) * self._camera._camera.pixel_ratio
-                self._canvas.create_oval(ex - radius, ey - radius, ex + radius, ey + radius, outline=self._colors["warning"], dash=(4, 2), tags="collider")
+                self._canvas.create_oval(
+                    ex - radius,
+                    ey - radius,
+                    ex + radius,
+                    ey + radius,
+                    outline=self._colors["warning"],
+                    dash=(4, 2),
+                    tags="collider",
+                )
             else:
                 width = float(data["width"]) * self._camera._camera.pixel_ratio / 2
                 height = float(data["height"]) * self._camera._camera.pixel_ratio / 2
-                self._canvas.create_rectangle(ex - width, ey - height, ex + width, ey + height, outline=self._colors["warning"], dash=(4, 2), tags="collider")
+                self._canvas.create_rectangle(
+                    ex - width,
+                    ey - height,
+                    ex + width,
+                    ey + height,
+                    outline=self._colors["warning"],
+                    dash=(4, 2),
+                    tags="collider",
+                )
 
     @staticmethod
     def _tk_color(color: Any) -> str:
@@ -662,7 +757,10 @@ class ViewportPanel(tk.Frame):
             transform = item.world_transform
             half_width = abs(item.primitive.size[0] * transform.scale[0]) / 2
             half_height = abs(item.primitive.size[1] * transform.scale[1]) / 2
-            if abs(world[0] - transform.position[0]) <= half_width and abs(world[1] - transform.position[1]) <= half_height:
+            if (
+                abs(world[0] - transform.position[0]) <= half_width
+                and abs(world[1] - transform.position[1]) <= half_height
+            ):
                 self._click_entity(item.key)
                 return
         if self._on_entity_click is not None:
@@ -680,8 +778,55 @@ class ViewportPanel(tk.Frame):
         self._pan_anchor = (float(event.x), float(event.y))
         self._redraw()
 
-    def _on_wheel(self, event: Any) -> None:
-        self.zoom(10.0 if event.delta > 0 else -10.0)
+    def _on_wheel(self, event: Any) -> str:
+        num = getattr(event, "num", None)
+        delta = getattr(event, "delta", 0)
+        if num == 4 or delta > 0:
+            factor = 1.1
+        elif num == 5 or delta < 0:
+            factor = 1.0 / 1.1
+        else:
+            return "break"
+        self._camera.zoom_at_cursor(factor, (float(event.x), float(event.y)))
+        self._notify_camera_change()
+        self._redraw()
+        return "break"
+
+    def _kb_zoom(self, factor: float) -> str:
+        vw = self._canvas.winfo_width() or 400
+        vh = self._canvas.winfo_height() or 300
+        self._camera.zoom_at_cursor(factor, (vw / 2.0, vh / 2.0))
+        self._notify_camera_change()
+        self._redraw()
+        return "break"
+
+    def _frame_selected_key(self) -> str:
+        self.frame_selected()
+        return "break"
+
+    def _frame_scene_key(self) -> str:
+        self.frame_scene()
+        return "break"
+
+    def _on_space_down(self, event: Any) -> None:
+        self._space_held = True
+
+    def _on_space_up(self, event: Any) -> None:
+        self._space_held = False
+        self._space_pan_anchor = None
+
+    def _on_lmb_press_for_pan(self, event: Any) -> None:
+        if self._space_held:
+            self._space_pan_anchor = (float(event.x), float(event.y))
+
+    def _on_lmb_motion_for_pan(self, event: Any) -> None:
+        if not self._space_held or self._space_pan_anchor is None:
+            return
+        px, py = self._space_pan_anchor
+        ratio = self._camera._camera.pixel_ratio or 1.0
+        self._camera.pan((px - event.x) / ratio, (event.y - py) / ratio)
+        self._space_pan_anchor = (float(event.x), float(event.y))
+        self._redraw()
 
     def _rotate_camera(self, degrees: float) -> str:
         self._camera.rotate(degrees)

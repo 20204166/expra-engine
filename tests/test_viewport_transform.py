@@ -38,7 +38,9 @@ class ResizeInvarianceTests(unittest.TestCase):
         wide = self._pixel_ratio((1200, 700))
         narrow = self._pixel_ratio((800, 700))
         self.assertAlmostEqual(
-            wide, narrow, places=6,
+            wide,
+            narrow,
+            places=6,
             msg="pixel_ratio must not depend on canvas width at zoom=1.0",
         )
 
@@ -46,7 +48,9 @@ class ResizeInvarianceTests(unittest.TestCase):
         tall = self._pixel_ratio((800, 700))
         short = self._pixel_ratio((800, 400))
         self.assertAlmostEqual(
-            tall, short, places=6,
+            tall,
+            short,
+            places=6,
             msg="pixel_ratio must not depend on canvas height at zoom=1.0",
         )
 
@@ -63,7 +67,9 @@ class ResizeInvarianceTests(unittest.TestCase):
         cam.resize((800, 700))
         ppu_after = cam._camera.pixel_ratio
         self.assertAlmostEqual(
-            ppu_before, ppu_after, places=6,
+            ppu_before,
+            ppu_after,
+            places=6,
             msg="resize() must not change pixel_ratio (zoom unchanged)",
         )
 
@@ -81,7 +87,9 @@ class ResizeInvarianceTests(unittest.TestCase):
         screen_wide = world_size * ppu_wide
         screen_narrow = world_size * ppu_narrow
         self.assertAlmostEqual(
-            screen_wide, screen_narrow, places=4,
+            screen_wide,
+            screen_narrow,
+            places=4,
             msg="entity screen size must not change when viewport width changes",
         )
 
@@ -107,7 +115,9 @@ class ResizeInvarianceTests(unittest.TestCase):
         ball_screen_wide = ball_world_size * cam_wide._camera.pixel_ratio
         ball_screen_narrow = ball_world_size * cam_narrow._camera.pixel_ratio
         self.assertAlmostEqual(
-            ball_screen_wide, ball_screen_narrow, places=4,
+            ball_screen_wide,
+            ball_screen_narrow,
+            places=4,
             msg="Space Pong ball must not grow when Inspector expands",
         )
 
