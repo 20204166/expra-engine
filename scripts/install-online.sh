@@ -38,17 +38,22 @@ python_usable() {
         >/dev/null 2>&1
 }
 
-py=""
-uv_installed=0
-if [[ -n "${EXPRA_SYSTEM_PYTHON:-}" ]]; then
-    py="$EXPRA_SYSTEM_PYTHON"
-    python_usable "$py" || { echo "ERROR: EXPRA_SYSTEM_PYTHON must be Python 3.12+ outside a virtual environment" >&2; exit 1; }
-elif command -v python3 >/dev/null 2>&1 && python_usable "$(command -v python3)"; then
-    py="$(command -v python3)"
-fi
-
-if [[ -z "$py" ]]; then
-    [[ "$mode" == "user" ]] || { echo "ERROR: --system requires an existing Python 3.12+ interpreter" >&2; exit 1; }
+# User mode: always install into an isolated uv-managed venv — avoids PEP 668
+# externally-managed-environment errors and pip-less venv problems.
+# System mode: requires a usable system Python 3.12+ and sudo.
+if [[ "$mode" == "system" ]]; then
+    py=""
+    if [[ -n "${EXPRA_SYSTEM_PYTHON:-}" ]]; then
+        py="$EXPRA_SYSTEM_PYTHON"
+        python_usable "$py" || { echo "ERROR: EXPRA_SYSTEM_PYTHON must be Python 3.12+ outside a virtual environment" >&2; exit 1; }
+    elif command -v python3 >/dev/null 2>&1 && python_usable "$(command -v python3)"; then
+        py="$(command -v python3)"
+    fi
+    [[ -n "$py" ]] || { echo "ERROR: --system requires an existing Python 3.12+ interpreter" >&2; exit 1; }
+    command -v sudo >/dev/null 2>&1 || { echo "sudo is required for --system" >&2; exit 1; }
+    sudo -H "$py" -m pip install --upgrade --upgrade-strategy eager "$wheel"
+    bin_dir="$($py -c 'import sysconfig; print(sysconfig.get_path("scripts"))')"
+else
     uv="$(command -v uv || true)"
     if [[ -z "$uv" ]]; then
         command -v curl >/dev/null 2>&1 || { echo "ERROR: curl is required to bootstrap uv" >&2; exit 1; }
@@ -60,22 +65,10 @@ if [[ -z "$py" ]]; then
         uv="$uv_dir/uv"
     fi
     venv_dir="${EXPRA_ENGINE_VENV:-$HOME/.local/share/expra-engine}"
-    "$uv" venv --python 3.12 "$venv_dir" >/dev/null
+    "$uv" venv --python 3.12 "$venv_dir" >/dev/null 2>&1 || "$uv" venv "$venv_dir" >/dev/null
     "$uv" pip install --python "$venv_dir/bin/python" --upgrade "$wheel" >/dev/null
     py="$venv_dir/bin/python"
     bin_dir="$venv_dir/bin"
-    uv_installed=1
-else
-    bin_dir="$($py -c 'import sysconfig; print(sysconfig.get_path("scripts", scheme="posix_user"))')"
-fi
-
-if [[ "${uv_installed:-0}" -eq 0 ]]; then
-    if [[ "$mode" == "system" ]]; then
-        command -v sudo >/dev/null 2>&1 || { echo "sudo is required for --system" >&2; exit 1; }
-        sudo -H "$py" -m pip install --upgrade --upgrade-strategy eager "$wheel"
-    else
-        "$py" -m pip install --user --upgrade --upgrade-strategy eager "$wheel"
-    fi
 fi
 
 expected_version="${wheel_name#expra_engine-}"
