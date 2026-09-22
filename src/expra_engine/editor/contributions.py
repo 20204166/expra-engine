@@ -8,6 +8,7 @@ presentation safety.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -158,6 +159,11 @@ class ContributionRegistry:
         if not referenced_ids.issubset(action_ids):
             missing = sorted(referenced_ids.difference(action_ids))[0]
             raise ValueError(f"Contribution references unknown action: {missing}")
+        shortcut_sequences = tuple(
+            self._shortcuts.normalize(item.sequence) for item in feature.shortcuts
+        )
+        if len(shortcut_sequences) != len(set(shortcut_sequences)):
+            raise ValueError(f"Feature contains duplicate shortcuts: {feature_id}")
         for shortcut in feature.shortcuts:
             self._shortcuts.validate(shortcut)
 
@@ -168,9 +174,7 @@ class ContributionRegistry:
         self._features[feature_id] = _FeatureRecord(
             feature=feature,
             action_ids=action_ids,
-            shortcut_sequences=tuple(
-                self._shortcuts.normalize(item.sequence) for item in feature.shortcuts
-            ),
+            shortcut_sequences=shortcut_sequences,
             menus=feature.menus,
             toolbars=feature.toolbars,
         )
@@ -269,12 +273,31 @@ class ShortcutRegistry:
         value = sequence.strip()
         if not value:
             raise ValueError("Shortcut sequence cannot be empty")
-        if value.startswith("<") and value.endswith(">"):
-            parts = value[1:-1].split("-")
-            parts = [part for part in parts if part.casefold() != "keypress"]
+        event_sequence = re.fullmatch(r"(?:<[^<>]*>)(?:\s*<[^<>]*>)*", value)
+        if event_sequence is not None:
             aliases = {"ctrl": "Control", "control": "Control", "alt": "Alt"}
-            parts = [aliases.get(part.lower(), part) for part in parts]
-            value = "<" + "-".join(parts) + ">"
+
+            def normalize_event(event: str) -> str:
+                parts = [part for part in re.split(r"[-\s]+", event[1:-1].strip()) if part]
+                parts = [aliases.get(part.lower(), part) for part in parts]
+                type_index = next(
+                    (
+                        index
+                        for index, part in enumerate(parts)
+                        if part.casefold() in {"key", "keypress"}
+                    ),
+                    None,
+                )
+                if type_index is not None:
+                    if type_index == len(parts) - 1:
+                        parts[type_index] = "KeyPress"
+                    else:
+                        parts.pop(type_index)
+                return "<" + "-".join(parts) + ">"
+
+            return " ".join(normalize_event(event) for event in re.findall(r"<[^<>]*>", value))
+        if len(value) == 1 and value.isascii() and value.isalnum():
+            value = f"<{value}>"
         return value
 
 

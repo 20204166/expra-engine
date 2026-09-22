@@ -21,21 +21,47 @@ class RuntimePreviewLoop:
 
     def start(self) -> None:
         self.stop()
-        self._after_id = self._root.after(16, self._tick)
+        if not self._root_exists():
+            return
+        try:
+            self._after_id = self._root.after(16, self._tick)
+        except (RuntimeError, tk.TclError):
+            if self._root_exists():
+                raise
+            self._after_id = None
 
     def stop(self) -> None:
         if self._after_id is not None:
-            with contextlib.suppress(tk.TclError):
+            with contextlib.suppress(RuntimeError, tk.TclError):
                 self._root.after_cancel(self._after_id)
             self._after_id = None
 
     def _tick(self) -> None:
         self._after_id = None
+        if not self._root_exists():
+            return
         if self._engine.run_state == EngineRunState.PLAY:
             self._engine.tick()
             self._render()
-        if self._engine.run_state in (EngineRunState.PLAY, EngineRunState.PAUSED):
-            self._after_id = self._root.after(16, self._tick)
+        if (
+            self._engine.run_state in (EngineRunState.PLAY, EngineRunState.PAUSED)
+            and self._root_exists()
+        ):
+            try:
+                self._after_id = self._root.after(16, self._tick)
+            except (RuntimeError, tk.TclError):
+                if self._root_exists():
+                    raise
+                self._after_id = None
+
+    def _root_exists(self) -> bool:
+        exists = getattr(self._root, "winfo_exists", None)
+        if exists is None:
+            return True
+        try:
+            return bool(exists())
+        except (RuntimeError, tk.TclError):
+            return False
 
 
 __all__ = ["RuntimePreviewLoop"]

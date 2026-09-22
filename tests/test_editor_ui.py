@@ -4,12 +4,15 @@ import tkinter as tk
 import unittest
 from contextlib import suppress
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any, cast
 
 from expra_engine.core.component import TransformComponent
 from expra_engine.core.component_schema import PropertyDescriptor
-from expra_engine.core.engine import Engine
+from expra_engine.core.engine import Engine, EngineRunState
 from expra_engine.core.scene import Scene
 from expra_engine.editor.assets import AssetEntry
+from expra_engine.editor.runtime_preview import RuntimePreviewLoop
 from expra_engine.filesystem import ResourceId
 from expra_engine.runtime.rendering import Color
 from expra_engine.runtime.script_component import ScriptComponent
@@ -32,6 +35,116 @@ def _display_available() -> bool:
 
 
 DISPLAY_AVAILABLE = _display_available()
+
+
+class RuntimePreviewLoopTests(unittest.TestCase):
+    def test_stop_clears_timer_when_root_is_already_destroyed(self) -> None:
+        class DeadRoot:
+            def after_cancel(self, _identifier: str) -> None:
+                raise RuntimeError("event loop is stopping")
+
+        loop = RuntimePreviewLoop(
+            DeadRoot(),
+            cast(Any, SimpleNamespace(run_state=EngineRunState.EDIT)),
+            lambda: None,
+        )
+        loop._after_id = "timer"
+
+        loop.stop()
+
+        self.assertIsNone(loop._after_id)
+
+    def test_start_ignores_destroyed_root(self) -> None:
+        class DeadRoot:
+            def after(self, _delay: int, _callback: object) -> str:
+                raise tk.TclError("event loop is stopping")
+
+            def winfo_exists(self) -> bool:
+                return False
+
+        loop = RuntimePreviewLoop(
+            DeadRoot(),
+            cast(Any, SimpleNamespace(run_state=EngineRunState.EDIT)),
+            lambda: None,
+        )
+
+        loop.start()
+
+        self.assertIsNone(loop._after_id)
+
+    def test_start_does_not_schedule_when_root_reports_destroyed(self) -> None:
+        class DeadRoot:
+            def after(self, _delay: int, _callback: object) -> str:
+                return "unexpected-timer"
+
+            def winfo_exists(self) -> bool:
+                return False
+
+        loop = RuntimePreviewLoop(
+            DeadRoot(),
+            cast(Any, SimpleNamespace(run_state=EngineRunState.PLAY)),
+            lambda: None,
+        )
+
+        loop.start()
+
+        self.assertIsNone(loop._after_id)
+
+    def test_tick_stops_rescheduling_when_root_is_destroyed(self) -> None:
+        class DeadRoot:
+            def after(self, _delay: int, _callback: object) -> str:
+                raise RuntimeError("event loop is stopping")
+
+            def winfo_exists(self) -> bool:
+                return False
+
+        engine = cast(Any, SimpleNamespace(run_state=EngineRunState.PLAY, tick=lambda: None))
+        rendered: list[str] = []
+        loop = RuntimePreviewLoop(DeadRoot(), engine, lambda: rendered.append("rendered"))
+
+        loop._tick()
+
+        self.assertEqual(rendered, [])
+        self.assertIsNone(loop._after_id)
+
+    def test_start_preserves_live_root_scheduling_errors(self) -> None:
+        class BrokenRoot:
+            def after(self, _delay: int, _callback: object) -> str:
+                raise tk.TclError("event loop is unavailable")
+
+            def winfo_exists(self) -> bool:
+                return True
+
+        loop = RuntimePreviewLoop(
+            BrokenRoot(),
+            cast(Any, SimpleNamespace(run_state=EngineRunState.PLAY)),
+            lambda: None,
+        )
+
+        with self.assertRaises(tk.TclError):
+            loop.start()
+
+    def test_tick_does_not_update_engine_when_root_reports_destroyed(self) -> None:
+        class DeadRoot:
+            def after(self, _delay: int, _callback: object) -> str:
+                return "unexpected-timer"
+
+            def winfo_exists(self) -> bool:
+                return False
+
+        ticks: list[str] = []
+        engine = cast(
+            Any,
+            SimpleNamespace(run_state=EngineRunState.PLAY, tick=lambda: ticks.append("tick")),
+        )
+        rendered: list[str] = []
+        loop = RuntimePreviewLoop(DeadRoot(), engine, lambda: rendered.append("rendered"))
+
+        loop._tick()
+
+        self.assertEqual(ticks, [])
+        self.assertEqual(rendered, [])
+        self.assertIsNone(loop._after_id)
 
 
 def test_inspector_value_conversion_uses_descriptor_rejection_policy() -> None:

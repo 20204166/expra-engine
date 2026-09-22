@@ -2,14 +2,14 @@
 
 import unittest
 
-from expra_engine.core.entity import Entity
 from expra_engine.core.component import TransformComponent
+from expra_engine.core.entity import Entity
 from expra_engine.core.scene import Scene
 from expra_engine.editor.commands import (
+    AddComponentCommand,
     Command,
     CommandStack,
     DeleteEntityCommand,
-    AddComponentCommand,
     RemoveComponentCommand,
     RenameEntityCommand,
     SetComponentPropertyCommand,
@@ -171,7 +171,9 @@ class ComponentCommandTests(unittest.TestCase):
         entity.add_component(transform)
         stack = CommandStack()
 
-        stack.push(SetComponentPropertyCommand(scene, entity.entity_id, TransformComponent, "x", 12.0))
+        stack.push(
+            SetComponentPropertyCommand(scene, entity.entity_id, TransformComponent, "x", 12.0)
+        )
         self.assertEqual(transform.x, 12.0)
         stack.undo()
         self.assertEqual(transform.x, 0.0)

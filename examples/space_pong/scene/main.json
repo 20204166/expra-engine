@@ -58,7 +58,7 @@
           "type": "primitive",
           "enabled": true,
           "kind": "rectangle",
-          "width": 100.0,
+          "width": 60.0,
           "height": 60.0,
           "radius": null,
           "fill": [
@@ -76,6 +76,27 @@
           "outline_width": 0.5,
           "layer": 0,
           "visible": true
+        },
+        {
+          "type": "area",
+          "enabled": true,
+          "priority": 0,
+          "gravity_mode": "disabled",
+          "gravity": 0.0,
+          "gravity_direction": [
+            0.0,
+            -1.0
+          ],
+          "gravity_point": false,
+          "gravity_point_center": [
+            0.0,
+            0.0
+          ],
+          "gravity_point_unit_distance": 0.0,
+          "linear_damp_mode": "disabled",
+          "linear_damp": 0.0,
+          "angular_damp_mode": "disabled",
+          "angular_damp": 0.0
         }
       ],
       "tags": [
@@ -131,7 +152,7 @@
         {
           "type": "transform",
           "enabled": true,
-          "x": -45.0,
+          "x": -29.0,
           "y": 0.0,
           "rotation": 0.0,
           "scale_x": 1.0,
@@ -187,7 +208,7 @@
         {
           "type": "transform",
           "enabled": true,
-          "x": 45.0,
+          "x": 29.0,
           "y": 0.0,
           "rotation": 0.0,
           "scale_x": 1.0,
@@ -226,6 +247,21 @@
           "trigger": false,
           "layer": 1,
           "mask": 1
+        },
+        {
+          "type": "sprite",
+          "enabled": true,
+          "asset": "",
+          "tint": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "width": 1.0,
+          "height": 1.0,
+          "layer": 0,
+          "visible": true
         }
       ],
       "tags": [

@@ -143,6 +143,25 @@ class ContributionRegistryTests(unittest.TestCase):
             registry.register(feature)
         self.assertEqual(actions.registered_ids(), ())
 
+    def test_duplicate_shortcuts_within_feature_fail_before_registration(self) -> None:
+        actions = ButtonCoordinator()
+        shortcuts = ShortcutRegistry()
+        registry = ContributionRegistry(actions, shortcuts=shortcuts)
+        feature = Feature(
+            "example",
+            (EditorActionSpec("editor.example", lambda: None),),
+            (
+                ShortcutContribution("<Control-KeyPress-e>", "editor.example"),
+                ShortcutContribution("<Control-e>", "editor.example"),
+            ),
+        )
+
+        with self.assertRaises(ValueError):
+            registry.register(feature)
+
+        self.assertEqual(actions.registered_ids(), ())
+        self.assertEqual(shortcuts.registered_sequences(), ())
+
     def test_registry_exposes_owned_surface_contributions(self) -> None:
         actions = ButtonCoordinator()
         registry = ContributionRegistry(actions)
@@ -251,6 +270,45 @@ class ToolbarStyleTests(unittest.TestCase):
         self.assertEqual(shortcuts.registered_sequences(), ("<Control-z>",))
         with self.assertRaises(ValueError):
             shortcuts.register(ShortcutContribution("<Control-z>", "redo"))
+
+    def test_shortcut_aliases_normalize_to_one_sequence(self) -> None:
+        aliases = ("<Control-Key-e>", "<Control KeyPress e>")
+
+        for alias in aliases:
+            with self.subTest(alias=alias):
+                shortcuts = ShortcutRegistry()
+                shortcuts.register(ShortcutContribution(alias, "first"))
+
+                with self.assertRaises(ValueError):
+                    shortcuts.register(ShortcutContribution("<Control-e>", "second"))
+
+                self.assertEqual(shortcuts.registered_sequences(), ("<Control-e>",))
+
+    def test_printable_shortcut_aliases_normalize_to_one_sequence(self) -> None:
+        shortcuts = ShortcutRegistry()
+        shortcuts.register(ShortcutContribution("e", "first"))
+
+        with self.assertRaises(ValueError):
+            shortcuts.register(ShortcutContribution("<KeyPress-e>", "second"))
+
+        self.assertEqual(shortcuts.registered_sequences(), ("<e>",))
+
+    def test_shortcut_normalization_preserves_punctuation_and_sequences(self) -> None:
+        for sequence in ("+", ">", "[", "-"):
+            with self.subTest(sequence=sequence):
+                self.assertEqual(ShortcutRegistry.normalize(sequence), sequence)
+
+        self.assertEqual(ShortcutRegistry.normalize("<KeyPress>"), "<KeyPress>")
+        self.assertEqual(ShortcutRegistry.normalize("<Key>"), "<KeyPress>")
+        self.assertEqual(ShortcutRegistry.normalize("<Control-KeyPress>"), "<Control-KeyPress>")
+        self.assertEqual(
+            ShortcutRegistry.normalize("<Control-z> <Control-x>"),
+            "<Control-z> <Control-x>",
+        )
+        self.assertEqual(
+            ShortcutRegistry.normalize("<Control-z><Control-x>"),
+            "<Control-z> <Control-x>",
+        )
 
     def test_shortcut_dispatch_respects_disabled_action(self) -> None:
         actions = ButtonCoordinator()

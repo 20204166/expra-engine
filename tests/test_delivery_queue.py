@@ -8,6 +8,7 @@ import threading
 import tkinter as tk
 import unittest
 from collections.abc import Callable
+from queue import Queue
 from typing import TYPE_CHECKING, cast
 from unittest.mock import Mock
 
@@ -174,6 +175,70 @@ class TkDeliveryQueueTests(unittest.TestCase):
         q.close()
         q.close()  # must not raise
         self.assertTrue(q.is_closed)
+
+    def test_close_race_does_not_leave_callback_after_close(self) -> None:
+        q, _widget = self._make_queue()
+        entered_put = threading.Event()
+        release_put = threading.Event()
+
+        class BlockingQueue(Queue[Callable[[], None]]):
+            def put(
+                self,
+                item: Callable[[], None],
+                block: bool = True,
+                timeout: float | None = None,
+            ) -> None:
+                entered_put.set()
+                release_put.wait(timeout=1)
+                super().put(item, block, timeout)
+
+        q._callbacks = BlockingQueue()  # type: ignore[attr-defined]
+        worker = threading.Thread(target=lambda: q(lambda: None))
+        worker.start()
+        self.assertTrue(entered_put.wait(1))
+
+        closer = threading.Thread(target=q.close)
+        closer.start()
+        release_put.set()
+        worker.join(1)
+        closer.join(1)
+
+        self.assertTrue(q.is_closed)
+        self.assertTrue(q._callbacks.empty())  # type: ignore[attr-defined]
+
+    def test_constructor_failure_closes_queue(self) -> None:
+        class BrokenWidget(FakeWidget):
+            def after(self, _delay: int, _callback: Callable[[], None]) -> str:
+                raise tk.TclError("event loop is stopping")
+
+        from expra_engine.editor.delivery import TkDeliveryQueue
+
+        q = TkDeliveryQueue(cast(tk.Misc, BrokenWidget()))
+
+        self.assertTrue(q.is_closed)
+        q(lambda: None)
+        self.assertTrue(q._callbacks.empty())  # type: ignore[attr-defined]
+
+    def test_reschedule_failure_discards_callbacks_queued_during_failure(self) -> None:
+        class FailingWidget(FakeWidget):
+            queue: "TkDeliveryQueue | None" = None
+
+            def after(self, delay: int, callback: Callable[[], None]) -> str:
+                if delay == 25:
+                    assert self.queue is not None
+                    self.queue(lambda: None)
+                    raise tk.TclError("event loop is stopping")
+                return super().after(delay, callback)
+
+        from expra_engine.editor.delivery import TkDeliveryQueue
+
+        widget = FailingWidget()
+        q = TkDeliveryQueue(cast(tk.Misc, widget))
+        widget.queue = q
+        q._drain()  # type: ignore[attr-defined]
+
+        self.assertTrue(q.is_closed)
+        self.assertTrue(q._callbacks.empty())  # type: ignore[attr-defined]
 
 
 if __name__ == "__main__":

@@ -16,14 +16,14 @@ from typing import Any
 from expra_engine.core.component_schema import component_type_spec
 
 __all__ = (
+    "AddComponentCommand",
     "Command",
     "CommandStack",
     "DeleteEntityCommand",
-    "RenameEntityCommand",
-    "SetExposedValueCommand",
-    "SetComponentPropertyCommand",
-    "AddComponentCommand",
     "RemoveComponentCommand",
+    "RenameEntityCommand",
+    "SetComponentPropertyCommand",
+    "SetExposedValueCommand",
     "apply_component_change",
     "remove_component",
 )
@@ -298,7 +298,9 @@ class RemoveComponentCommand(Command):
 
     def execute(self) -> None:
         entity = self._scene.find_entity(self._entity_id)
-        if entity is None or not any(component is self._component for component in entity.components):
+        if entity is None or not any(
+            component is self._component for component in entity.components
+        ):
             return
         from expra_engine.core.component_schema import registered_component_specs
 
@@ -329,7 +331,9 @@ class RemoveComponentCommand(Command):
         return f"Remove {type(self._component).__name__}"
 
 
-def apply_component_change(window: Any, entity_id: str, component_name: str, field: str, value: Any) -> None:
+def apply_component_change(
+    window: Any, entity_id: str, component_name: str, field: str, value: Any
+) -> None:
     if window._engine.run_state.name != "EDIT":
         return
     scene = window._engine.edit_scene
@@ -339,7 +343,9 @@ def apply_component_change(window: Any, entity_id: str, component_name: str, fie
         return
     if scene is None:
         return
-    window._command_stack.push(SetComponentPropertyCommand(scene, entity_id, spec.cls, field, value))
+    window._command_stack.push(
+        SetComponentPropertyCommand(scene, entity_id, spec.cls, field, value)
+    )
     window._present_all()
 
 
