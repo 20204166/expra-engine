@@ -39,6 +39,7 @@ python_usable() {
 }
 
 py=""
+uv_installed=0
 if [[ -n "${EXPRA_SYSTEM_PYTHON:-}" ]]; then
     py="$EXPRA_SYSTEM_PYTHON"
     python_usable "$py" || { echo "ERROR: EXPRA_SYSTEM_PYTHON must be Python 3.12+ outside a virtual environment" >&2; exit 1; }
@@ -63,15 +64,18 @@ if [[ -z "$py" ]]; then
     "$uv" pip install --python "$venv_dir/bin/python" --upgrade "$wheel" >/dev/null
     py="$venv_dir/bin/python"
     bin_dir="$venv_dir/bin"
+    uv_installed=1
 else
     bin_dir="$($py -c 'import sysconfig; print(sysconfig.get_path("scripts", scheme="posix_user"))')"
 fi
 
-if [[ "$mode" == "system" ]]; then
-    command -v sudo >/dev/null 2>&1 || { echo "sudo is required for --system" >&2; exit 1; }
-    sudo -H "$py" -m pip install --upgrade --upgrade-strategy eager "$wheel"
-else
-    "$py" -m pip install --user --upgrade --upgrade-strategy eager "$wheel"
+if [[ "${uv_installed:-0}" -eq 0 ]]; then
+    if [[ "$mode" == "system" ]]; then
+        command -v sudo >/dev/null 2>&1 || { echo "sudo is required for --system" >&2; exit 1; }
+        sudo -H "$py" -m pip install --upgrade --upgrade-strategy eager "$wheel"
+    else
+        "$py" -m pip install --user --upgrade --upgrade-strategy eager "$wheel"
+    fi
 fi
 
 expected_version="${wheel_name#expra_engine-}"
