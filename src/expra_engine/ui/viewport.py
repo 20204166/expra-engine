@@ -406,13 +406,18 @@ class ViewportPanel(tk.Frame):
             self._delete_canvas_entry(self._canvas_items.pop(stale))
 
         # Collider overlays — cheap (few items), always refresh.
+        # Always clear collider outlines; only redraw them in editor mode.
+        canvas.delete("collider")
         if self._editor_overlays:
-            canvas.delete("collider")
             self._draw_colliders()
 
-        # Icon markers for non-visual entities — retained, binds only on creation.
+        # Icon markers — clear when overlays are turned off, draw when on.
         if self._editor_overlays:
             self._draw_entity_markers(current_keys)
+        else:
+            for eid in list(self._marker_entries):
+                canvas.delete(f"entity:{eid}")
+            self._marker_entries.clear()
 
     def _draw_grid(self, w: int, h: int) -> None:
         canvas = self._canvas
