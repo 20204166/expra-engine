@@ -22,6 +22,7 @@ from expra_engine.ui.styles import (
     SPACING,
     STYLE_CHECKBUTTON,
     STYLE_ENTRY,
+    STYLE_NEUTRAL_BUTTON,
 )
 
 
@@ -77,20 +78,6 @@ class InspectorPanel(tk.Frame):
         )
         self._scroll_canvas.configure(bg=c["panel_bg"], highlightthickness=0)
         self._content.configure(bg=c["panel_bg"])
-        self._bind_mousewheel(self._scroll_canvas)
-        self._bind_mousewheel(self._content)
-
-    def _bind_mousewheel(self, widget: Any) -> None:
-        widget.bind("<MouseWheel>", self._on_mousewheel, add="+")
-        widget.bind("<Button-4>", self._on_mousewheel, add="+")
-        widget.bind("<Button-5>", self._on_mousewheel, add="+")
-
-    def _on_mousewheel(self, event: Any) -> str:
-        delta = -1 if getattr(event, "num", None) == 5 else 1
-        if getattr(event, "delta", 0):
-            delta = -1 if event.delta > 0 else 1
-        self._scroll_canvas.yview_scroll(delta, "units")
-        return "break"
 
     def render(self, entity: Entity | None) -> None:
         """Render one entity or a useful no-selection state."""
@@ -256,6 +243,7 @@ class InspectorPanel(tk.Frame):
             ttk.Button(
                 header,
                 text="Remove",
+                style=STYLE_NEUTRAL_BUTTON,
                 command=lambda name=spec.name: self._emit_remove_component(entity.entity_id, name),
             ).pack(side="right")
         form = self._form()

@@ -182,5 +182,268 @@ class TestRenderIntentMerge(unittest.TestCase):
             a.merge(b)
 
 
+class TestUICoordinatorObserver(unittest.TestCase):
+    """Observer must record commits, coalesced, stale, and rejected events."""
+
+    def test_commit_is_recorded_by_shared_observer(self) -> None:
+        from expra_engine.observability import ObservabilityWatcher
+
+        observer = ObservabilityWatcher()
+        coord = UICoordinator(observer=observer)
+        coord.request(RenderIntent("hierarchy"), lambda _: None)
+        metric = observer.snapshot().metrics[0]
+        self.assertEqual(metric.target, "ui:render:hierarchy")
+        self.assertEqual(metric.successes, 1)
+
+    def test_coalesced_stale_and_rejected_events_all_observed(self) -> None:
+        from expra_engine.observability import ObservabilityWatcher
+
+        observer = ObservabilityWatcher()
+        coord = UICoordinator(observer=observer)
+        # Coalesced: two requests inside a batch → one commit
+        coord.begin_batch()
+        coord.request(RenderIntent("viewport"), lambda _: None)
+        coord.request(RenderIntent("viewport"), lambda _: None)
+        coord.end_batch()
+        # Stale: generation too old
+        coord.invalidate("viewport", 10)
+        coord.request(RenderIntent("viewport", generation=2), lambda _: None)
+        # Rejected: after shutdown
+        coord.shutdown()
+        coord.request(RenderIntent("viewport"), lambda _: None)
+
+        metric = observer.snapshot().metrics[0]
+        self.assertGreaterEqual(metric.coalesced, 1)
+        self.assertGreaterEqual(metric.stale, 1)
+        self.assertGreaterEqual(metric.rejected, 1)
+
+
+class TestUICoordinatorFieldMerge(unittest.TestCase):
+    """Coalescing must union components, OR layout_changed, and take max priority."""
+
+    def test_merge_unions_components_layout_and_priority(self) -> None:
+        received: list[RenderIntent] = []
+        coord = UICoordinator()
+        coord.begin_batch()
+        coord.request(
+            RenderIntent(
+                target="inspector",
+                payload="first",
+                payload_set=True,
+                components=frozenset({"transform"}),
+                priority=1,
+            ),
+            received.append,
+        )
+        coord.request(
+            RenderIntent(
+                target="inspector",
+                payload="second",
+                payload_set=True,
+                components=frozenset({"sprite"}),
+                layout_changed=True,
+                priority=3,
+            ),
+            received.append,
+        )
+        coord.end_batch()
+
+        self.assertEqual(len(received), 1)
+        merged = received[0]
+        self.assertEqual(merged.payload, "second")
+        self.assertEqual(merged.components, frozenset({"transform", "sprite"}))
+        self.assertTrue(merged.layout_changed)
+        self.assertEqual(merged.priority, 3)
+
+
+class TestUICoordinatorPendingBounded(unittest.TestCase):
+    """100 requests for the same target must stay bounded to 1 pending + 1 commit."""
+
+    def test_hundred_requests_produce_one_commit(self) -> None:
+        received: list[str] = []
+        coord = UICoordinator()
+        coord.begin_batch()
+        for i in range(100):
+            coord.request(
+                RenderIntent(target="console", payload=f"line-{i}", payload_set=True),
+                lambda intent: received.append(str(intent.payload)),
+            )
+        self.assertEqual(coord.pending_count, 1)
+        coord.end_batch()
+        self.assertEqual(received, ["line-99"])
+        self.assertEqual(coord.render_commits, 1)
+
+
+class TestUICoordinatorReentrancy(unittest.TestCase):
+    """A render callback that queues another request must be committed in the same flush."""
+
+    def test_request_inside_apply_callback_is_committed(self) -> None:
+        received: list[str] = []
+        coord = UICoordinator()
+
+        def apply_hierarchy(_intent: RenderIntent) -> None:
+            received.append("hierarchy")
+            coord.request(
+                RenderIntent(target="status", payload="updated", payload_set=True),
+                lambda intent: received.append(str(intent.payload)),
+            )
+
+        coord.begin_batch()
+        coord.request(RenderIntent(target="hierarchy"), apply_hierarchy)
+        coord.end_batch()
+
+        self.assertEqual(received, ["hierarchy", "updated"])
+        self.assertEqual(coord.pending_count, 0)
+        self.assertEqual(coord.render_commits, 2)
+
+
+class TestUICoordinatorNonePayload(unittest.TestCase):
+    """Explicit None payload with payload_set=True must clear a prior payload."""
+
+    def test_none_payload_clears_previous(self) -> None:
+        received: list[RenderIntent] = []
+        coord = UICoordinator()
+        coord.begin_batch()
+        coord.request(
+            RenderIntent(target="inspector", payload="entity", payload_set=True),
+            received.append,
+        )
+        coord.request(
+            RenderIntent(target="inspector", payload=None, payload_set=True),
+            received.append,
+        )
+        coord.end_batch()
+        self.assertEqual(len(received), 1)
+        self.assertIsNone(received[0].payload)
+        self.assertTrue(received[0].payload_set)
+
+
+class TestUICoordinatorMetricsExtended(unittest.TestCase):
+    """pending_peak, commit duration, failure counter, and thread identity."""
+
+    def test_pending_peak_and_commit_duration_tracked(self) -> None:
+        coord = UICoordinator()
+        coord.begin_batch()
+        coord.request(RenderIntent(target="assets"), lambda _: None)
+        coord.end_batch()
+        self.assertEqual(coord.pending_peak, 1)
+        self.assertGreaterEqual(coord.last_commit_seconds, 0.0)
+
+    def test_failed_commit_increments_failure_counter(self) -> None:
+        coord = UICoordinator()
+
+        def bad_apply(_intent: RenderIntent) -> None:
+            raise RuntimeError("widget gone")
+
+        coord.request(RenderIntent(target="viewport"), bad_apply)
+        self.assertEqual(coord.render_failures, 1)
+
+    def test_commit_runs_on_requesting_thread(self) -> None:
+        import threading
+
+        coord = UICoordinator()
+        committed_on: list[Any] = []
+        coord.request(
+            RenderIntent(target="toolbar"),
+            lambda _intent: committed_on.append(threading.current_thread()),
+        )
+        self.assertEqual(committed_on, [threading.current_thread()])
+
+
+class TestUICoordinatorPriorityFlush(unittest.TestCase):
+    """Higher-priority targets must be committed before lower-priority ones."""
+
+    def test_flush_commits_by_descending_priority(self) -> None:
+        committed: list[str] = []
+        coord = UICoordinator()
+        coord.begin_batch()
+        coord.request(
+            RenderIntent(target="console", priority=1),
+            lambda _: committed.append("console"),
+        )
+        coord.request(
+            RenderIntent(target="status", priority=5),
+            lambda _: committed.append("status"),
+        )
+        coord.request(
+            RenderIntent(target="toolbar", priority=3),
+            lambda _: committed.append("toolbar"),
+        )
+        coord.end_batch()
+        self.assertEqual(committed, ["status", "toolbar", "console"])
+
+
+class TestUICoordinatorTransitions(unittest.TestCase):
+    """schedule_transition / cancel_transition must manage named timer slots."""
+
+    def _make(self) -> "tuple[UICoordinator, list[tuple[int, Any]], list[Any]]":
+        scheduled: list[tuple[int, Any]] = []
+        cancelled: list[Any] = []
+        timer_id = 0
+
+        def fake_schedule(delay: int, callback: Any) -> int:
+            nonlocal timer_id
+            timer_id += 1
+            scheduled.append((delay, callback))
+            return timer_id
+
+        def fake_cancel(identifier: Any) -> bool:
+            cancelled.append(identifier)
+            return True
+
+        coord = UICoordinator(schedule=fake_schedule, cancel=fake_cancel)
+        return coord, scheduled, cancelled
+
+    def test_schedule_transition_fires_after_delay(self) -> None:
+        coord, scheduled, _ = self._make()
+        applied: list[str] = []
+        coord.schedule_transition("play-start", 300, lambda: applied.append("done"))
+        self.assertEqual(len(scheduled), 1)
+        self.assertEqual(scheduled[0][0], 300)
+        self.assertEqual(applied, [])
+        scheduled[0][1]()  # fire the timer
+        self.assertEqual(applied, ["done"])
+
+    def test_schedule_transition_supersedes_pending(self) -> None:
+        coord, scheduled, cancelled = self._make()
+        applied: list[str] = []
+        coord.schedule_transition("status", 200, lambda: applied.append("first"))
+        coord.schedule_transition("status", 200, lambda: applied.append("second"))
+        self.assertEqual(len(cancelled), 1, "first timer must be cancelled")
+        scheduled[1][1]()  # fire only the second
+        self.assertEqual(applied, ["second"])
+
+    def test_schedule_different_names_are_independent(self) -> None:
+        coord, scheduled, cancelled = self._make()
+        coord.schedule_transition("play", 200, lambda: None)
+        coord.schedule_transition("scan", 100, lambda: None)
+        self.assertEqual(len(cancelled), 0, "different names must not cancel each other")
+        self.assertEqual(len(scheduled), 2)
+
+    def test_cancel_transition_cancels_the_timer(self) -> None:
+        coord, scheduled, cancelled = self._make()
+        coord.schedule_transition("status", 200, lambda: None)
+        coord.cancel_transition("status")
+        self.assertEqual(len(cancelled), 1)
+        self.assertEqual(cancelled[0], 1)
+
+    def test_cancel_transition_unknown_name_is_safe(self) -> None:
+        coord, _, _ = self._make()
+        coord.cancel_transition("nonexistent")  # must not raise
+
+    def test_shutdown_cancels_all_pending_transitions(self) -> None:
+        coord, _, cancelled = self._make()
+        coord.schedule_transition("play", 200, lambda: None)
+        coord.schedule_transition("scan", 100, lambda: None)
+        coord.shutdown()
+        self.assertEqual(len(cancelled), 2)
+
+    def test_no_schedule_callable_means_transitions_are_noop(self) -> None:
+        coord = UICoordinator()  # no schedule/cancel injected
+        coord.schedule_transition("status", 200, lambda: None)  # must not raise
+        coord.cancel_transition("status")  # must not raise
+        coord.shutdown()  # must not raise
+
+
 if __name__ == "__main__":
     unittest.main()

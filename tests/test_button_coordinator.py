@@ -144,5 +144,82 @@ class TestButtonCoordinatorUnregister(unittest.TestCase):
         self.assertIn("b", coord.registered_ids())
 
 
+class TestButtonCoordinatorObserver(unittest.TestCase):
+    """Observer integration: dispatches and rejections must be recorded."""
+
+    def _make(self) -> "tuple[ButtonCoordinator, Any]":
+        from expra_engine.observability import ObservabilityWatcher
+
+        observer = ObservabilityWatcher()
+        coord = ButtonCoordinator(observer=observer)
+        return coord, observer
+
+    def test_dispatch_is_recorded_by_observer(self) -> None:
+        coord, observer = self._make()
+        coord.register("entity:add", lambda: None)
+        coord.dispatch("entity:add")
+        metric = observer.snapshot().metrics[0]
+        self.assertEqual(metric.target, "ui:action:entity:add")
+        self.assertEqual(metric.successes, 1)
+
+    def test_disabled_dispatch_is_observed_as_rejected(self) -> None:
+        coord, observer = self._make()
+        coord.register("entity:add", lambda: None, enabled=False)
+        coord.dispatch("entity:add")
+        metric = observer.snapshot().metrics[0]
+        self.assertEqual(metric.rejected, 1)
+
+
+class TestButtonCoordinatorTclError(unittest.TestCase):
+    """Tk widget errors must never crash the coordinator; dead widgets are pruned."""
+
+    def _tcl_widget(self, raises_on_config: bool = False) -> Any:
+        """Return a fake widget whose config() either works or raises TclError."""
+        import tkinter as tk
+
+        class _W:
+            def __init__(self) -> None:
+                self._exists = True
+                self.calls: list[Any] = []
+
+            def winfo_exists(self) -> bool:
+                return self._exists
+
+            def config(self, **options: Any) -> None:
+                if raises_on_config:
+                    raise tk.TclError("invalid command name")
+                self.calls.append(options)
+
+            configure = config
+
+        return _W()
+
+    def test_replace_prunes_widget_that_fails_state_update(self) -> None:
+        coord = ButtonCoordinator()
+        widget = self._tcl_widget(raises_on_config=True)
+        coord.register("scene:save", lambda: None)
+        # Bind succeeds at first (widget exists); later a replace triggers state re-sync.
+        # The TclError during the re-sync must drop the widget from tracking.
+        coord._actions["scene:save"].widgets.append(widget)
+        coord.register("scene:save", lambda: None, replace=True)
+        self.assertEqual(coord._actions["scene:save"].widgets, [])
+
+    def test_bind_unknown_action_raises_key_error(self) -> None:
+        coord = ButtonCoordinator()
+        widget = self._tcl_widget()
+        with self.assertRaises(KeyError):
+            coord.bind(widget, "nonexistent:action")
+
+    def test_bind_tcl_error_drops_widget(self) -> None:
+        coord = ButtonCoordinator()
+        coord.register("entity:delete", lambda: None)
+        widget = self._tcl_widget(raises_on_config=True)
+        coord.bind(widget, "entity:delete")
+        # Widget raised TclError during config() — must be dropped, not tracked.
+        self.assertEqual(coord._actions["entity:delete"].widgets, [])
+        # But the action itself must still be dispatchable.
+        self.assertTrue(coord.dispatch("entity:delete"))
+
+
 if __name__ == "__main__":
     unittest.main()

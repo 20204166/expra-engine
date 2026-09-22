@@ -29,7 +29,7 @@ class ConsolePanel(tk.Frame):
         self._colors = c
 
         header = tk.Frame(self, bg=c["panel_bg"])
-        header.pack(fill="x", padx=SPACING["card_pad_x"], pady=(6, 4))
+        header.pack(fill="x", padx=SPACING["card_pad_x"], pady=(SPACING["card_pad_y"], 6))
         tk.Label(
             header, text="CONSOLE", font=FONTS["panel_header"], bg=c["panel_bg"], fg=c["ink"]
         ).pack(side="left")

@@ -72,16 +72,35 @@ class PanelRouter:
         self._loaders[key] = (loader, on_loaded, cache_policy)
 
     def show(self, key: str) -> bool:
-        """Show the named panel and hide all others. Returns True if key found."""
+        """Show the named panel and hide all others.
+
+        Returns True on success, False when the key is not registered or when
+        packing the destination fails (previous panel is restored in that case).
+        active_key is only updated after the destination is successfully packed.
+        """
         if key not in self._panels:
             return False
-        for panel_key, panel in self._panels.items():
-            if panel_key == key:
+        if key == self._active_key:
+            return True
+
+        previous_key = self._active_key
+        previous_panel = self._panels.get(previous_key) if previous_key else None
+
+        # Hide the current panel before showing the new one.
+        if previous_panel is not None:
+            with contextlib.suppress(Exception):
+                previous_panel.pack_forget()
+
+        # Try to pack the destination; restore previous on failure.
+        destination = self._panels[key]
+        try:
+            destination.pack(fill="both", expand=True)
+        except Exception:
+            if previous_panel is not None:
                 with contextlib.suppress(Exception):
-                    panel.pack(fill="both", expand=True)
-            else:
-                with contextlib.suppress(Exception):
-                    panel.pack_forget()
+                    previous_panel.pack(fill="both", expand=True)
+            return False
+
         self._active_key = key
         loader_entry = self._loaders.get(key)
         if loader_entry is not None and self._coordinator is not None:
