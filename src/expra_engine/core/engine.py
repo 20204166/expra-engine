@@ -95,9 +95,12 @@ class Engine:
         # Pluggable runtime systems
         self._systems: list[RuntimeSystem] = []
         from expra_engine.runtime.animated_sprite_system import AnimatedSpriteSystem
+        from expra_engine.runtime.audio_2d import Audio2DSystem
 
         self._animated_sprite_system = AnimatedSpriteSystem()
         self.add_system(self._animated_sprite_system)
+        self._audio_2d_system = Audio2DSystem()
+        self.add_system(self._audio_2d_system)
         self._behaviour_system: BehaviourSystem | None = None
         self._input_map = InputMap()
         self._quit_requested = False
@@ -141,6 +144,11 @@ class Engine:
     def animated_sprite_system(self) -> Any:
         """Built-in owner of transient AnimatedSprite2D playback state."""
         return self._animated_sprite_system
+
+    @property
+    def audio_2d_system(self) -> Any:
+        """Built-in owner of transient 2D spatial-audio playback state."""
+        return self._audio_2d_system
 
     @property
     def interpolation_fraction(self) -> float:

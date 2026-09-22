@@ -8,9 +8,11 @@ all entity IDs and component state.
 from __future__ import annotations
 
 import contextlib
+import math
 import uuid
 from typing import Any
 
+from expra_engine.core.component import TransformComponent
 from expra_engine.core.entity import Entity
 from expra_engine.core.scene.camera import SceneCamera
 
@@ -140,6 +142,55 @@ class Scene:
                 return entity
         return None
 
+    def world_pose(self, entity_id: str) -> tuple[float, float, float]:
+        """Return an entity's authoritative parent-composed 2D pose.
+
+        Missing or disabled transforms use the identity pose, matching render
+        extraction. Missing parents are treated as roots; malformed cycles are
+        rejected rather than recursing indefinitely.
+        """
+        entities = {entity.entity_id: entity for entity in self._entities}
+        active: set[str] = set()
+
+        def resolve(current_id: str) -> tuple[float, float, float, float, float]:
+            if current_id in active:
+                raise ValueError("entity hierarchy contains a cycle")
+            entity = entities.get(current_id)
+            if entity is None:
+                raise KeyError(f"entity not found: {current_id!r}")
+            active.add(current_id)
+            transform = entity.get_component(TransformComponent)
+            if transform is None or not transform.enabled:
+                local = (0.0, 0.0, 0.0, 1.0, 1.0)
+            else:
+                values: tuple[float, float, float, float, float] = (
+                    float(transform.x),
+                    float(transform.y),
+                    float(transform.rotation),
+                    float(transform.scale_x),
+                    float(transform.scale_y),
+                )
+                if not all(math.isfinite(value) for value in values):
+                    raise ValueError("transform values must be finite")
+                local = values
+            x, y, rotation, scale_x, scale_y = local
+            parent = entities.get(entity.parent_id) if entity.parent_id is not None else None
+            if parent is not None:
+                px, py, protation, pscale_x, pscale_y = resolve(parent.entity_id)
+                angle = math.radians(protation)
+                x, y = (
+                    px + (x * pscale_x) * math.cos(angle) - (y * pscale_y) * math.sin(angle),
+                    py + (x * pscale_x) * math.sin(angle) + (y * pscale_y) * math.cos(angle),
+                )
+                rotation += protation
+                scale_x *= pscale_x
+                scale_y *= pscale_y
+            active.remove(current_id)
+            return x, y, rotation, scale_x, scale_y
+
+        x, y, rotation, _scale_x, _scale_y = resolve(entity_id)
+        return x, y, rotation
+
     def entities_by_layer(self) -> list[Entity]:
         """Return all entities sorted ascending by layer."""
         return sorted(self._entities, key=lambda entity: entity.layer)
@@ -151,7 +202,7 @@ class Scene:
         return None
 
     def to_dict(self) -> dict[str, Any]:
-        data = {
+        data: dict[str, Any] = {
             "scene_id": self.scene_id,
             "name": self.name,
             "entities": [e.to_dict() for e in self._entities],

@@ -119,6 +119,7 @@ def component_from_dict(data: dict[str, Any]) -> Component:
     """Deserialize a component from its dict representation."""
     _register_visual_components()
     _register_physics_components()
+    _register_audio_components()
     component_type = data.get("type", "")
     if component_type == "script":
         from expra_engine.runtime.script_component import (
@@ -152,6 +153,7 @@ def registered_component_types() -> tuple[tuple[str, type[Component]], ...]:
     """Return registered component types in registration order for editor tooling."""
     _register_visual_components()
     _register_physics_components()
+    _register_audio_components()
     return tuple(_COMPONENT_REGISTRY.items())
 
 
@@ -294,3 +296,59 @@ def _register_physics_components() -> None:
         register_component_spec(
             ComponentTypeSpec("area", AreaComponent, area_fields, (ColliderComponent,))
         )
+
+
+def _register_audio_components() -> None:
+    if "audio_listener_2d" in _COMPONENT_REGISTRY:
+        return
+    from expra_engine.runtime.audio_2d import (
+        AudioListener2DComponent,
+        AudioStreamPlayer2DComponent,
+        PlaybackType2D,
+    )
+
+    _COMPONENT_REGISTRY["audio_listener_2d"] = AudioListener2DComponent
+    register_component_spec(
+        ComponentTypeSpec(
+            "audio_listener_2d",
+            AudioListener2DComponent,
+            (
+                PropertyDescriptor("current", "Current Listener", bool, False),
+                PropertyDescriptor("enabled", "Enabled", bool, True),
+            ),
+        )
+    )
+    _COMPONENT_REGISTRY["audio_stream_player_2d"] = AudioStreamPlayer2DComponent
+    register_component_spec(
+        ComponentTypeSpec(
+            "audio_stream_player_2d",
+            AudioStreamPlayer2DComponent,
+            (
+                PropertyDescriptor("asset_id", "Audio Asset", str, ""),
+                PropertyDescriptor("volume_db", "Volume (dB)", float, 0.0),
+                PropertyDescriptor("pitch_scale", "Pitch Scale", float, 1.0, minimum=0.000001),
+                PropertyDescriptor("autoplay", "Autoplay", bool, False),
+                PropertyDescriptor("stream_paused", "Paused", bool, False),
+                PropertyDescriptor("max_distance", "Max Distance", float, 2000.0, minimum=0.000001),
+                PropertyDescriptor("attenuation", "Attenuation", float, 1.0, minimum=0.0),
+                PropertyDescriptor("max_polyphony", "Max Polyphony", int, 1, minimum=1),
+                PropertyDescriptor("panning_strength", "Panning Strength", float, 1.0, minimum=0.0),
+                PropertyDescriptor(
+                    "bus",
+                    "Bus",
+                    str,
+                    "sfx",
+                    enum_values=("master", "music", "sfx", "ambience", "dialogue", "ui"),
+                ),
+                PropertyDescriptor("area_mask", "Area Mask", int, 0, minimum=0, maximum=0xFFFFFFFF),
+                PropertyDescriptor(
+                    "playback_type",
+                    "Playback Type",
+                    str,
+                    PlaybackType2D.DEFAULT.value,
+                    enum_values=tuple(mode.value for mode in PlaybackType2D),
+                ),
+                PropertyDescriptor("enabled", "Enabled", bool, True),
+            ),
+        )
+    )

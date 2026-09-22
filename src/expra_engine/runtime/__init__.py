@@ -13,6 +13,20 @@ from expra_engine.runtime.animated_sprite_2d import (
 from expra_engine.runtime.animated_sprite_system import AnimatedSpriteSystem
 from expra_engine.runtime.animator import AnimatorStateMachine
 from expra_engine.runtime.area import AreaComponent, SpaceOverride
+from expra_engine.runtime.audio import AudioBus, AudioClip, AudioMixer
+from expra_engine.runtime.audio_2d import (
+    Audio2DListener,
+    Audio2DSystem,
+    Audio2DWorld,
+    AudioListener2DComponent,
+    AudioPlaybackRequest2D,
+    AudioStreamPlayer2DComponent,
+    AudioStreamPlayer2DState,
+    PlaybackType2D,
+    SpatialAudioMix2D,
+    db_to_linear,
+    linear_to_db,
+)
 from expra_engine.runtime.behaviour import (
     HANDLED,
     PASS,
@@ -101,6 +115,16 @@ __all__ = [
     "AnimatorStateMachine",
     "AreaComponent",
     "AreaEffect2D",
+    "Audio2DListener",
+    "Audio2DSystem",
+    "Audio2DWorld",
+    "AudioBus",
+    "AudioClip",
+    "AudioListener2DComponent",
+    "AudioMixer",
+    "AudioPlaybackRequest2D",
+    "AudioStreamPlayer2DComponent",
+    "AudioStreamPlayer2DState",
     "Behaviour",
     "BehaviourContext",
     "BehaviourFactory",
@@ -120,6 +144,7 @@ __all__ = [
     "OrthographicCamera",
     "PlatformerController2d",
     "PlatformerPhase",
+    "PlaybackType2D",
     "PrimitiveDescriptor",
     "PygameRenderFrame",
     "PygameRenderer",
@@ -150,6 +175,7 @@ __all__ = [
     "Sequence",
     "SmoothFollow",
     "SpaceOverride",
+    "SpatialAudioMix2D",
     "SpriteAnimation2D",
     "SpriteEvent2D",
     "SpriteFrame2D",
@@ -172,8 +198,10 @@ __all__ = [
     "Viewport",
     "Wait",
     "after",
+    "db_to_linear",
     "every",
     "exposed",
     "invoke",
+    "linear_to_db",
     "walk",
 ]
