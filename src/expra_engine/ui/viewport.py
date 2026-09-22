@@ -14,8 +14,7 @@ from __future__ import annotations
 
 import math
 import tkinter as tk
-from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from expra_engine.core.camera import Camera2D
@@ -37,12 +36,21 @@ from expra_engine.runtime.rendering import (
 )
 from expra_engine.ui.layout import resize_aware
 from expra_engine.ui.styles import COLORS, editor_entity_kind
+from expra_engine.ui.viewport_camera import (
+    _MAX_ZOOM,
+    _MIN_ZOOM,
+    VIEWPORT_BASE_PPU,
+    ViewportCamera,
+)
 
-# Pixels per world unit at zoom=1.0 on any canvas size.
-# At default zoom a 1-unit entity occupies 40 px regardless of panel layout.
-VIEWPORT_BASE_PPU: float = 40.0
-_MIN_ZOOM: float = 0.05
-_MAX_ZOOM: float = 20.0
+__all__ = [
+    "VIEWPORT_BASE_PPU",
+    "ColliderOutline",
+    "EditorRenderTarget",
+    "ViewportCamera",
+    "ViewportPanel",
+    "build_editor_render_target",
+]
 
 
 @dataclass(frozen=True)
@@ -60,6 +68,23 @@ class EditorRenderTarget:
     items: tuple[RenderItem, ...]
     selected_id: str | None
     colliders: tuple[ColliderOutline, ...] = ()
+
+
+@dataclass
+class _CanvasEntry:
+    """Retained canvas item IDs for one render-item entity."""
+
+    shape: str  # "rect" | "circle" | "poly" | "text"
+    body: int  # main shape canvas item ID
+    label: int | None = None  # name label canvas item ID
+
+
+@dataclass
+class _MarkerEntry:
+    """Retained canvas item IDs for one icon-marker entity."""
+
+    kind: str  # "default" | "camera" | "camera_compact" | "player" | "player_compact"
+    ids: list[int] = field(default_factory=list)  # all canvas IDs in draw order
 
 
 def build_editor_render_target(
@@ -116,126 +141,6 @@ def build_editor_render_target(
     )
 
 
-class ViewportCamera:
-    """Small editor camera adapter backed by the existing Camera2D contract.
-
-    pixel_ratio is always VIEWPORT_BASE_PPU * zoom_level, independent of
-    canvas size.  Resizing the canvas only changes how much of the world is
-    visible — it never alters entity screen scale or camera position.
-    """
-
-    def __init__(self, viewport: tuple[int, int] = (400, 300)) -> None:
-        self._viewport = (max(1, viewport[0]), max(1, viewport[1]))
-        self._base_ppu: float = VIEWPORT_BASE_PPU
-        self.zoom_level: float = 1.0
-        vw, vh = self._viewport
-        self._camera = Camera2D(viewport=(vw, vh), target_width=vw / self._base_ppu)
-
-    @property
-    def position(self) -> tuple[float, float]:
-        return self._camera.position
-
-    def pan(self, x: float, y: float) -> None:
-        self._camera.position = (self.position[0] + x, self.position[1] + y)
-
-    def zoom(self, percent: float) -> None:
-        new_level = self.zoom_level * (1.0 + percent / 100.0)
-        self.zoom_level = max(_MIN_ZOOM, min(_MAX_ZOOM, new_level))
-        vw, vh = self._viewport
-        position = self.position
-        self._camera = Camera2D(
-            position=position,
-            viewport=(vw, vh),
-            target_width=vw / (self._base_ppu * self.zoom_level),
-        )
-
-    def zoom_at_cursor(self, factor: float, cursor_screen: tuple[float, float]) -> None:
-        """Zoom by ``factor`` keeping the world point under the cursor fixed.
-
-        ``factor`` is a multiplier: 1.5 zooms in 50%, 0.5 zooms out 50%.
-        Invalid factors (<=0, non-finite) are silently ignored.
-        """
-        if not math.isfinite(factor) or factor <= 0.0:
-            return
-        world_before = self._camera.translate_to_game(cursor_screen)
-        new_level = max(_MIN_ZOOM, min(_MAX_ZOOM, self.zoom_level * factor))
-        if abs(new_level - self.zoom_level) < 1e-9:
-            return
-        self.zoom_level = new_level
-        vw, vh = self._viewport
-        position = self.position
-        self._camera = Camera2D(
-            position=position,
-            viewport=(vw, vh),
-            target_width=vw / (self._base_ppu * self.zoom_level),
-        )
-        world_after = self._camera.translate_to_game(cursor_screen)
-        dx = world_before[0] - world_after[0]
-        dy = world_before[1] - world_after[1]
-        self._camera.position = (position[0] + dx, position[1] + dy)
-
-    def resize(self, viewport: tuple[int, int]) -> None:
-        if viewport[0] <= 0 or viewport[1] <= 0:
-            return
-        self._viewport = (viewport[0], viewport[1])
-        position = self.position
-        vw, vh = self._viewport
-        self._camera = Camera2D(
-            position=position,
-            viewport=(vw, vh),
-            target_width=vw / (self._base_ppu * self.zoom_level),
-        )
-
-    def frame_selected(self, point: tuple[float, float] | None) -> bool:
-        if point is None:
-            return False
-        self._camera.position = point
-        return True
-
-    def frame_scene(self, points: Iterable[tuple[float, float]]) -> bool:
-        values = tuple(points)
-        if not values:
-            return False
-        self._camera.position = (
-            (min(point[0] for point in values) + max(point[0] for point in values)) / 2,
-            (min(point[1] for point in values) + max(point[1] for point in values)) / 2,
-        )
-        return True
-
-    def project(self, point: tuple[float, float]) -> tuple[float, float]:
-        return self._camera.translate_to_screen(point)
-
-    def unproject(self, point: tuple[float, float]) -> tuple[float, float]:
-        return self._camera.translate_to_game(point)
-
-    def rotate(self, degrees: float) -> None:
-        self._camera.rotation += math.radians(float(degrees))
-
-    def reset_view(self) -> None:
-        self.zoom_level = 1.0
-        vw, vh = self._viewport
-        self._camera = Camera2D(viewport=(vw, vh), target_width=vw / self._base_ppu)
-
-    def to_dict(self) -> dict[str, object]:
-        return self._camera.to_dict()
-
-    def apply_dict(self, values: object) -> None:
-        self._camera.apply_dict(values)
-        raw_zoom = self._camera.zoom
-        saved_position = self.position
-        saved_rotation = self._camera.rotation
-        self.zoom_level = max(
-            _MIN_ZOOM, min(_MAX_ZOOM, raw_zoom if math.isfinite(raw_zoom) and raw_zoom > 0 else 1.0)
-        )
-        vw, vh = self._viewport
-        self._camera = Camera2D(
-            position=saved_position,
-            viewport=(vw, vh),
-            target_width=vw / (self._base_ppu * self.zoom_level),
-        )
-        self._camera.rotation = saved_rotation
-
-
 class ViewportPanel(tk.Frame):
     """Canvas-based editor viewport.
 
@@ -274,6 +179,13 @@ class ViewportPanel(tk.Frame):
         self._space_held = False
         self._space_pan_anchor: tuple[float, float] | None = None
 
+        # Render-loop state
+        self._redraw_pending = False  # after_idle gate to cap redraw rate
+        self._grid_dirty = True  # grid/axis needs rebuild (camera moved or canvas resized)
+        self._canvas_items: dict[str, _CanvasEntry] = {}  # retained visual-entity items
+        self._marker_entries: dict[str, _MarkerEntry] = {}  # retained icon-marker items
+        self._entity_map: dict[str, Any] = {}  # built once per render() call; O(1) lookup
+
         # Canvas fills the frame
         self._canvas = tk.Canvas(
             self,
@@ -309,6 +221,10 @@ class ViewportPanel(tk.Frame):
         self._canvas.bind("<B1-Motion>", self._on_lmb_motion_for_pan)
         resize_aware(self, lambda _w: self._on_resize())
 
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
     def render(
         self,
         scene: Scene | None,
@@ -323,14 +239,24 @@ class ViewportPanel(tk.Frame):
         scene_changed = scene is not None and (
             self._scene is None or self._scene.scene_id != scene.scene_id
         )
+        overlays_changed = editor_overlays != self._editor_overlays
         self._scene = scene
         self._selected_id = selected_id
         self._editor_overlays = editor_overlays
         self._interpolator = interpolator
         self._interpolation_fraction = interpolation_fraction
         self._animated_players = animated_players
+
         if scene_changed and scene is not None:
             self._camera.apply_dict(scene.camera)
+            self._grid_dirty = True
+            self._clear_all_items()
+        if overlays_changed:
+            self._grid_dirty = True
+
+        # Build entity map once — replaces O(n²) find_entity calls in _draw_render_item.
+        self._entity_map = {e.entity_id: e for e in scene.entities} if scene is not None else {}
+
         self._target = build_editor_render_target(
             scene,
             viewport=(max(1, self._canvas.winfo_width()), max(1, self._canvas.winfo_height())),
@@ -344,11 +270,13 @@ class ViewportPanel(tk.Frame):
 
     def pan(self, x: float, y: float) -> None:
         self._camera.pan(x, y)
+        self._grid_dirty = True
         self._notify_camera_change()
         self._redraw()
 
     def zoom(self, percent: float) -> None:
         self._camera.zoom(percent)
+        self._grid_dirty = True
         self._notify_camera_change()
         self._redraw()
 
@@ -359,6 +287,7 @@ class ViewportPanel(tk.Frame):
         transform = entity.get_component(TransformComponent) if entity else None
         framed = self._camera.frame_selected((transform.x, transform.y) if transform else None)
         if framed:
+            self._grid_dirty = True
             self._notify_camera_change()
             self._redraw()
         return framed
@@ -401,14 +330,30 @@ class ViewportPanel(tk.Frame):
             viewport=(vw, vh),
             target_width=vw / (self._camera._base_ppu * new_zoom),
         )
+        self._grid_dirty = True
         self._notify_camera_change()
         self._redraw()
         return True
+
+    # ------------------------------------------------------------------
+    # Internal render loop
+    # ------------------------------------------------------------------
+
+    def _schedule_redraw(self) -> None:
+        """Coalesce multiple same-tick events into one redraw via after_idle."""
+        if not self._redraw_pending:
+            self._redraw_pending = True
+            self._canvas.after_idle(self._flush_redraw)
+
+    def _flush_redraw(self) -> None:
+        self._redraw_pending = False
+        self._redraw()
 
     def _on_resize(self) -> None:
         self._camera.resize(
             (max(1, self._canvas.winfo_width()), max(1, self._canvas.winfo_height()))
         )
+        self._grid_dirty = True
         self._target = build_editor_render_target(
             self._scene,
             viewport=(max(1, self._canvas.winfo_width()), max(1, self._canvas.winfo_height())),
@@ -418,229 +363,97 @@ class ViewportPanel(tk.Frame):
             interpolation_fraction=self._interpolation_fraction,
             animated_players=getattr(self, "_animated_players", None),
         )
-        self._redraw()
+        self._schedule_redraw()
 
     def _redraw(self) -> None:
         canvas = self._canvas
-        canvas.delete("all")
-        c = self._colors
         w = canvas.winfo_width() or 400
         h = canvas.winfo_height() or 300
-        cx, cy = w // 2, h // 2
 
+        # Grid + axis lines — only rebuilt when camera moved or canvas resized.
+        # Scene-only updates (entity data changes, play-mode ticks) skip 56+ create_line calls.
         if self._editor_overlays:
-            # Grid lines
-            grid_color = c["grid_minor"]
-            major_grid_color = c["grid_major"]
-            step = 40
-            for gx in range(0, w, step):
-                canvas.create_line(gx, 0, gx, h, fill=grid_color, width=1)
-            for gy in range(0, h, step):
-                canvas.create_line(0, gy, w, gy, fill=grid_color, width=1)
+            if self._grid_dirty:
+                canvas.delete("grid")
+                self._draw_grid(w, h)
+                self._grid_dirty = False
+        else:
+            if self._grid_dirty:
+                canvas.delete("grid")
+                self._grid_dirty = False
 
-            for gx in range(0, w, step * 5):
-                canvas.create_line(gx, 0, gx, h, fill=major_grid_color, width=1)
-            for gy in range(0, h, step * 5):
-                canvas.create_line(0, gy, w, gy, fill=major_grid_color, width=1)
-
-            # Axis lines
-            axis_x, axis_y = self._camera.project((0.0, 0.0))
-            canvas.create_line(axis_x, 0, axis_x, h, fill=c["accent"], width=1)
-            canvas.create_line(0, axis_y, w, axis_y, fill=c["accent"], width=1)
-
+        # No-scene placeholder
+        canvas.delete("no_scene_text")
         if self._scene is None:
+            self._clear_all_items()
             canvas.create_text(
-                cx,
-                cy,
+                w // 2,
+                h // 2,
                 text="No scene loaded",
-                fill=c["ink_3"],
+                fill=self._colors["ink_3"],
                 font=("Helvetica", 14),
+                tags="no_scene_text",
             )
             return
 
-        visual_ids = {item.key for item in self._target.items}
+        # Render items — retained model: update existing canvas items in-place.
+        current_keys = {item.key for item in self._target.items}
+        canvas.delete("selection")
         for item in self._target.items:
             self._draw_render_item(item, editor_overlays=self._editor_overlays)
+        # Remove canvas items for entities that left the scene.
+        for stale in set(self._canvas_items) - current_keys:
+            self._delete_canvas_entry(self._canvas_items.pop(stale))
+
+        # Collider overlays — cheap (few items), always refresh.
         if self._editor_overlays:
+            canvas.delete("collider")
             self._draw_colliders()
 
-        r = self._ENTITY_RADIUS
+        # Icon markers for non-visual entities — retained, binds only on creation.
         if self._editor_overlays:
-            for entity in self._scene.entities:
-                if not entity.enabled:
-                    continue
-                if entity.entity_id in visual_ids:
-                    continue
-                transform = entity.get_component(TransformComponent)
-                kind = editor_entity_kind(entity.name)
-                has_script = any(
-                    getattr(component, "component_type", None) == "script"
-                    for component in entity.components
-                )
-                if transform is None and has_script:
-                    continue
-                ex, ey = self._camera.project(
-                    (transform.x, transform.y) if transform else (0.0, 0.0)
-                )
+            self._draw_entity_markers(current_keys)
 
-                is_selected = entity.entity_id == self._selected_id
-                fill = c["accent"] if is_selected else c["surface"]
-                outline = c["accent_ink"] if is_selected else c["ink_2"]
+    def _draw_grid(self, w: int, h: int) -> None:
+        canvas = self._canvas
+        c = self._colors
+        step = 40
+        for gx in range(0, w, step):
+            canvas.create_line(gx, 0, gx, h, fill=c["grid_minor"], width=1, tags="grid")
+        for gy in range(0, h, step):
+            canvas.create_line(0, gy, w, gy, fill=c["grid_minor"], width=1, tags="grid")
+        for gx in range(0, w, step * 5):
+            canvas.create_line(gx, 0, gx, h, fill=c["grid_major"], width=1, tags="grid")
+        for gy in range(0, h, step * 5):
+            canvas.create_line(0, gy, w, gy, fill=c["grid_major"], width=1, tags="grid")
+        ax, ay = self._camera.project((0.0, 0.0))
+        canvas.create_line(ax, 0, ax, h, fill=c["accent"], width=1, tags="grid")
+        canvas.create_line(0, ay, w, ay, fill=c["accent"], width=1, tags="grid")
+        canvas.tag_lower("grid")
 
-                tag = f"entity:{entity.entity_id}"
-                if kind in {"camera", "camera_compact"}:
-                    marker_fill = c["camera_active"] if is_selected else c["camera"]
-                    canvas.create_rectangle(
-                        ex - r,
-                        ey - r // 2,
-                        ex + r,
-                        ey + r // 2,
-                        fill=marker_fill,
-                        outline=outline,
-                        width=2,
-                        tags=tag,
-                    )
-                    canvas.create_oval(
-                        ex - r // 2,
-                        ey - r // 2,
-                        ex + r // 2,
-                        ey + r // 2,
-                        fill=fill,
-                        outline=outline,
-                        width=1,
-                        tags=tag,
-                    )
-                    if kind == "camera":
-                        canvas.create_rectangle(
-                            ex - r // 2,
-                            ey - r // 2 - 3,
-                            ex - r // 5,
-                            ey - r // 2,
-                            fill=marker_fill,
-                            outline=outline,
-                            width=1,
-                            tags=tag,
-                        )
-                        canvas.create_oval(
-                            ex - r // 4,
-                            ey - r // 4,
-                            ex + r // 4,
-                            ey + r // 4,
-                            fill=marker_fill,
-                            outline=outline,
-                            width=1,
-                            tags=tag,
-                        )
-                elif kind == "player":
-                    marker_fill = c["player_active"] if is_selected else c["player"]
-                    canvas.create_oval(
-                        ex - 3,
-                        ey - r - 5,
-                        ex + 3,
-                        ey - r + 1,
-                        fill=marker_fill,
-                        outline=outline,
-                        width=1,
-                        tags=tag,
-                    )
-                    canvas.create_polygon(
-                        ex,
-                        ey - r + 1,
-                        ex + 6,
-                        ey + 3,
-                        ex,
-                        ey + r,
-                        ex - 6,
-                        ey + 3,
-                        fill=marker_fill,
-                        outline=outline,
-                        width=2,
-                        tags=tag,
-                    )
-                    canvas.create_line(
-                        ex - 6,
-                        ey - 1,
-                        ex - r,
-                        ey + 6,
-                        fill=outline,
-                        width=2,
-                        tags=tag,
-                    )
-                    canvas.create_line(
-                        ex + 6,
-                        ey - 1,
-                        ex + r,
-                        ey + 6,
-                        fill=outline,
-                        width=2,
-                        tags=tag,
-                    )
-                    canvas.create_line(
-                        ex - 3,
-                        ey + 8,
-                        ex - 5,
-                        ey + r + 4,
-                        fill=outline,
-                        width=2,
-                        tags=tag,
-                    )
-                    canvas.create_line(
-                        ex + 3,
-                        ey + 8,
-                        ex + 5,
-                        ey + r + 4,
-                        fill=outline,
-                        width=2,
-                        tags=tag,
-                    )
-                elif kind == "player_compact":
-                    marker_fill = c["player_active"] if is_selected else c["player"]
-                    canvas.create_polygon(
-                        ex,
-                        ey - r,
-                        ex + r,
-                        ey,
-                        ex,
-                        ey + r,
-                        ex - r,
-                        ey,
-                        fill=marker_fill,
-                        outline=outline,
-                        width=2,
-                        tags=tag,
-                    )
-                else:
-                    canvas.create_rectangle(
-                        ex - r,
-                        ey - r,
-                        ex + r,
-                        ey + r,
-                        fill=fill,
-                        outline=outline,
-                        width=2,
-                        tags=tag,
-                    )
-                canvas.create_text(
-                    ex,
-                    ey + r + 8,
-                    text=entity.name,
-                    fill=c["ink_3"] if not is_selected else c["accent_ink"],
-                    font=("Helvetica", 9),
-                    tags=tag,
-                )
-                canvas.tag_bind(
-                    tag,
-                    "<Button-1>",
-                    lambda _e, eid=entity.entity_id: self._click_entity(eid),  # type: ignore[misc]
-                )
+    def _delete_canvas_entry(self, entry: _CanvasEntry) -> None:
+        self._canvas.delete(entry.body)
+        if entry.label is not None:
+            self._canvas.delete(entry.label)
+
+    def _clear_all_items(self) -> None:
+        for entry in self._canvas_items.values():
+            self._delete_canvas_entry(entry)
+        self._canvas_items.clear()
+        for eid in list(self._marker_entries):
+            self._canvas.delete(f"entity:{eid}")
+        self._marker_entries.clear()
+        self._canvas.delete("collider")
+        self._canvas.delete("selection")
 
     def _draw_render_item(self, item: RenderItem, *, editor_overlays: bool = True) -> None:
         transform = (
             item.sprite_transform if item.primitive.kind == "sprite" else item.world_transform
         )
         ex, ey = self._camera.project((transform.position[0], transform.position[1]))
-        sx = abs(item.primitive.size[0] * transform.scale[0]) * self._camera._camera.pixel_ratio / 2
-        sy = abs(item.primitive.size[1] * transform.scale[1]) * self._camera._camera.pixel_ratio / 2
+        ppu = self._camera._camera.pixel_ratio
+        sx = abs(item.primitive.size[0] * transform.scale[0]) * ppu / 2
+        sy = abs(item.primitive.size[1] * transform.scale[1]) * ppu / 2
         tag = f"entity:{item.key}"
         color = self._tk_color(modulate_color(item.material.color, self._target.frame.modulation))
         outline = (
@@ -648,40 +461,106 @@ class ViewportPanel(tk.Frame):
             if item.material.outline
             else color
         )
+
+        # Determine which canvas primitive matches the current state.
         if item.primitive.kind == "circle":
-            self._canvas.create_oval(
-                ex - sx, ey - sy, ex + sx, ey + sy, fill=color, outline=outline, tags=tag
-            )
+            new_shape = "circle"
         elif item.primitive.kind == "text":
-            text = item.text.text if item.text else ""
-            font = (item.text.font, round(item.text.size)) if item.text else "TkDefaultFont"
-            self._canvas.create_text(ex, ey, text=text, fill=color, font=font, tags=tag)
+            new_shape = "text"
         elif transform.rotation or self._camera._camera.rotation:
-            self._canvas.create_polygon(
-                *self._projected_corners(item), fill=color, outline=outline, tags=tag
-            )
+            new_shape = "poly"
         else:
-            self._canvas.create_rectangle(
-                ex - sx, ey - sy, ex + sx, ey + sy, fill=color, outline=outline, tags=tag
-            )
-        if editor_overlays:
-            self._canvas.tag_bind(
-                tag,
-                "<Button-1>",
-                lambda _e, eid=item.key: self._click_entity(eid),  # type: ignore[misc]
-            )
-        entity = self._scene.find_entity(item.key) if self._scene is not None else None
+            new_shape = "rect"
+
+        entry = self._canvas_items.get(item.key)
+        if entry is not None and entry.shape != new_shape:
+            self._delete_canvas_entry(entry)
+            entry = None
+
+        # Update existing item in-place, or create a new one.
+        if new_shape == "circle":
+            if entry is not None:
+                self._canvas.coords(entry.body, ex - sx, ey - sy, ex + sx, ey + sy)
+                self._canvas.itemconfig(entry.body, fill=color, outline=outline)
+                body_id = entry.body
+            else:
+                body_id = self._canvas.create_oval(
+                    ex - sx, ey - sy, ex + sx, ey + sy, fill=color, outline=outline, tags=tag
+                )
+                if editor_overlays:
+                    self._canvas.tag_bind(
+                        tag, "<Button-1>", lambda _e, eid=item.key: self._click_entity(eid)
+                    )
+        elif new_shape == "text":
+            text_val = item.text.text if item.text else ""
+            font_val = (item.text.font, round(item.text.size)) if item.text else "TkDefaultFont"
+            if entry is not None:
+                self._canvas.coords(entry.body, ex, ey)
+                self._canvas.itemconfig(entry.body, text=text_val, fill=color, font=font_val)
+                body_id = entry.body
+            else:
+                body_id = self._canvas.create_text(
+                    ex, ey, text=text_val, fill=color, font=font_val, tags=tag
+                )
+                if editor_overlays:
+                    self._canvas.tag_bind(
+                        tag, "<Button-1>", lambda _e, eid=item.key: self._click_entity(eid)
+                    )
+        elif new_shape == "poly":
+            corners = self._projected_corners(item)
+            if entry is not None:
+                self._canvas.coords(entry.body, *corners)
+                self._canvas.itemconfig(entry.body, fill=color, outline=outline)
+                body_id = entry.body
+            else:
+                body_id = self._canvas.create_polygon(
+                    *corners, fill=color, outline=outline, tags=tag
+                )
+                if editor_overlays:
+                    self._canvas.tag_bind(
+                        tag, "<Button-1>", lambda _e, eid=item.key: self._click_entity(eid)
+                    )
+        else:  # rect
+            if entry is not None:
+                self._canvas.coords(entry.body, ex - sx, ey - sy, ex + sx, ey + sy)
+                self._canvas.itemconfig(entry.body, fill=color, outline=outline)
+                body_id = entry.body
+            else:
+                body_id = self._canvas.create_rectangle(
+                    ex - sx, ey - sy, ex + sx, ey + sy, fill=color, outline=outline, tags=tag
+                )
+                if editor_overlays:
+                    self._canvas.tag_bind(
+                        tag, "<Button-1>", lambda _e, eid=item.key: self._click_entity(eid)
+                    )
+
+        # Name label — update color/text/position in-place.
+        entity = self._entity_map.get(item.key)
+        label_id: int | None = None
         if entity is not None and editor_overlays:
-            self._canvas.create_text(
-                ex,
-                ey + sy + 8,
-                text=entity.name,
-                fill=self._colors["accent_ink"]
+            label_color = (
+                self._colors["accent_ink"]
                 if item.key == self._target.selected_id
-                else self._colors["ink_3"],
-                font=("Helvetica", 9),
-                tags=tag,
+                else self._colors["ink_3"]
             )
+            if entry is not None and entry.label is not None:
+                self._canvas.coords(entry.label, ex, ey + sy + 8)
+                self._canvas.itemconfig(entry.label, text=entity.name, fill=label_color)
+                label_id = entry.label
+            else:
+                label_id = self._canvas.create_text(
+                    ex,
+                    ey + sy + 8,
+                    text=entity.name,
+                    fill=label_color,
+                    font=("Helvetica", 9),
+                    tags=tag,
+                )
+        elif entry is not None and entry.label is not None:
+            # Overlays turned off — remove stale label.
+            self._canvas.delete(entry.label)
+
+        # Selection highlight — always recreated (at most 1 per frame, tag="selection").
         if item.key == self._target.selected_id and editor_overlays:
             self._canvas.create_rectangle(
                 ex - sx - 4,
@@ -692,6 +571,8 @@ class ViewportPanel(tk.Frame):
                 width=2,
                 tags="selection",
             )
+
+        self._canvas_items[item.key] = _CanvasEntry(shape=new_shape, body=body_id, label=label_id)
 
     def _projected_corners(self, item: RenderItem) -> tuple[float, ...]:
         transform = (
@@ -742,9 +623,276 @@ class ViewportPanel(tk.Frame):
                     tags="collider",
                 )
 
+    def _draw_entity_markers(self, visual_ids: set[str]) -> None:
+        """Draw icon markers for non-visual entities; retain bindings across frames."""
+        if self._scene is None:
+            return
+        # Determine which entities need markers this frame.
+        needed: dict[str, str] = {}  # entity_id -> kind
+        for entity in self._scene.entities:
+            if not entity.enabled or entity.entity_id in visual_ids:
+                continue
+            transform = entity.get_component(TransformComponent)
+            has_script = any(
+                getattr(comp, "component_type", None) == "script" for comp in entity.components
+            )
+            if transform is None and has_script:
+                continue
+            needed[entity.entity_id] = editor_entity_kind(entity.name)
+
+        # Delete stale markers.
+        for stale in set(self._marker_entries) - set(needed):
+            self._canvas.delete(f"entity:{stale}")
+            del self._marker_entries[stale]
+
+        # Update or create each marker.
+        for entity in self._scene.entities:
+            eid = entity.entity_id
+            if eid not in needed:
+                continue
+            kind = needed[eid]
+            transform = entity.get_component(TransformComponent)
+            ex, ey = self._camera.project((transform.x, transform.y) if transform else (0.0, 0.0))
+            is_selected = eid == self._selected_id
+            existing = self._marker_entries.get(eid)
+            if existing is not None and existing.kind == kind:
+                self._update_marker_coords(existing, entity, ex, ey, is_selected)
+            else:
+                if existing is not None:
+                    self._canvas.delete(f"entity:{eid}")
+                self._marker_entries[eid] = self._create_marker(entity, kind, ex, ey, is_selected)
+
+    def _update_marker_coords(
+        self,
+        entry: _MarkerEntry,
+        entity: Any,
+        ex: float,
+        ey: float,
+        is_selected: bool,
+    ) -> None:
+        """Move and recolour all canvas items for an existing marker without rebinding."""
+        r = self._ENTITY_RADIUS
+        c = self._colors
+        fill = c["accent"] if is_selected else c["surface"]
+        outline = c["accent_ink"] if is_selected else c["ink_2"]
+        label_color = c["accent_ink"] if is_selected else c["ink_3"]
+        ids = entry.ids
+
+        if entry.kind == "default":
+            # [rect, label]
+            self._canvas.coords(ids[0], ex - r, ey - r, ex + r, ey + r)
+            self._canvas.itemconfig(ids[0], fill=fill, outline=outline)
+            self._canvas.coords(ids[1], ex, ey + r + 8)
+            self._canvas.itemconfig(ids[1], fill=label_color)
+        elif entry.kind in {"camera", "camera_compact"}:
+            # camera_compact: [rect_body, oval_body, label]
+            # camera:         [rect_body, oval_body, rect_top, oval_lens, label]
+            marker_fill = c["camera_active"] if is_selected else c["camera"]
+            self._canvas.coords(ids[0], ex - r, ey - r // 2, ex + r, ey + r // 2)
+            self._canvas.itemconfig(ids[0], fill=marker_fill, outline=outline)
+            self._canvas.coords(ids[1], ex - r // 2, ey - r // 2, ex + r // 2, ey + r // 2)
+            self._canvas.itemconfig(ids[1], fill=fill, outline=outline)
+            if entry.kind == "camera":
+                self._canvas.coords(ids[2], ex - r // 2, ey - r // 2 - 3, ex - r // 5, ey - r // 2)
+                self._canvas.itemconfig(ids[2], fill=marker_fill, outline=outline)
+                self._canvas.coords(ids[3], ex - r // 4, ey - r // 4, ex + r // 4, ey + r // 4)
+                self._canvas.itemconfig(ids[3], fill=marker_fill, outline=outline)
+                self._canvas.coords(ids[4], ex, ey + r + 8)
+                self._canvas.itemconfig(ids[4], fill=label_color)
+            else:
+                self._canvas.coords(ids[2], ex, ey + r + 8)
+                self._canvas.itemconfig(ids[2], fill=label_color)
+        elif entry.kind == "player":
+            # [head_oval, body_poly, left_arm, right_arm, left_leg, right_leg, label]
+            marker_fill = c["player_active"] if is_selected else c["player"]
+            self._canvas.coords(ids[0], ex - 3, ey - r - 5, ex + 3, ey - r + 1)
+            self._canvas.itemconfig(ids[0], fill=marker_fill, outline=outline)
+            self._canvas.coords(ids[1], ex, ey - r + 1, ex + 6, ey + 3, ex, ey + r, ex - 6, ey + 3)
+            self._canvas.itemconfig(ids[1], fill=marker_fill, outline=outline)
+            self._canvas.coords(ids[2], ex - 6, ey - 1, ex - r, ey + 6)
+            self._canvas.itemconfig(ids[2], fill=outline)
+            self._canvas.coords(ids[3], ex + 6, ey - 1, ex + r, ey + 6)
+            self._canvas.itemconfig(ids[3], fill=outline)
+            self._canvas.coords(ids[4], ex - 3, ey + 8, ex - 5, ey + r + 4)
+            self._canvas.itemconfig(ids[4], fill=outline)
+            self._canvas.coords(ids[5], ex + 3, ey + 8, ex + 5, ey + r + 4)
+            self._canvas.itemconfig(ids[5], fill=outline)
+            self._canvas.coords(ids[6], ex, ey + r + 8)
+            self._canvas.itemconfig(ids[6], fill=label_color)
+        elif entry.kind == "player_compact":
+            # [diamond_poly, label]
+            marker_fill = c["player_active"] if is_selected else c["player"]
+            self._canvas.coords(ids[0], ex, ey - r, ex + r, ey, ex, ey + r, ex - r, ey)
+            self._canvas.itemconfig(ids[0], fill=marker_fill, outline=outline)
+            self._canvas.coords(ids[1], ex, ey + r + 8)
+            self._canvas.itemconfig(ids[1], fill=label_color)
+
+    def _create_marker(
+        self, entity: Any, kind: str, ex: float, ey: float, is_selected: bool
+    ) -> _MarkerEntry:
+        """Create fresh canvas items for an entity marker; bind click handler once."""
+        r = self._ENTITY_RADIUS
+        c = self._colors
+        fill = c["accent"] if is_selected else c["surface"]
+        outline = c["accent_ink"] if is_selected else c["ink_2"]
+        label_color = c["accent_ink"] if is_selected else c["ink_3"]
+        tag = f"entity:{entity.entity_id}"
+        canvas = self._canvas
+        ids: list[int] = []
+
+        if kind in {"camera", "camera_compact"}:
+            marker_fill = c["camera_active"] if is_selected else c["camera"]
+            ids.append(
+                canvas.create_rectangle(
+                    ex - r,
+                    ey - r // 2,
+                    ex + r,
+                    ey + r // 2,
+                    fill=marker_fill,
+                    outline=outline,
+                    width=2,
+                    tags=tag,
+                )
+            )
+            ids.append(
+                canvas.create_oval(
+                    ex - r // 2,
+                    ey - r // 2,
+                    ex + r // 2,
+                    ey + r // 2,
+                    fill=fill,
+                    outline=outline,
+                    width=1,
+                    tags=tag,
+                )
+            )
+            if kind == "camera":
+                ids.append(
+                    canvas.create_rectangle(
+                        ex - r // 2,
+                        ey - r // 2 - 3,
+                        ex - r // 5,
+                        ey - r // 2,
+                        fill=marker_fill,
+                        outline=outline,
+                        width=1,
+                        tags=tag,
+                    )
+                )
+                ids.append(
+                    canvas.create_oval(
+                        ex - r // 4,
+                        ey - r // 4,
+                        ex + r // 4,
+                        ey + r // 4,
+                        fill=marker_fill,
+                        outline=outline,
+                        width=1,
+                        tags=tag,
+                    )
+                )
+        elif kind == "player":
+            marker_fill = c["player_active"] if is_selected else c["player"]
+            ids.append(
+                canvas.create_oval(
+                    ex - 3,
+                    ey - r - 5,
+                    ex + 3,
+                    ey - r + 1,
+                    fill=marker_fill,
+                    outline=outline,
+                    width=1,
+                    tags=tag,
+                )
+            )
+            ids.append(
+                canvas.create_polygon(
+                    ex,
+                    ey - r + 1,
+                    ex + 6,
+                    ey + 3,
+                    ex,
+                    ey + r,
+                    ex - 6,
+                    ey + 3,
+                    fill=marker_fill,
+                    outline=outline,
+                    width=2,
+                    tags=tag,
+                )
+            )
+            ids.append(
+                canvas.create_line(ex - 6, ey - 1, ex - r, ey + 6, fill=outline, width=2, tags=tag)
+            )
+            ids.append(
+                canvas.create_line(ex + 6, ey - 1, ex + r, ey + 6, fill=outline, width=2, tags=tag)
+            )
+            ids.append(
+                canvas.create_line(
+                    ex - 3, ey + 8, ex - 5, ey + r + 4, fill=outline, width=2, tags=tag
+                )
+            )
+            ids.append(
+                canvas.create_line(
+                    ex + 3, ey + 8, ex + 5, ey + r + 4, fill=outline, width=2, tags=tag
+                )
+            )
+        elif kind == "player_compact":
+            marker_fill = c["player_active"] if is_selected else c["player"]
+            ids.append(
+                canvas.create_polygon(
+                    ex,
+                    ey - r,
+                    ex + r,
+                    ey,
+                    ex,
+                    ey + r,
+                    ex - r,
+                    ey,
+                    fill=marker_fill,
+                    outline=outline,
+                    width=2,
+                    tags=tag,
+                )
+            )
+        else:  # default
+            ids.append(
+                canvas.create_rectangle(
+                    ex - r,
+                    ey - r,
+                    ex + r,
+                    ey + r,
+                    fill=fill,
+                    outline=outline,
+                    width=2,
+                    tags=tag,
+                )
+            )
+
+        ids.append(
+            canvas.create_text(
+                ex,
+                ey + r + 8,
+                text=entity.name,
+                fill=label_color,
+                font=("Helvetica", 9),
+                tags=tag,
+            )
+        )
+        canvas.tag_bind(
+            tag,
+            "<Button-1>",
+            lambda _e, eid=entity.entity_id: self._click_entity(eid),  # type: ignore[misc]
+        )
+        return _MarkerEntry(kind=kind, ids=ids)
+
     @staticmethod
     def _tk_color(color: Any) -> str:
         return f"#{round(color.red * 255):02x}{round(color.green * 255):02x}{round(color.blue * 255):02x}"
+
+    # ------------------------------------------------------------------
+    # Input handlers
+    # ------------------------------------------------------------------
 
     def _on_click(self, event: Any) -> None:
         if not self._editor_overlays:
@@ -776,7 +924,8 @@ class ViewportPanel(tk.Frame):
         ratio = self._camera._camera.pixel_ratio or 1.0
         self._camera.pan((previous_x - event.x) / ratio, (event.y - previous_y) / ratio)
         self._pan_anchor = (float(event.x), float(event.y))
-        self._redraw()
+        self._grid_dirty = True
+        self._schedule_redraw()
 
     def _on_wheel(self, event: Any) -> str:
         num = getattr(event, "num", None)
@@ -789,7 +938,8 @@ class ViewportPanel(tk.Frame):
             return "break"
         self._camera.zoom_at_cursor(factor, (float(event.x), float(event.y)))
         self._notify_camera_change()
-        self._redraw()
+        self._grid_dirty = True
+        self._schedule_redraw()
         return "break"
 
     def _kb_zoom(self, factor: float) -> str:
@@ -797,7 +947,8 @@ class ViewportPanel(tk.Frame):
         vh = self._canvas.winfo_height() or 300
         self._camera.zoom_at_cursor(factor, (vw / 2.0, vh / 2.0))
         self._notify_camera_change()
-        self._redraw()
+        self._grid_dirty = True
+        self._schedule_redraw()
         return "break"
 
     def _frame_selected_key(self) -> str:
@@ -826,16 +977,19 @@ class ViewportPanel(tk.Frame):
         ratio = self._camera._camera.pixel_ratio or 1.0
         self._camera.pan((px - event.x) / ratio, (event.y - py) / ratio)
         self._space_pan_anchor = (float(event.x), float(event.y))
-        self._redraw()
+        self._grid_dirty = True
+        self._schedule_redraw()
 
     def _rotate_camera(self, degrees: float) -> str:
         self._camera.rotate(degrees)
+        self._grid_dirty = True
         self._notify_camera_change()
         self._redraw()
         return "break"
 
     def _reset_camera(self) -> str:
         self._camera.reset_view()
+        self._grid_dirty = True
         self._notify_camera_change()
         self._redraw()
         return "break"

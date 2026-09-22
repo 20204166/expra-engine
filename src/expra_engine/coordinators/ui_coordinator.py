@@ -84,6 +84,7 @@ class UICoordinator:
         self._target_nodes: dict[str, Any | None] = {}
         self._batch_depth = 0
         self._flushing = False
+        self._flush_scheduled = False
         self._closed = False
         self.pending_peak = 0
         self.last_commit_seconds = 0.0
@@ -243,9 +244,23 @@ class UICoordinator:
         self._record_event(intent.target, "request")
         self.pending_peak = max(self.pending_peak, len(self._pending))
 
-        if self._batch_depth == 0 and not self._flushing and self._visible.get(intent.target, True):
-            self._apply_target(intent.target)
+        if (
+            self._batch_depth == 0
+            and not self._flushing
+            and not self._flush_scheduled
+            and self._visible.get(intent.target, True)
+        ):
+            token = self._schedule(0, self._deferred_flush)
+            if token is not None:
+                self._flush_scheduled = True
+            else:
+                self._apply_target(intent.target)
         return True
+
+    def _deferred_flush(self) -> None:
+        self._flush_scheduled = False
+        if not self._closed:
+            self.flush()
 
     def flush(self) -> None:
         if self._closed:
