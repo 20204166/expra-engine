@@ -473,6 +473,10 @@ class ViewportPanel(tk.Frame):
         # Determine which canvas primitive matches the current state.
         if runtime_pixels:
             new_shape = "pixels"
+        elif item.material.texture_id is not None:
+            # Keep the failure path explicit: the placeholder is only used
+            # after EditorPixelRenderer has logged the texture error.
+            new_shape = "poly" if transform.rotation or self._camera._camera.rotation else "rect"
         elif item.primitive.kind == "circle":
             new_shape = "circle"
         elif item.primitive.kind == "text":

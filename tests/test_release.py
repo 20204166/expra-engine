@@ -2,6 +2,7 @@
 
 import hashlib
 import tempfile
+import tomllib
 import unittest
 import zipfile
 from pathlib import Path
@@ -132,6 +133,14 @@ class ManifestDiffTests(unittest.TestCase):
 
 
 class VersionFileTests(unittest.TestCase):
+    def test_editor_texture_dependency_is_installed_with_package(self) -> None:
+        pyproject = tomllib.loads(
+            (Path(__file__).parents[1] / "pyproject.toml").read_text(encoding="utf-8")
+        )
+
+        self.assertIn("pygame>=2.6", pyproject["project"]["dependencies"])
+        self.assertNotIn("runtime-pygame", pyproject["project"].get("optional-dependencies", {}))
+
     def test_project_metadata_uses_canonical_version_module(self) -> None:
         pyproject = (Path(__file__).parents[1] / "pyproject.toml").read_text()
         self.assertIn('dynamic = ["version"]', pyproject)

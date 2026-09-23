@@ -50,6 +50,7 @@ from expra_engine.ui.viewport import (
     ViewportPanel,
     build_editor_render_target,
 )
+from tests.support.texture_project import make_texture_project
 
 
 def test_editor_pixel_bridge_renders_and_encodes_the_canonical_frame() -> None:
@@ -134,7 +135,7 @@ def test_editor_pixel_bridge_returns_none_for_incomplete_backend_frames(caplog) 
         )
 
     assert image is None
-    assert "[Texture] Editor renderer reported an incomplete frame" in caplog.text
+    assert "[EditorTexture] presentation failed: renderer produced an incomplete frame" in caplog.text
 
 
 def test_editor_pixel_bridge_logs_missing_resource_provider(caplog) -> None:
@@ -151,7 +152,24 @@ def test_editor_pixel_bridge_logs_missing_resource_provider(caplog) -> None:
         )
 
     assert image is None
-    assert "[Texture] No resource provider attached to editor renderer" in caplog.text
+    assert "[EditorTexture] renderer has no resource provider" in caplog.text
+
+
+def test_editor_pixel_renderer_logs_presentation_failure(monkeypatch, caplog) -> None:
+    renderer = EditorPixelRenderer(object())
+    original_import = __import__
+
+    def fail_pygame(name, *args, **kwargs):
+        if name == "pygame":
+            raise ModuleNotFoundError("No module named 'pygame'")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.__import__", fail_pygame)
+    with caplog.at_level(logging.ERROR, logger="expra_engine.ui.editor_pixel_renderer"):
+        image = renderer.render(RenderFrame(), ViewportCamera(), 160, 90, object())
+
+    assert image is None
+    assert "[EditorTexture] presentation failed" in caplog.text
 
 
 def test_real_blacksite_png_reaches_editor_pixel_output() -> None:
@@ -207,6 +225,46 @@ def test_real_blacksite_png_reaches_editor_pixel_output() -> None:
         assert decoded.get_bounding_rect().height > 0
     finally:
         pygame.quit()
+
+
+def test_final_editor_photoimage_preserves_nonuniform_png_pixels(tmp_path: Path) -> None:
+    pygame = pytest.importorskip("pygame")
+    try:
+        root = tk.Tk()
+    except tk.TclError:
+        pytest.skip("no display for real Tk editor presentation")
+
+    project, scene, _asset_id = make_texture_project(tmp_path)
+    frame = extract_render_frame(scene)
+    service = project.resource_service()
+    pygame.init()
+    try:
+        provider = PygameResourceProvider(pygame, service)
+        image = render_editor_frame_to_tk_image(
+            frame,
+            RenderContext(Viewport(0, 0, 160, 120)),
+            width=160,
+            height=120,
+            resource_service=service,
+            resource_provider=provider,
+            pygame_module=pygame,
+            image_master=root,
+        )
+
+        assert image is not None
+        red, green, blue, yellow = (
+            image.get(72, 54),
+            image.get(88, 54),
+            image.get(72, 66),
+            image.get(88, 66),
+        )
+        assert red[0] > red[1] and red[0] > red[2]
+        assert green[1] > green[0] and green[1] > green[2]
+        assert blue[2] > blue[0] and blue[2] > blue[1]
+        assert yellow[0] > yellow[2] and yellow[1] > yellow[2]
+    finally:
+        pygame.quit()
+        root.destroy()
 
 
 def test_blacksite_editor_edit_and_play_keep_real_pixels() -> None:

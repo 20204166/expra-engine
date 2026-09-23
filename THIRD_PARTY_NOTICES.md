@@ -47,11 +47,11 @@ Kenney's Top-down Shooter asset pack: `floor_panel.png`,
 These files are example-game content only; they are not part of the Expra
 engine package and do not change the engine's source license.
 
-## Pygame (optional runtime dependency)
+## Pygame (runtime dependency)
 
-The optional `runtime-pygame` extra depends on Pygame for the SDL display and
-Pygame renderer adapter. Pygame is installed separately and is not bundled in
-the Expra wheel.
+The Expra wheel depends on Pygame for the SDL display and Pygame renderer
+adapter. Pygame is installed as a normal package dependency and is not bundled
+in the Expra wheel.
 
 **License:** GNU Lesser General Public License 2.1 or later, as distributed by
 the Pygame project

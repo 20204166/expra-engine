@@ -73,11 +73,11 @@ runtime-owned; only the renderer-neutral component requests are serialized.
 
 The repository includes several project-owned dogfood games. They exercise the
 real editor, scene loader, scripts, renderer, physics, input, lifecycle, and
-export paths rather than a test-only harness. Install the optional game runtime
-dependency for source runs:
+export paths rather than a test-only harness. Install the project dependencies
+for source runs:
 
 ```bash
-pip install -e ".[runtime-pygame]"
+pip install -e .
 ```
 
 ### Neon Arena
@@ -168,6 +168,12 @@ the Expra version when needed, refresh `dist/SHA256SUMS`, and verify the wheel:
 
 ```bash
 EXPRA_VERSION_BUMP=auto ./scripts/build-wheel.sh
+```
+
+Validate the installed editor entry point in a clean virtual environment:
+
+```bash
+./scripts/smoke-installed-editor.sh
 ```
 
 `auto` is the normal release mode: it selects `patch`, `feature`, `minor`, or
