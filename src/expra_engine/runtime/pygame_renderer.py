@@ -7,13 +7,15 @@ import math
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass, field, replace
-from io import BytesIO
 from typing import Any, cast
 
 from expra_engine.core.component import TransformComponent
 from expra_engine.core.scene import Scene
 from expra_engine.runtime.canvas_effects import modulate_color
+from expra_engine.runtime.pygame_geometry import projected_rectangle_points
+from expra_engine.runtime.pygame_resource_provider import PygameResourceProvider
 from expra_engine.runtime.pygame_screen_pipeline import PygameScreenPipeline
+from expra_engine.runtime.render_diagnostics import FailureKey, RenderDiagnostics
 from expra_engine.runtime.render_pipeline import RenderPlanBuilder
 from expra_engine.runtime.rendering import (
     Color,
@@ -31,13 +33,6 @@ from expra_engine.ui_model.geometry import Insets, Rect
 __all__ = ("PygameRenderFrame", "PygameRenderer", "PygameResourceProvider", "RenderFrame")
 
 _LOGGER = logging.getLogger(__name__)
-
-
-class _ResourceUnavailable:
-    pass
-
-
-_RESOURCE_UNAVAILABLE = _ResourceUnavailable()
 
 
 @dataclass(frozen=True)
@@ -68,61 +63,6 @@ class _FallbackRect:
         return (self.width, self.height)
 
 
-class PygameResourceProvider:
-    """Decode project-owned resource bytes into cached Pygame textures."""
-
-    def __init__(self, pygame_module: Any, resources: Any) -> None:
-        self._pygame = pygame_module
-        self._resources = resources
-        self._textures: dict[str, Any] = {}
-        self._texture_identities: dict[str, tuple[int, str] | None] = {}
-        self._last_failure: tuple[str, str] | None = None
-
-    @property
-    def last_failure(self) -> tuple[str, str] | None:
-        """Return the most recent failure from the last provider call."""
-        return self._last_failure
-
-    def __call__(self, texture_id: str) -> Any | None:
-        self._last_failure = None
-        identity = self._content_identity(texture_id)
-        if isinstance(identity, _ResourceUnavailable):
-            self._textures.pop(texture_id, None)
-            self._texture_identities.pop(texture_id, None)
-            return None
-        if texture_id in self._textures and (
-            identity is None or self._texture_identities.get(texture_id) == identity
-        ):
-            return self._textures[texture_id]
-        try:
-            data = self._resources.read_bytes(texture_id)
-        except Exception as exc:  # noqa: BLE001 - resource failures are frame-local
-            self._last_failure = ("read", str(exc))
-            _LOGGER.error("[Texture] Failed to read %s: %s", texture_id, exc)
-            return None
-        try:
-            texture = self._pygame.image.load(BytesIO(data))
-        except Exception as exc:  # noqa: BLE001 - decoder failures are frame-local
-            self._last_failure = ("decode", str(exc))
-            _LOGGER.error("[Texture] Failed to decode %s: %s", texture_id, exc)
-            return None
-        self._textures[texture_id] = texture
-        self._texture_identities[texture_id] = identity
-        return texture
-
-    def _content_identity(self, texture_id: str) -> tuple[int, str] | _ResourceUnavailable | None:
-        metadata = getattr(self._resources, "metadata", None)
-        if not callable(metadata):
-            return None
-        try:
-            value = cast(Any, metadata(texture_id))
-            return (int(value.size), str(value.content_hash))
-        except Exception as exc:  # noqa: BLE001 - metadata failures are frame-local
-            self._last_failure = ("resolve", str(exc))
-            _LOGGER.error("[Texture] Failed to resolve %s: %s", texture_id, exc)
-            return _RESOURCE_UNAVAILABLE
-
-
 class PygameRenderer:
     """Draw tagged scene entities as simple 2D primitives.
 
@@ -142,6 +82,7 @@ class PygameRenderer:
         font_provider: Any | None = None,
         resource_provider: Any | None = None,
         clear_color: tuple[int, ...] | None = (10, 14, 30),
+        diagnostics: RenderDiagnostics | None = None,
     ) -> None:
         self.pygame = pygame_module
         self.surface = surface
@@ -154,6 +95,7 @@ class PygameRenderer:
         self._resource_provider = resource_provider
         self._clear_color = clear_color
         self._draw_failed = False
+        self._diagnostics = diagnostics if diagnostics is not None else RenderDiagnostics(_LOGGER)
         self._screen_pipeline = PygameScreenPipeline(pygame_module)
         try:
             self.font = self._font_provider(None, font_size)
@@ -188,6 +130,7 @@ class PygameRenderer:
 
     def resize(self, viewport: Any) -> None:
         self._screen_pipeline.clear()
+        self._diagnostics.clear()
         self.context = (
             RenderContext(viewport, self.context.camera)
             if self.context
@@ -204,10 +147,12 @@ class PygameRenderer:
     def set_surface(self, surface: Any) -> None:
         self.surface = surface
         self._screen_pipeline.clear()
+        self._diagnostics.clear()
         self._update_screen_capabilities()
 
     def stop(self) -> None:
         self._screen_pipeline.clear()
+        self._diagnostics.clear()
         self._engine = None
         self.context = None
 
@@ -215,8 +160,7 @@ class PygameRenderer:
         surface = self.surface
         transform = getattr(self.pygame, "transform", None)
         can_capture = surface is not None and all(
-            callable(getattr(surface, name, None))
-            for name in ("subsurface", "copy", "get_size")
+            callable(getattr(surface, name, None)) for name in ("subsurface", "copy", "get_size")
         )
         can_scale = callable(getattr(transform, "scale", None))
         can_linear_scale = callable(getattr(transform, "smoothscale", None))
@@ -249,18 +193,40 @@ class PygameRenderer:
         except Exception:  # noqa: BLE001 - backend clear failures require fallback
             return False
 
+    def _fail_frame(self, key: FailureKey, message: str) -> None:
+        self._draw_failed = True
+        self._diagnostics.report(key, message)
+
     def render(self, frame: ContractRenderFrame) -> None:
         """Render a backend-neutral frame of primitive descriptors."""
         self._screen_pipeline.clear()
         self._draw_failed = False
         context = self.context
         if context is None:
-            self._draw_failed = True
+            self._fail_frame(
+                ("renderer", "lifecycle", "no-context"),
+                "[Render] renderer has no active context",
+            )
             return
         draw = getattr(self.pygame, "draw", None)
         surface = self.surface
-        if draw is None or surface is None or not self._clear_surface(surface, draw):
-            self._draw_failed = True
+        if draw is None:
+            self._fail_frame(
+                ("renderer", "backend", "draw-module"),
+                "[Render] Pygame draw capability unavailable",
+            )
+            return
+        if surface is None:
+            self._fail_frame(
+                ("renderer", "backend", "surface"),
+                "[Render] renderer has no target surface",
+            )
+            return
+        if not self._clear_surface(surface, draw):
+            self._fail_frame(
+                ("renderer", "backend", "clear"),
+                "[Render] renderer could not clear target surface",
+            )
             return
         if frame.submissions:
             self._screen_pipeline.execute(
@@ -276,6 +242,11 @@ class PygameRenderer:
                 self._draw_contract_item(item, surface, frame.modulation, context)
         if isinstance(frame.payload, RenderFrame):
             self.on_render(frame.payload, clear=False)
+        if not self._draw_failed:
+            self._diagnostics.clear()
+            reset_diagnostics = getattr(self._resource_provider, "reset_diagnostics", None)
+            if callable(reset_diagnostics):
+                reset_diagnostics()
 
     def _draw_contract_item(
         self,
@@ -285,9 +256,7 @@ class PygameRenderer:
         context: RenderContext,
     ) -> None:
         transform = (
-            item.sprite_transform
-            if item.material.texture_id is not None
-            else item.world_transform
+            item.sprite_transform if item.material.texture_id is not None else item.world_transform
         )
         center = context.camera.project(
             (transform.position[0], transform.position[1]), context.viewport
@@ -307,7 +276,8 @@ class PygameRenderer:
             if item.material.texture_id is not None:
                 if self._resource_provider is None:
                     self._draw_failed = True
-                    _LOGGER.error(
+                    self._diagnostics.report(
+                        ("renderer", "texture", item.material.texture_id, "no-provider"),
                         "[Texture] No resource provider attached to renderer for %s",
                         item.material.texture_id,
                     )
@@ -315,7 +285,8 @@ class PygameRenderer:
                 texture = self._resource_provider(item.material.texture_id)
                 if texture is None:
                     self._draw_failed = True
-                    _LOGGER.error(
+                    self._diagnostics.report(
+                        ("renderer", "texture", item.material.texture_id, "unavailable"),
                         "[Texture] Renderer received no texture for %s",
                         item.material.texture_id,
                     )
@@ -349,9 +320,7 @@ class PygameRenderer:
                     )
                 )
                 angle = transform.rotation - math.degrees(context.camera.rotation)
-                texture = self._prepare_texture_for_transform(
-                    texture, require_alpha=bool(angle)
-                )
+                texture = self._prepare_texture_for_transform(texture, require_alpha=bool(angle))
                 rendered_texture = (
                     texture
                     if modulation == Color(1.0, 1.0, 1.0, 1.0)
@@ -362,6 +331,11 @@ class PygameRenderer:
                 )
                 if rendered_texture is None:
                     self._draw_failed = True
+                    self._diagnostics.report(
+                        ("renderer", "texture", item.material.texture_id, "tint"),
+                        "[Texture] Renderer could not prepare %s",
+                        item.material.texture_id,
+                    )
                     return
                 transform_api = getattr(self.pygame, "transform", None)
                 if transform_api is not None and (item.sprite_flip_h or item.sprite_flip_v):
@@ -371,9 +345,7 @@ class PygameRenderer:
                             rendered_texture, item.sprite_flip_h, item.sprite_flip_v
                         )
                 if transform_api is not None and hasattr(transform_api, "smoothscale"):
-                    rendered_texture = transform_api.smoothscale(
-                        rendered_texture, (width, height)
-                    )
+                    rendered_texture = transform_api.smoothscale(rendered_texture, (width, height))
                 if angle and transform_api is not None:
                     rendered_texture = transform_api.rotate(rendered_texture, angle)
                 get_size = cast(
@@ -411,33 +383,51 @@ class PygameRenderer:
                 )
                 return
             if item.primitive.kind in ("rectangle", "rect"):
-                width = round(
-                    abs(
-                        item.primitive.size[0]
-                        * transform.scale[0]
-                        / context.camera.width
-                        * context.viewport.width
+                if transform.rotation or context.camera.rotation:
+                    polygon = getattr(draw, "polygon", None)
+                    if not callable(polygon):
+                        raise RuntimeError("Pygame backend cannot draw transformed rectangles")
+                    points = projected_rectangle_points(item, transform, context)
+                    polygon(surface, color, points)
+                    if item.material.outline is not None and item.material.outline_width:
+                        polygon(
+                            surface,
+                            self._color(
+                                modulate_color(item.material.outline, modulation),
+                                item.material.opacity,
+                            ),
+                            points,
+                            round(item.material.outline_width),
+                        )
+                else:
+                    width = round(
+                        abs(
+                            item.primitive.size[0]
+                            * transform.scale[0]
+                            / context.camera.width
+                            * context.viewport.width
+                        )
                     )
-                )
-                height = round(
-                    abs(
-                        item.primitive.size[1]
-                        * transform.scale[1]
-                        / context.camera.height
-                        * context.viewport.height
+                    height = round(
+                        abs(
+                            item.primitive.size[1]
+                            * transform.scale[1]
+                            / context.camera.height
+                            * context.viewport.height
+                        )
                     )
-                )
-                draw.rect(surface, color, self._rect_from_center(position, width, height))
-                if item.material.outline is not None and item.material.outline_width:
-                    draw.rect(
-                        surface,
-                        self._color(
-                            modulate_color(item.material.outline, modulation),
-                            item.material.opacity,
-                        ),
-                        self._rect_from_center(position, width, height),
-                        round(item.material.outline_width),
-                    )
+                    rectangle = self._rect_from_center(position, width, height)
+                    draw.rect(surface, color, rectangle)
+                    if item.material.outline is not None and item.material.outline_width:
+                        draw.rect(
+                            surface,
+                            self._color(
+                                modulate_color(item.material.outline, modulation),
+                                item.material.opacity,
+                            ),
+                            rectangle,
+                            round(item.material.outline_width),
+                        )
             elif item.primitive.kind == "circle":
                 radius = item.primitive.radius or item.primitive.size[0] / 2
                 pixels = round(
@@ -449,13 +439,47 @@ class PygameRenderer:
                     )
                 )
                 draw.circle(surface, color, position, pixels)
+                if item.material.outline is not None and item.material.outline_width:
+                    draw.circle(
+                        surface,
+                        self._color(
+                            modulate_color(item.material.outline, modulation),
+                            item.material.opacity,
+                        ),
+                        position,
+                        pixels,
+                        round(item.material.outline_width),
+                    )
             elif item.primitive.kind == "point":
                 draw.circle(surface, color, position, 1)
+                if item.material.outline is not None and item.material.outline_width:
+                    draw.circle(
+                        surface,
+                        self._color(
+                            modulate_color(item.material.outline, modulation),
+                            item.material.opacity,
+                        ),
+                        position,
+                        1,
+                        round(item.material.outline_width),
+                    )
+            else:
+                self._draw_failed = True
+                self._diagnostics.report(
+                    ("renderer", "primitive", item.key, item.primitive.kind),
+                    "[Render] unsupported primitive %s for %s",
+                    item.primitive.kind,
+                    item.key,
+                )
         except Exception as exc:  # noqa: BLE001 - backend draw failures are frame-local
             self._draw_failed = True
-            texture_id = item.material.texture_id
-            if texture_id is not None:
-                _LOGGER.error("[Texture] Renderer draw failed for %s: %s", texture_id, exc)
+            failure_type = "texture" if item.material.texture_id is not None else "primitive"
+            self._diagnostics.report(
+                ("renderer", failure_type, item.key, type(exc).__name__),
+                "[Render] draw failed for %s: %s",
+                item.key,
+                exc,
+            )
 
     def _prepare_texture_for_transform(self, texture: Any, *, require_alpha: bool) -> Any:
         get_bitsize = cast(Callable[[], int] | None, getattr(texture, "get_bitsize", None))
@@ -467,9 +491,7 @@ class PygameRenderer:
         has_alpha = callable(get_flags) and bool(get_flags() & alpha_flag)
         if bitsize in (24, 32) and (not require_alpha or has_alpha):
             return texture
-        get_size = cast(
-            Callable[[], tuple[int, int]] | None, getattr(texture, "get_size", None)
-        )
+        get_size = cast(Callable[[], tuple[int, int]] | None, getattr(texture, "get_size", None))
         surface_factory = cast(Callable[..., Any] | None, getattr(self.pygame, "Surface", None))
         if not callable(get_size) or not callable(surface_factory):
             return texture
@@ -917,5 +939,6 @@ class PygameRenderer:
 
     def _rect_from_center(self, center: tuple[int, int], width: int, height: int) -> Any:
         return self._rect((center[0] - width // 2, center[1] - height // 2, width, height))
+
 
 PygameRenderFrame = RenderFrame

@@ -69,20 +69,39 @@ class _FakeDraw:
     def __init__(self) -> None:
         self.rects: list[tuple[object, object, object]] = []
         self.circles: list[tuple[object, object, object, object]] = []
+        self.circle_widths: list[int] = []
         self.lines: list[tuple[object, object, object, object]] = []
         self.polygons: list[tuple[object, object, object]] = []
+        self.polygon_widths: list[int] = []
 
     def rect(self, surface: object, color: object, rectangle: object, width: int = 0) -> None:
         self.rects.append((surface, color, rectangle, width))
 
-    def circle(self, surface: object, color: object, center: object, radius: object) -> None:
+    def circle(
+        self,
+        surface: object,
+        color: object,
+        center: object,
+        radius: object,
+        width: int = 0,
+    ) -> None:
         self.circles.append((surface, color, center, radius))
+        if width:
+            self.circle_widths.append(width)
 
     def line(self, surface: object, color: object, start: object, end: object) -> None:
         self.lines.append((surface, color, start, end))
 
-    def polygon(self, surface: object, color: object, points: object) -> None:
+    def polygon(
+        self,
+        surface: object,
+        color: object,
+        points: object,
+        width: int = 0,
+    ) -> None:
         self.polygons.append((surface, color, points))
+        if width:
+            self.polygon_widths.append(width)
 
 
 class _FakeFont:
@@ -259,7 +278,9 @@ class TestPygameRenderer(unittest.TestCase):
         with self.assertLogs("expra_engine.runtime.pygame_renderer", level="ERROR") as logs:
             assert provider("assets://ship.png") is None
 
-        assert any("[Texture] Failed to decode assets://ship.png" in message for message in logs.output)
+        assert any(
+            "[Texture] Failed to decode assets://ship.png" in message for message in logs.output
+        )
         self.assertEqual(provider.last_failure[0], "decode")  # type: ignore[index]
 
     def test_resource_provider_reports_resolution_and_read_failures(self) -> None:
@@ -297,6 +318,67 @@ class TestPygameRenderer(unittest.TestCase):
 
         self.assertEqual(provider("assets://ship.png"), b"ok")
         self.assertIsNone(provider.last_failure)
+
+    def test_resource_provider_deduplicates_persistent_failures_and_recovers(self) -> None:
+        available = False
+
+        def read_bytes(resource_id: str) -> bytes:
+            if not available:
+                raise OSError(f"unreadable {resource_id}")
+            return b"ok"
+
+        resource = SimpleNamespace(
+            metadata=lambda _resource_id: SimpleNamespace(
+                size=2, content_hash="stable" if available else "unavailable"
+            ),
+            read_bytes=read_bytes,
+        )
+        provider = PygameResourceProvider(
+            SimpleNamespace(image=SimpleNamespace(load=lambda stream: stream.read())), resource
+        )
+
+        with self.assertLogs("expra_engine.runtime.pygame_renderer", level="ERROR") as logs:
+            for _ in range(100):
+                self.assertIsNone(provider("assets://first.png"))
+            self.assertIsNone(provider("assets://second.png"))
+            available = True
+            self.assertEqual(provider("assets://first.png"), b"ok")
+            available = False
+            self.assertIsNone(provider("assets://first.png"))
+
+        self.assertEqual(len(logs.output), 3)
+        self.assertIn("assets://first.png", logs.output[0])
+        self.assertIn("assets://second.png", logs.output[1])
+        self.assertIn("assets://first.png", logs.output[2])
+
+    def test_successful_frame_resets_provider_failure_diagnostics(self) -> None:
+        resources = SimpleNamespace(
+            metadata=lambda _resource_id: SimpleNamespace(size=1, content_hash="same"),
+            read_bytes=lambda _resource_id: (_ for _ in ()).throw(OSError("unreadable")),
+        )
+        pygame = SimpleNamespace(
+            image=SimpleNamespace(load=lambda _stream: object()),
+            draw=_FakeDraw(),
+        )
+        provider = PygameResourceProvider(pygame, resources)
+        renderer = PygameRenderer(
+            pygame, _ClearSurface(), resource_provider=provider, clear_color=None
+        )
+        renderer.start(RenderContext(Viewport(0, 0, 100, 100)))
+        item = RenderItem(
+            "sprite",
+            PrimitiveDescriptor("sprite", size=(2.0, 1.0)),
+            Transform(),
+            material=MaterialDescriptor(texture_id="ship"),
+        )
+
+        with self.assertLogs("expra_engine.runtime.pygame_renderer", level="ERROR") as logs:
+            renderer.render(RenderContractFrame((item,)))
+            renderer.render(RenderContractFrame())
+            renderer.render(RenderContractFrame((item,)))
+
+        provider_errors = [message for message in logs.output if "Failed to read ship" in message]
+        self.assertEqual(len(provider_errors), 2)
 
     def test_resource_provider_reloads_when_content_identity_changes(self) -> None:
         resources = _MutableResource()
@@ -359,6 +441,36 @@ class TestPygameRenderer(unittest.TestCase):
 
         self.assertTrue(renderer.draw_failed)
 
+    def test_clear_failure_reports_the_backend_operation_once(self) -> None:
+        class FailingClearSurface(_ClearSurface):
+            def fill(self, color: object) -> None:
+                raise RuntimeError(f"clear failed: {color!r}")
+
+        renderer = PygameRenderer(
+            _FakePygame(_FakeFont()),
+            FailingClearSurface(),
+            clear_color=None,
+        )
+        renderer.start(RenderContext(Viewport(0, 0, 100, 100)))
+
+        with self.assertLogs("expra_engine.runtime.pygame_renderer", level="ERROR") as logs:
+            renderer.render(RenderContractFrame())
+            renderer.render(RenderContractFrame())
+
+        self.assertEqual(len(logs.output), 1)
+        self.assertIn("could not clear target surface", logs.output[0])
+
+    def test_missing_backend_surface_reports_the_capability_once(self) -> None:
+        renderer = PygameRenderer(_FakePygame(_FakeFont()), None)
+        renderer.start(RenderContext(Viewport(0, 0, 100, 100)))
+
+        with self.assertLogs("expra_engine.runtime.pygame_renderer", level="ERROR") as logs:
+            renderer.render(RenderContractFrame())
+            renderer.render(RenderContractFrame())
+
+        self.assertEqual(len(logs.output), 1)
+        self.assertIn("no target surface", logs.output[0])
+
     def test_missing_texture_marks_frame_incomplete_for_editor_fallback(self) -> None:
         renderer = PygameRenderer(
             _FakePygame(_FakeFont()),
@@ -376,6 +488,27 @@ class TestPygameRenderer(unittest.TestCase):
         renderer.render(RenderContractFrame((item,)))
 
         self.assertTrue(renderer.draw_failed)
+
+    def test_backend_reset_allows_a_persistent_failure_to_log_again(self) -> None:
+        renderer = PygameRenderer(
+            _FakePygame(_FakeFont()),
+            _FakeSurface(),
+            resource_provider=lambda _texture_id: None,
+        )
+        renderer.start(RenderContext(Viewport(0, 0, 100, 100)))
+        item = RenderItem(
+            "sprite",
+            PrimitiveDescriptor("sprite", size=(2.0, 1.0)),
+            Transform(),
+            material=MaterialDescriptor(texture_id="ship"),
+        )
+
+        with self.assertLogs("expra_engine.runtime.pygame_renderer", level="ERROR") as logs:
+            renderer.render(RenderContractFrame((item,)))
+            renderer.set_surface(_FakeSurface())
+            renderer.render(RenderContractFrame((item,)))
+
+        self.assertEqual(len(logs.output), 2)
 
     def test_default_capabilities_do_not_claim_screen_support(self) -> None:
         capabilities = RendererCapabilities()
@@ -437,6 +570,22 @@ class TestPygameRenderer(unittest.TestCase):
         )
         self.assertEqual(surface.subsurfaces, [(0, 0, 100, 100)])
         self.assertEqual(len(surface.blits), 1)
+
+    def test_render_plan_uses_rotated_primitive_path_before_capture(self) -> None:
+        scene = _screen_effect_scene()
+        background = scene.find_entity("background")
+        assert background is not None
+        background.add_component(TransformComponent(rotation=30.0))
+        events: list[str] = []
+        pygame = _ScreenPygame(_FakeFont(), events)
+        renderer = PygameRenderer(pygame, _ScreenSurface(events=events))
+        renderer.start(RenderContext(Viewport(0, 0, 100, 100)))
+
+        renderer.render(extract_render_frame(scene))
+
+        self.assertFalse(renderer.draw_failed)
+        self.assertTrue(pygame.draw.polygons)
+        self.assertIn("capture", events)
 
     def test_effect_frame_applies_canvas_modulation_to_contract_items_once(self) -> None:
         scene = _screen_effect_scene()
@@ -649,6 +798,56 @@ class TestPygameRenderer(unittest.TestCase):
         self.assertEqual(renderer.pygame.draw.rects[2][1], (0, 0, 255))
         self.assertEqual(renderer.pygame.draw.rects[2][3], 2)
 
+    def test_rotated_rectangle_uses_projected_polygon_for_fill_and_outline(self) -> None:
+        pygame = _FakePygame(_FakeFont())
+        renderer = PygameRenderer(pygame, _FakeSurface())
+        camera = OrthographicCamera(width=10.0, height=10.0)
+        camera.rotation = radians(15.0)
+        renderer.start(
+            RenderContext(
+                Viewport(0, 0, 100, 100),
+                camera,
+            )
+        )
+        item = RenderItem(
+            "rotated",
+            PrimitiveDescriptor("rectangle", size=(2.0, 1.0)),
+            Transform(position=(1.0, 0.5, 0.0), rotation=45.0),
+            material=MaterialDescriptor(
+                color=Color(1.0, 0.0, 0.0),
+                outline=Color(0.0, 0.0, 1.0),
+                outline_width=2,
+            ),
+        )
+
+        renderer.render(RenderContractFrame((item,)))
+
+        self.assertFalse(renderer.draw_failed)
+        self.assertEqual(len(pygame.draw.polygons), 2)
+        self.assertTrue(all(len(points) == 4 for _, _, points in pygame.draw.polygons))
+        self.assertEqual(pygame.draw.polygon_widths, [2])
+
+    def test_circle_and_point_outlines_use_canonical_draw_support(self) -> None:
+        pygame = _FakePygame(_FakeFont())
+        renderer = PygameRenderer(pygame, _FakeSurface())
+        renderer.start(RenderContext(Viewport(0, 0, 100, 100)))
+        outline = MaterialDescriptor(outline=Color(0.0, 0.0, 1.0), outline_width=1)
+
+        renderer.render(
+            RenderContractFrame(
+                (
+                    RenderItem(
+                        "circle", PrimitiveDescriptor("circle", (2.0, 2.0)), Transform(), outline
+                    ),
+                    RenderItem("point", PrimitiveDescriptor("point"), Transform(), outline),
+                )
+            )
+        )
+
+        self.assertFalse(renderer.draw_failed)
+        self.assertEqual(len(pygame.draw.circles), 4)
+        self.assertEqual(pygame.draw.circle_widths, [1, 1])
+
     def test_contract_frame_applies_canvas_modulation_after_material_tint_once(self) -> None:
         renderer = PygameRenderer(_FakePygame(_FakeFont()), _FakeSurface())
         renderer.start(RenderContext(Viewport(0, 0, 100, 100)))
@@ -702,7 +901,8 @@ class TestPygameRenderer(unittest.TestCase):
 
         renderer.render(extract_render_frame(scene))
 
-        assert renderer.pygame.draw.rects[1][1] == (82, 46, 20, 128)
+        assert renderer.pygame.draw.rects[1][1] == (102, 76, 51, 128)
+
     def test_render_frame_aliases_keep_protocol_and_legacy_hud_frames_distinct(self) -> None:
         self.assertIs(RenderFrame, PygameRenderFrame)
         self.assertIsNot(RenderContractFrame, PygameRenderFrame)
@@ -764,8 +964,8 @@ class TestPygameRenderer(unittest.TestCase):
         calls: list[tuple[str, object]] = []
         pygame = _FakePygame(_FakeFont())
         pygame.transform = SimpleNamespace(
-            rotate=lambda value, angle: (calls.append(("rotate", angle)) or value),
-            smoothscale=lambda value, size: (calls.append(("scale", size)) or value),
+            rotate=lambda value, angle: calls.append(("rotate", angle)) or value,
+            smoothscale=lambda value, size: calls.append(("scale", size)) or value,
         )
         renderer = PygameRenderer(pygame, _FakeSurface(), resource_provider=lambda _: texture)
         camera = OrthographicCamera()
@@ -918,7 +1118,9 @@ class TestPygameRenderer(unittest.TestCase):
             arena_bounds=(0, 0, 100, 100),
         )
 
-        renderer.on_render(RenderFrame(scene, interpolator=interpolator, interpolation_fraction=0.5))
+        renderer.on_render(
+            RenderFrame(scene, interpolator=interpolator, interpolation_fraction=0.5)
+        )
 
         assert renderer.pygame.draw.rects[1][2].center == (5, 0)
 
@@ -950,7 +1152,10 @@ class TestPygameRenderer(unittest.TestCase):
             arena_bounds=(0, 0, 200, 100),
         )
         renderer.start(
-            RenderContext(Viewport(0, 0, 200, 100), OrthographicCamera(position=(10.0, 5.0, 0.0), width=20.0, height=10.0))
+            RenderContext(
+                Viewport(0, 0, 200, 100),
+                OrthographicCamera(position=(10.0, 5.0, 0.0), width=20.0, height=10.0),
+            )
         )
 
         renderer.on_render(RenderFrame(scene))

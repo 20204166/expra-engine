@@ -42,7 +42,9 @@ def test_visual_components_round_trip_as_additive_json_payloads() -> None:
             visible=False,
         ),
         SpriteComponent("ship.png", tint=Color(0.2, 0.3, 0.4, 0.5), width=4.0, height=5.0),
-        TextComponent("", font="mono", size=18.0, color=Color(0.9, 0.8, 0.7), max_width=120.0, align="right"),
+        TextComponent(
+            "", font="mono", size=18.0, color=Color(0.9, 0.8, 0.7), max_width=120.0, align="right"
+        ),
     )
 
     for component in components:
@@ -55,7 +57,15 @@ def test_visual_components_round_trip_as_additive_json_payloads() -> None:
 
 def test_visual_components_expose_registry_field_metadata() -> None:
     assert tuple(field.name for field in component_type_spec("primitive").fields) == (
-        "kind", "width", "height", "radius", "fill", "outline", "outline_width", "layer", "visible"
+        "kind",
+        "width",
+        "height",
+        "radius",
+        "fill",
+        "outline",
+        "outline_width",
+        "layer",
+        "visible",
     )
     assert tuple(field.name for field in component_type_spec("sprite").fields) == (
         "asset",
@@ -71,13 +81,21 @@ def test_visual_components_expose_registry_field_metadata() -> None:
         "visible",
     )
     assert tuple(field.name for field in component_type_spec("text").fields) == (
-        "text", "font", "size", "color", "max_width", "align", "layer", "visible"
+        "text",
+        "font",
+        "size",
+        "color",
+        "max_width",
+        "align",
+        "layer",
+        "visible",
     )
 
 
 def test_canvas_modulation_is_registered_with_editor_metadata() -> None:
     assert tuple(field.name for field in component_type_spec("canvas_modulate").fields) == (
-        "color", "enabled"
+        "color",
+        "enabled",
     )
     component = component_from_dict(
         {"type": "canvas_modulate", "color": [0.2, 0.3, 0.4, 0.5], "enabled": False}
@@ -104,7 +122,6 @@ def test_extractor_keeps_existing_materials_and_resolves_modulation_once() -> No
     assert frame.modulation == Color(0.5, 0.5, 0.5, 0.5)
     assert frame.items[0].material == MaterialDescriptor(
         color=Color(0.8, 0.6, 0.4, 0.5),
-        tint=Color(0.8, 0.6, 0.4, 0.5),
     )
 
 
@@ -134,12 +151,19 @@ def test_extractor_composes_transforms_and_orders_phase_layer_and_entity_stably(
     second = scene.create_entity("second", entity_id="second")
     second.add_component(PrimitiveComponent("rectangle", layer=3))
     transparent = scene.create_entity("transparent", entity_id="transparent")
-    transparent.add_component(PrimitiveComponent("rectangle", fill=Color(1.0, 1.0, 1.0, 0.5), layer=-1))
+    transparent.add_component(
+        PrimitiveComponent("rectangle", fill=Color(1.0, 1.0, 1.0, 0.5), layer=-1)
+    )
 
     frame = extract_render_frame(scene, elapsed=1.25)
 
     assert frame.elapsed == 1.25
-    assert [item.key for item in frame.ordered_items()] == ["child", "first", "second", "transparent"]
+    assert [item.key for item in frame.ordered_items()] == [
+        "child",
+        "first",
+        "second",
+        "transparent",
+    ]
     child_item = next(item for item in frame.items if item.key == "child")
     assert child_item.world_transform.position == (10.0, 7.0, 0.0)
     assert child_item.phase is RenderPhase.OPAQUE

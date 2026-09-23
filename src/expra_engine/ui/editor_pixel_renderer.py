@@ -5,11 +5,12 @@ from __future__ import annotations
 import base64
 import logging
 import tkinter as tk
-from collections.abc import Callable
+from collections.abc import Callable, Hashable, Mapping
 from io import BytesIO
 from typing import Any, cast
 
 from expra_engine.runtime.pygame_renderer import PygameRenderer, PygameResourceProvider
+from expra_engine.runtime.render_diagnostics import RenderDiagnostics
 from expra_engine.runtime.rendering import OrthographicCamera, RenderContext, RenderFrame, Viewport
 
 __all__ = (
@@ -31,19 +32,35 @@ def render_editor_frame_to_image(
     renderer_factory: Callable[[Any], Any],
     encode_surface: Callable[[Any], bytes],
     image_factory: Callable[[bytes], Any],
+    diagnostics: RenderDiagnostics | None = None,
+    entity_names: Mapping[str, str] | None = None,
 ) -> Any | None:
     """Render one canonical frame and bridge its pixels into Tk safely."""
+    diagnostics = diagnostics or RenderDiagnostics(_LOGGER)
     try:
         surface = surface_factory((context.viewport.width, context.viewport.height))
         renderer = renderer_factory(surface)
         renderer.start(context)
         renderer.render(frame)
         if getattr(renderer, "draw_failed", False):
-            _log_presentation_failure(frame, "renderer produced an incomplete frame")
+            _log_presentation_failure(
+                frame,
+                "renderer produced an incomplete frame",
+                diagnostics=diagnostics,
+                entity_names=entity_names,
+            )
             return None
-        return image_factory(encode_surface(surface))
+        image = image_factory(encode_surface(surface))
+        diagnostics.clear()
+        return image
     except Exception as exc:  # noqa: BLE001 - editor backend failures use geometry fallback
-        _log_presentation_failure(frame, str(exc))
+        _log_presentation_failure(
+            frame,
+            str(exc),
+            diagnostics=diagnostics,
+            entity_names=entity_names,
+            failure_signature=type(exc).__name__,
+        )
         return None
 
 
@@ -58,44 +75,48 @@ def frame_textures_available(
     frame: RenderFrame,
     context: RenderContext,
     resource_provider: Callable[[str], Any | None],
+    *,
+    diagnostics: RenderDiagnostics | None = None,
+    entity_names: Mapping[str, str] | None = None,
 ) -> bool:
     """Return whether every visible texture can participate in pixel rendering."""
+    diagnostics = diagnostics or RenderDiagnostics(_LOGGER)
     try:
         items = frame.visible_items(context)
+        available = True
         for item in items:
             texture_id = item.material.texture_id
             if texture_id is None and item.nine_slice is not None:
                 texture_id = item.nine_slice.texture_id
-            if texture_id is None and item.text is None and item.nine_slice is None:
-                if item.primitive.kind not in {"rectangle", "rect", "circle", "point"}:
-                    _LOGGER.error(
-                        "[EditorTexture] presentation failed for %s: unsupported primitive %s",
-                        item.key,
-                        item.primitive.kind,
-                    )
-                    return False
-                if item.primitive.kind in {"rectangle", "rect"} and (
-                    item.world_transform.rotation or context.camera.rotation
-                ):
-                    _LOGGER.error(
-                        "[EditorTexture] presentation failed for %s: rotated primitive",
-                        item.key,
-                    )
-                    return False
-                if item.primitive.kind in {"circle", "point"} and (
-                    item.material.outline is not None and item.material.outline_width
-                ):
-                    _LOGGER.error(
-                        "[EditorTexture] presentation failed for %s: outlined primitive",
-                        item.key,
-                    )
-                    return False
+            if (
+                texture_id is None
+                and item.text is None
+                and item.nine_slice is None
+                and item.primitive.kind not in {"rectangle", "rect", "circle", "point"}
+            ):
+                diagnostics.report(
+                    ("preflight", "primitive", item.key, item.primitive.kind),
+                    "[Render] unsupported primitive: entity=%r id=%r kind=%r rotation=%.1f",
+                    _entity_name(item.key, entity_names),
+                    item.key,
+                    item.primitive.kind,
+                    item.world_transform.rotation,
+                )
+                available = False
+                continue
             if texture_id is None:
                 continue
             texture = resource_provider(texture_id)
             if texture is None:
-                _log_texture_failure(texture_id, resource_provider)
-                return False
+                _log_texture_failure(
+                    texture_id,
+                    resource_provider,
+                    diagnostics=diagnostics,
+                    entity_id=item.key,
+                    entity_names=entity_names,
+                )
+                available = False
+                continue
             region = item.material.source_region
             if region is None:
                 continue
@@ -109,16 +130,34 @@ def frame_textures_available(
                 or region.x + region.width > width
                 or region.y + region.height > height
             ):
-                _LOGGER.error(
-                    "[EditorTexture] presentation failed for %s: invalid source region %s",
+                diagnostics.report(
+                    (
+                        "preflight",
+                        "source-region",
+                        item.key,
+                        texture_id,
+                        region.x,
+                        region.y,
+                        region.width,
+                        region.height,
+                    ),
+                    "[EditorTexture] invalid source region entity=%r id=%r resource=%s: %s",
+                    _entity_name(item.key, entity_names),
+                    item.key,
                     texture_id,
                     region,
                 )
-                return False
+                available = False
+        return available
     except Exception as exc:  # noqa: BLE001 - editor validation failures use geometry fallback
-        _log_presentation_failure(frame, str(exc))
+        _log_presentation_failure(
+            frame,
+            str(exc),
+            diagnostics=diagnostics,
+            entity_names=entity_names,
+            failure_signature=type(exc).__name__,
+        )
         return False
-    return True
 
 
 def render_editor_frame_to_tk_image(
@@ -131,15 +170,34 @@ def render_editor_frame_to_tk_image(
     resource_provider: PygameResourceProvider | None,
     pygame_module: Any,
     image_master: Any,
+    diagnostics: RenderDiagnostics | None = None,
+    entity_names: Mapping[str, str] | None = None,
 ) -> Any | None:
     """Render a complete editor frame, or return ``None`` for Tk fallback."""
+    diagnostics = diagnostics or RenderDiagnostics(_LOGGER)
     if resource_service is None:
-        _log_presentation_failure(frame, "renderer has no resource provider")
+        _log_presentation_failure(
+            frame,
+            "renderer has no resource provider",
+            diagnostics=diagnostics,
+            entity_names=entity_names,
+        )
         return None
     if resource_provider is None:
-        _log_presentation_failure(frame, "renderer has no resource provider")
+        _log_presentation_failure(
+            frame,
+            "renderer has no resource provider",
+            diagnostics=diagnostics,
+            entity_names=entity_names,
+        )
         return None
-    if not frame_textures_available(frame, context, resource_provider):
+    if not frame_textures_available(
+        frame,
+        context,
+        resource_provider,
+        diagnostics=diagnostics,
+        entity_names=entity_names,
+    ):
         return None
     try:
         font_init = getattr(getattr(pygame_module, "font", None), "init", None)
@@ -161,6 +219,7 @@ def render_editor_frame_to_tk_image(
                 arena_bounds=(0, 0, width, height),
                 resource_provider=resource_provider,
                 clear_color=None,
+                diagnostics=diagnostics,
             )
 
         return render_editor_frame_to_image(
@@ -173,9 +232,17 @@ def render_editor_frame_to_tk_image(
                 master=image_master,
                 data=base64.b64encode(data).decode("ascii"),
             ),
+            diagnostics=diagnostics,
+            entity_names=entity_names,
         )
     except Exception as exc:  # noqa: BLE001 - editor backend failures use geometry fallback
-        _log_presentation_failure(frame, str(exc))
+        _log_presentation_failure(
+            frame,
+            str(exc),
+            diagnostics=diagnostics,
+            entity_names=entity_names,
+            failure_signature=type(exc).__name__,
+        )
         return None
 
 
@@ -195,6 +262,8 @@ class EditorPixelRenderer:
         self._resource_service = resource_service
         self._provider: PygameResourceProvider | None = None
         self._provider_resources: Any | None = None
+        self._diagnostics = RenderDiagnostics(_LOGGER)
+        self._last_image: Any | None = None
 
     @property
     def resource_service(self) -> Any | None:
@@ -206,6 +275,15 @@ class EditorPixelRenderer:
         self._resource_service = resource_service
         self._provider = None
         self._provider_resources = None
+        self._diagnostics.clear()
+        self._last_image = None
+
+    def clear(self) -> None:
+        """Discard backend state and any image retained for failure recovery."""
+        self._provider = None
+        self._provider_resources = None
+        self._diagnostics.clear()
+        self._last_image = None
 
     def render(
         self,
@@ -214,9 +292,16 @@ class EditorPixelRenderer:
         width: int,
         height: int,
         image_master: Any,
+        *,
+        entity_names: Mapping[str, str] | None = None,
     ) -> Any | None:
         if self._resource_service is None:
-            _log_presentation_failure(frame, "renderer has no resource provider")
+            _log_presentation_failure(
+                frame,
+                "renderer has no resource provider",
+                diagnostics=self._diagnostics,
+                entity_names=entity_names,
+            )
             return None
         try:
             import pygame  # type: ignore[reportMissingImports]
@@ -224,7 +309,7 @@ class EditorPixelRenderer:
             if self._provider_resources is not self._resource_service:
                 self._provider = PygameResourceProvider(pygame, self._resource_service)
                 self._provider_resources = self._resource_service
-            return render_editor_frame_to_tk_image(
+            image = render_editor_frame_to_tk_image(
                 frame,
                 editor_render_context(editor_camera, width, height),
                 width=width,
@@ -233,16 +318,28 @@ class EditorPixelRenderer:
                 resource_provider=self._provider,
                 pygame_module=pygame,
                 image_master=image_master,
+                diagnostics=self._diagnostics,
+                entity_names=entity_names,
             )
+            if image is not None:
+                self._last_image = image
+                return image
+            return self._last_image
         except Exception as exc:  # noqa: BLE001 - editor backend failures use geometry fallback
-            _log_presentation_failure(frame, str(exc))
-            return None
+            _log_presentation_failure(
+                frame,
+                str(exc),
+                diagnostics=self._diagnostics,
+                entity_names=entity_names,
+                failure_signature=type(exc).__name__,
+            )
+            return self._last_image
 
 
-def _frame_texture_ids(frame: RenderFrame) -> tuple[str, ...]:
+def _frame_texture_items(frame: RenderFrame) -> tuple[tuple[str, str], ...]:
     return tuple(
         dict.fromkeys(
-            texture_id
+            (item.key, texture_id)
             for item in frame.items
             for texture_id in (
                 item.material.texture_id,
@@ -253,24 +350,81 @@ def _frame_texture_ids(frame: RenderFrame) -> tuple[str, ...]:
     )
 
 
-def _log_texture_failure(texture_id: str, resource_provider: Any) -> None:
+def _entity_name(entity_id: str, entity_names: Mapping[str, str] | None) -> str:
+    return entity_names.get(entity_id, entity_id) if entity_names is not None else entity_id
+
+
+def _log_texture_failure(
+    texture_id: str,
+    resource_provider: Any,
+    *,
+    diagnostics: RenderDiagnostics,
+    entity_id: str | None = None,
+    entity_names: Mapping[str, str] | None = None,
+) -> None:
     failure = getattr(resource_provider, "last_failure", None)
     stage = failure[0] if isinstance(failure, tuple) and failure else None
     if stage == "decode":
-        _LOGGER.error("[EditorTexture] unable to decode %s", texture_id)
+        detail = "unable to decode"
     elif stage in {"resolve", "read"}:
-        _LOGGER.error("[EditorTexture] unable to resolve %s", texture_id)
+        detail = "unable to resolve"
     else:
-        _LOGGER.error("[EditorTexture] presentation failed for %s", texture_id)
+        detail = "presentation failed"
+    if entity_id is None:
+        diagnostics.report(
+            ("preflight", "texture", texture_id, stage or "unknown"),
+            f"[EditorTexture] {detail} %s",
+            texture_id,
+        )
+    else:
+        diagnostics.report(
+            ("preflight", "texture", entity_id, texture_id, stage or "unknown"),
+            "[EditorTexture] %s entity=%r id=%r resource=%s",
+            detail,
+            _entity_name(entity_id, entity_names),
+            entity_id,
+            texture_id,
+        )
 
 
-def _log_presentation_failure(frame: RenderFrame, detail: str) -> None:
+def _log_presentation_failure(
+    frame: RenderFrame,
+    detail: str,
+    *,
+    diagnostics: RenderDiagnostics,
+    entity_names: Mapping[str, str] | None = None,
+    failure_signature: Hashable | None = None,
+) -> None:
     if detail == "renderer has no resource provider":
-        _LOGGER.error("[EditorTexture] renderer has no resource provider")
+        diagnostics.report(
+            ("presentation", "no-resource-provider"),
+            "[EditorTexture] renderer has no resource provider",
+        )
         return
-    texture_ids = _frame_texture_ids(frame)
-    if texture_ids:
-        for texture_id in texture_ids:
-            _LOGGER.error("[EditorTexture] presentation failed for %s: %s", texture_id, detail)
+    signature = detail if failure_signature is None else failure_signature
+    texture_items = _frame_texture_items(frame)
+    if texture_items:
+        for entity_id, texture_id in texture_items:
+            diagnostics.report(
+                ("presentation", entity_id, texture_id, signature),
+                "[EditorTexture] presentation failed for entity=%r id=%r resource=%s: %s",
+                _entity_name(entity_id, entity_names),
+                entity_id,
+                texture_id,
+                detail,
+            )
+    elif frame.items:
+        for item in frame.items:
+            diagnostics.report(
+                ("presentation", item.key, signature),
+                "[EditorTexture] presentation failed for entity=%r id=%r: %s",
+                _entity_name(item.key, entity_names),
+                item.key,
+                detail,
+            )
     else:
-        _LOGGER.error("[EditorTexture] presentation failed: %s", detail)
+        diagnostics.report(
+            ("presentation", signature),
+            "[EditorTexture] presentation failed: %s",
+            detail,
+        )

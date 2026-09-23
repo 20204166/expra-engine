@@ -189,6 +189,7 @@ class ViewportPanel(tk.Frame):
             self._camera.apply_dict(scene.camera)
             self._grid_dirty = True
             self._clear_all_items()
+            self._pixel_renderer.clear()
         if overlays_changed:
             self._grid_dirty = True
 
@@ -355,6 +356,7 @@ class ViewportPanel(tk.Frame):
         canvas.delete("no_scene_text")
         if self._scene is None:
             self._clear_all_items()
+            self._pixel_renderer.clear()
             self._canvas.itemconfigure(self._pixel_image_item, state="hidden", image="")
             self._pixel_image = None
             canvas.create_text(
@@ -373,6 +375,7 @@ class ViewportPanel(tk.Frame):
             max(1, int(w)),
             max(1, int(h)),
             self._canvas,
+            entity_names={entity_id: entity.name for entity_id, entity in self._entity_map.items()},
         )
         runtime_pixels = pixel_image is not None
         if runtime_pixels:

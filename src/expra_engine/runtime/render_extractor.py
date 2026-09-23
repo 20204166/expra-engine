@@ -59,11 +59,15 @@ def _transform(
             active.remove(entity.entity_id)
             return result
     local = entity.get_component(TransformComponent)
-    result = Transform(
-        position=(local.x, local.y, 0.0),
-        rotation=local.rotation,
-        scale=(local.scale_x, local.scale_y, 1.0),
-    ) if local is not None and local.enabled else Transform()
+    result = (
+        Transform(
+            position=(local.x, local.y, 0.0),
+            rotation=local.rotation,
+            scale=(local.scale_x, local.scale_y, 1.0),
+        )
+        if local is not None and local.enabled
+        else Transform()
+    )
     if entity.parent_id is not None:
         parent = entities.get(entity.parent_id)
         if parent is not None:
@@ -95,7 +99,6 @@ def _item(
             color=color,
             outline=visual.outline,
             outline_width=visual.outline_width,
-            tint=color,
         )
         payload = visual.to_dict()
         layer = visual.layer
@@ -179,7 +182,9 @@ def _item(
             visual.color,
             visual.max_width,
             visual.align,
-        ) if isinstance(visual, TextComponent) else None,
+        )
+        if isinstance(visual, TextComponent)
+        else None,
     )
 
 
@@ -211,7 +216,8 @@ def extract_render_frame(
             continue
         for visual in entity.components:
             if isinstance(
-                visual, (PrimitiveComponent, SpriteComponent, TextComponent, AnimatedSprite2DComponent)
+                visual,
+                (PrimitiveComponent, SpriteComponent, TextComponent, AnimatedSprite2DComponent),
             ):
                 if not visual.enabled or not visual.visible:
                     continue

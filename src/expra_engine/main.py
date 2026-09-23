@@ -15,7 +15,10 @@ def main() -> None:
     )
     engine = Engine()
     window = EditorWindow(engine)
-    window.run()
+    try:
+        window.run()
+    except KeyboardInterrupt:
+        window._on_close()
 
 
 if __name__ == "__main__":

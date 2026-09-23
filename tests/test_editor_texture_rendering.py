@@ -21,8 +21,10 @@ from expra_engine.editor.project_workflow import ProjectWorkflow
 from expra_engine.filesystem import ResourceId
 from expra_engine.runtime.input import PhysicalInput
 from expra_engine.runtime.pygame_renderer import PygameRenderer, PygameResourceProvider
+from expra_engine.runtime.render_diagnostics import RenderDiagnostics
 from expra_engine.runtime.render_extractor import extract_render_frame
 from expra_engine.runtime.rendering import (
+    MaterialDescriptor,
     OrthographicCamera,
     PrimitiveDescriptor,
     RenderContext,
@@ -31,7 +33,7 @@ from expra_engine.runtime.rendering import (
     Transform,
     Viewport,
 )
-from expra_engine.runtime.visual_components import SpriteComponent
+from expra_engine.runtime.visual_components import PrimitiveComponent, SpriteComponent
 from expra_engine.ui.editor_pixel_renderer import (
     EditorPixelRenderer,
     frame_textures_available,
@@ -135,7 +137,9 @@ def test_editor_pixel_bridge_returns_none_for_incomplete_backend_frames(caplog) 
         )
 
     assert image is None
-    assert "[EditorTexture] presentation failed: renderer produced an incomplete frame" in caplog.text
+    assert (
+        "[EditorTexture] presentation failed: renderer produced an incomplete frame" in caplog.text
+    )
 
 
 def test_editor_pixel_bridge_logs_missing_resource_provider(caplog) -> None:
@@ -170,6 +174,172 @@ def test_editor_pixel_renderer_logs_presentation_failure(monkeypatch, caplog) ->
 
     assert image is None
     assert "[EditorTexture] presentation failed" in caplog.text
+
+
+def test_editor_renderer_deduplicates_failures_and_preserves_last_good_image(caplog) -> None:
+    pytest.importorskip("pygame")
+    try:
+        root = tk.Tk()
+    except tk.TclError:
+        pytest.skip("no display for editor presentation test")
+
+    unsupported = RenderFrame(
+        (
+            RenderItem(
+                "rounded",
+                PrimitiveDescriptor("rounded_rectangle", (2.0, 1.0)),
+                Transform(),
+            ),
+        )
+    )
+    different_unsupported = RenderFrame(
+        (
+            RenderItem(
+                "hexagon",
+                PrimitiveDescriptor("hexagon", (2.0, 1.0)),
+                Transform(),
+            ),
+        )
+    )
+    renderer = EditorPixelRenderer(object())
+    try:
+        with caplog.at_level(logging.ERROR, logger="expra_engine.ui.editor_pixel_renderer"):
+            for _ in range(100):
+                assert (
+                    renderer.render(
+                        unsupported,
+                        ViewportCamera(),
+                        160,
+                        90,
+                        root,
+                        entity_names={"rounded": "Unsupported Shape"},
+                    )
+                    is None
+                )
+            assert renderer.render(different_unsupported, ViewportCamera(), 160, 90, root) is None
+            last_good = renderer.render(RenderFrame(), ViewportCamera(), 160, 90, root)
+            assert last_good is not None
+            assert (
+                renderer.render(
+                    unsupported,
+                    ViewportCamera(),
+                    160,
+                    90,
+                    root,
+                    entity_names={"rounded": "Unsupported Shape"},
+                )
+                is last_good
+            )
+
+        messages = [record.getMessage() for record in caplog.records]
+        unsupported_messages = [
+            message for message in messages if "unsupported primitive" in message
+        ]
+        assert len(unsupported_messages) == 3
+        assert "entity='Unsupported Shape'" in unsupported_messages[0]
+    finally:
+        root.destroy()
+
+
+def test_editor_bridge_deduplicates_backend_failures_across_redraw_renderers(caplog) -> None:
+    diagnostics = RenderDiagnostics(logging.getLogger("expra_engine.runtime.pygame_renderer"))
+
+    class FailingSurface:
+        def fill(self, _color: object) -> None:
+            return None
+
+        def blit(self, _texture: object, _destination: object) -> None:
+            raise RuntimeError("blit failed")
+
+    class Texture:
+        def get_size(self) -> tuple[int, int]:
+            return (16, 16)
+
+    pygame = SimpleNamespace(draw=SimpleNamespace(), transform=SimpleNamespace())
+    frame = RenderFrame(
+        (
+            RenderItem(
+                "ship",
+                PrimitiveDescriptor("sprite", (1.0, 1.0)),
+                Transform(),
+                material=MaterialDescriptor(texture_id="assets://ship.png"),
+            ),
+        )
+    )
+
+    with caplog.at_level(logging.ERROR, logger="expra_engine.runtime.pygame_renderer"):
+        for _ in range(100):
+            assert (
+                _render_editor_frame_to_image(
+                    frame,
+                    RenderContext(Viewport(0, 0, 160, 90)),
+                    surface_factory=lambda _size: FailingSurface(),
+                    renderer_factory=lambda surface: PygameRenderer(
+                        pygame,
+                        surface,
+                        resource_provider=lambda _texture_id: Texture(),
+                        clear_color=None,
+                        diagnostics=diagnostics,
+                    ),
+                    encode_surface=lambda _surface: b"unreachable",
+                    image_factory=lambda value: value,
+                    diagnostics=diagnostics,
+                    entity_names={"ship": "Cargo Ship"},
+                )
+                is None
+            )
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert sum("[Render] draw failed for ship" in message for message in messages) == 1
+    assert (
+        sum(
+            "entity='Cargo Ship'" in message and "renderer produced an incomplete frame" in message
+            for message in messages
+        )
+        == 1
+    )
+
+
+def test_editor_bridge_deduplicates_changing_backend_error_details(caplog) -> None:
+    diagnostics = RenderDiagnostics(logging.getLogger("expra_engine.ui.editor_pixel_renderer"))
+    attempts = 0
+    frame = RenderFrame(
+        (
+            RenderItem(
+                "ship",
+                PrimitiveDescriptor("sprite", (1.0, 1.0)),
+                Transform(),
+                material=MaterialDescriptor(texture_id="assets://ship.png"),
+            ),
+        )
+    )
+
+    def failing_surface(_size: tuple[int, int]) -> object:
+        nonlocal attempts
+        attempts += 1
+        raise RuntimeError(f"surface failed {attempts}")
+
+    with caplog.at_level(logging.ERROR, logger="expra_engine.ui.editor_pixel_renderer"):
+        for _ in range(100):
+            assert (
+                _render_editor_frame_to_image(
+                    frame,
+                    RenderContext(Viewport(0, 0, 160, 90)),
+                    surface_factory=failing_surface,
+                    renderer_factory=lambda _surface: object(),
+                    encode_surface=lambda _surface: b"unreachable",
+                    image_factory=lambda value: value,
+                    diagnostics=diagnostics,
+                    entity_names={"ship": "Cargo Ship"},
+                )
+                is None
+            )
+
+    messages = [record.getMessage() for record in caplog.records]
+    presentation_messages = [
+        message for message in messages if "presentation failed for entity" in message
+    ]
+    assert len(presentation_messages) == 1
 
 
 def test_real_blacksite_png_reaches_editor_pixel_output() -> None:
@@ -235,6 +405,9 @@ def test_final_editor_photoimage_preserves_nonuniform_png_pixels(tmp_path: Path)
         pytest.skip("no display for real Tk editor presentation")
 
     project, scene, _asset_id = make_texture_project(tmp_path)
+    rotated = scene.create_entity("rotated primitive", entity_id="rotated")
+    rotated.add_component(TransformComponent(x=3.0, rotation=45.0))
+    rotated.add_component(PrimitiveComponent(width=1.5, height=0.75, fill=(0.1, 0.8, 0.2, 1.0)))
     frame = extract_render_frame(scene)
     service = project.resource_service()
     pygame.init()
@@ -286,9 +459,10 @@ def test_blacksite_editor_edit_and_play_keep_real_pixels() -> None:
 
         assert engine.run_state is EngineRunState.EDIT
         assert window._viewport._pixel_image is not None
-        assert window._viewport._canvas.itemcget(
-            window._viewport._pixel_image_item, "state"
-        ) == "normal"
+        assert (
+            window._viewport._canvas.itemcget(window._viewport._pixel_image_item, "state")
+            == "normal"
+        )
         provider = window._viewport._pixel_renderer._provider
         assert provider is not None
         decoded_assets = set(provider._textures)
@@ -305,9 +479,10 @@ def test_blacksite_editor_edit_and_play_keep_real_pixels() -> None:
 
         assert engine.run_state is EngineRunState.PLAY
         assert window._viewport._pixel_image is not None
-        assert window._viewport._canvas.itemcget(
-            window._viewport._pixel_image_item, "state"
-        ) == "normal"
+        assert (
+            window._viewport._canvas.itemcget(window._viewport._pixel_image_item, "state")
+            == "normal"
+        )
         runtime_scene = engine.active_scene
         assert runtime_scene is not None
         player = next(entity for entity in runtime_scene.entities if entity.name == "Operative")
@@ -315,20 +490,37 @@ def test_blacksite_editor_edit_and_play_keep_real_pixels() -> None:
         assert transform is not None
         before = (transform.x, transform.y)
 
-        for event in engine.input_map.press(PhysicalInput("keyboard", "d")):
-            engine.signal(event)
-        engine.tick(0.25)
-        for event in engine.input_map.release(PhysicalInput("keyboard", "d")):
-            engine.signal(event)
-        window._present_all()
-        for _ in range(5):
-            window._root.update()
+        for name, keys, expected_rotation in (
+            ("D", ("d",), 0.0),
+            ("W", ("w",), 90.0),
+            ("A", ("a",), 180.0),
+            ("S", ("s",), -90.0),
+            ("W+D", ("w", "d"), 45.0),
+        ):
+            for key in keys:
+                for event in engine.input_map.press(PhysicalInput("keyboard", key)):
+                    engine.signal(event)
+            engine.tick(0.25)
+            for key in keys:
+                for event in engine.input_map.release(PhysicalInput("keyboard", key)):
+                    engine.signal(event)
+            window._present_all()
+            for _ in range(5):
+                window._root.update()
+
+            aim = next(
+                entity for entity in runtime_scene.entities if entity.name == "Aim Indicator"
+            )
+            aim_transform = aim.get_component(TransformComponent)
+            assert aim_transform is not None
+            assert aim_transform.rotation == pytest.approx(expected_rotation), name
+            assert window._viewport._pixel_image is not None, name
+            assert (
+                window._viewport._canvas.itemcget(window._viewport._pixel_image_item, "state")
+                == "normal"
+            ), name
 
         assert (transform.x, transform.y) != before
-        assert window._viewport._pixel_image is not None
-        assert window._viewport._canvas.itemcget(
-            window._viewport._pixel_image_item, "state"
-        ) == "normal"
     finally:
         if engine.run_state is not EngineRunState.EDIT:
             engine.stop()
@@ -366,7 +558,7 @@ def test_missing_visible_texture_requires_tk_geometry_fallback() -> None:
     assert not frame_textures_available(frame, context, lambda _texture_id: None)
 
 
-def test_unsupported_or_rotated_geometry_requires_tk_fallback() -> None:
+def test_editor_preflight_matches_canonical_primitive_capabilities() -> None:
     unsupported = RenderFrame(
         (
             RenderItem(
@@ -426,10 +618,74 @@ def test_unsupported_or_rotated_geometry_requires_tk_fallback() -> None:
     context = RenderContext(Viewport(0, 0, 160, 90))
 
     assert not frame_textures_available(unsupported, context, lambda _texture_id: None)
-    assert not frame_textures_available(rotated, context, lambda _texture_id: None)
-    assert not frame_textures_available(outlined_circle, context, lambda _texture_id: None)
-    assert not frame_textures_available(outlined_point, context, lambda _texture_id: None)
+    assert frame_textures_available(rotated, context, lambda _texture_id: None)
+    assert frame_textures_available(outlined_circle, context, lambda _texture_id: None)
+    assert frame_textures_available(outlined_point, context, lambda _texture_id: None)
     assert not frame_textures_available(missing_nine_slice, context, lambda _texture_id: None)
+
+
+def test_editor_preflight_reports_distinct_texture_failures_in_one_frame(caplog) -> None:
+    frame = RenderFrame(
+        (
+            RenderItem(
+                "first",
+                PrimitiveDescriptor("sprite"),
+                Transform(),
+                material=SimpleNamespace(texture_id="assets://first.png", source_region=None),
+            ),
+            RenderItem(
+                "second",
+                PrimitiveDescriptor("sprite"),
+                Transform(position=(1.0, 0.0, 0.0)),
+                material=SimpleNamespace(texture_id="assets://second.png", source_region=None),
+            ),
+        )
+    )
+
+    with caplog.at_level(logging.ERROR, logger="expra_engine.ui.editor_pixel_renderer"):
+        assert not frame_textures_available(
+            frame,
+            RenderContext(Viewport(0, 0, 160, 90)),
+            lambda _: None,
+            entity_names={"first": "First Ship", "second": "Second Ship"},
+        )
+
+    assert "assets://first.png" in caplog.text
+    assert "assets://second.png" in caplog.text
+    assert "entity='First Ship'" in caplog.text
+    assert "entity='Second Ship'" in caplog.text
+
+
+def test_editor_preflight_reports_invalid_regions_with_entity_context(caplog) -> None:
+    frame = RenderFrame(
+        (
+            RenderItem(
+                "atlas-sprite",
+                PrimitiveDescriptor("sprite"),
+                Transform(),
+                material=SimpleNamespace(
+                    texture_id="assets://atlas.png",
+                    source_region=SimpleNamespace(x=4, y=4, width=8, height=8),
+                ),
+            ),
+        )
+    )
+
+    class Texture:
+        def get_size(self) -> tuple[int, int]:
+            return (8, 8)
+
+    with caplog.at_level(logging.ERROR, logger="expra_engine.ui.editor_pixel_renderer"):
+        assert not frame_textures_available(
+            frame,
+            RenderContext(Viewport(0, 0, 160, 90)),
+            lambda _texture_id: Texture(),
+            entity_names={"atlas-sprite": "Atlas Sprite"},
+        )
+
+    assert "entity='Atlas Sprite'" in caplog.text
+    assert "id='atlas-sprite'" in caplog.text
+    assert "assets://atlas.png" in caplog.text
 
 
 def test_viewport_refreshes_target_after_camera_moves() -> None:
