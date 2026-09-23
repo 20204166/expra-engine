@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import logging
 import tkinter as tk
 from collections.abc import Callable
 from io import BytesIO
@@ -18,6 +19,8 @@ __all__ = (
     "render_editor_frame_to_image",
     "render_editor_frame_to_tk_image",
 )
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def render_editor_frame_to_image(
@@ -36,9 +39,11 @@ def render_editor_frame_to_image(
         renderer.start(context)
         renderer.render(frame)
         if getattr(renderer, "draw_failed", False):
+            _LOGGER.error("[Texture] Editor renderer reported an incomplete frame")
             return None
         return image_factory(encode_surface(surface))
-    except Exception:
+    except Exception as exc:  # noqa: BLE001 - editor backend failures use geometry fallback
+        _LOGGER.error("[Texture] Editor pixel presentation failed: %s", exc)
         return None
 
 
@@ -63,19 +68,35 @@ def frame_textures_available(
                 texture_id = item.nine_slice.texture_id
             if texture_id is None and item.text is None and item.nine_slice is None:
                 if item.primitive.kind not in {"rectangle", "rect", "circle", "point"}:
+                    _LOGGER.error(
+                        "[Texture] Editor pixel renderer cannot draw primitive %s for %s",
+                        item.primitive.kind,
+                        item.key,
+                    )
                     return False
                 if item.primitive.kind in {"rectangle", "rect"} and (
                     item.world_transform.rotation or context.camera.rotation
                 ):
+                    _LOGGER.error(
+                        "[Texture] Editor pixel renderer cannot draw rotated primitive for %s",
+                        item.key,
+                    )
                     return False
                 if item.primitive.kind in {"circle", "point"} and (
                     item.material.outline is not None and item.material.outline_width
                 ):
+                    _LOGGER.error(
+                        "[Texture] Editor pixel renderer cannot draw outlined primitive for %s",
+                        item.key,
+                    )
                     return False
             if texture_id is None:
                 continue
             texture = resource_provider(texture_id)
             if texture is None:
+                _LOGGER.error(
+                    "[Texture] Failed to resolve or decode %s for editor renderer", texture_id
+                )
                 return False
             region = item.material.source_region
             if region is None:
@@ -90,8 +111,12 @@ def frame_textures_available(
                 or region.x + region.width > width
                 or region.y + region.height > height
             ):
+                _LOGGER.error(
+                    "[Texture] Invalid source region for %s: %s", texture_id, region
+                )
                 return False
-    except Exception:
+    except Exception as exc:  # noqa: BLE001 - editor validation failures use geometry fallback
+        _LOGGER.error("[Texture] Failed to validate editor frame textures: %s", exc)
         return False
     return True
 
@@ -108,7 +133,11 @@ def render_editor_frame_to_tk_image(
     image_master: Any,
 ) -> Any | None:
     """Render a complete editor frame, or return ``None`` for Tk fallback."""
-    if resource_service is None or resource_provider is None:
+    if resource_service is None:
+        _LOGGER.error("[Texture] No project resource service attached to editor renderer")
+        return None
+    if resource_provider is None:
+        _LOGGER.error("[Texture] No resource provider attached to editor renderer")
         return None
     if not frame_textures_available(frame, context, resource_provider):
         return None
@@ -145,7 +174,8 @@ def render_editor_frame_to_tk_image(
                 data=base64.b64encode(data).decode("ascii"),
             ),
         )
-    except Exception:
+    except Exception as exc:  # noqa: BLE001 - editor backend failures use geometry fallback
+        _LOGGER.error("[Texture] Editor renderer failed before final presentation: %s", exc)
         return None
 
 
@@ -186,6 +216,7 @@ class EditorPixelRenderer:
         image_master: Any,
     ) -> Any | None:
         if self._resource_service is None:
+            _LOGGER.error("[Texture] No project resource service attached to editor renderer")
             return None
         try:
             import pygame  # type: ignore[reportMissingImports]
@@ -203,5 +234,6 @@ class EditorPixelRenderer:
                 pygame_module=pygame,
                 image_master=image_master,
             )
-        except Exception:
+        except Exception as exc:  # noqa: BLE001 - optional Pygame failures use geometry fallback
+            _LOGGER.error("[Texture] Editor texture presentation failed: %s", exc)
             return None

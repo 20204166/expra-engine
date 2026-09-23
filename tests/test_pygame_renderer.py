@@ -243,6 +243,61 @@ def _screen_effect_scene() -> Scene:
 
 
 class TestPygameRenderer(unittest.TestCase):
+    def test_resource_provider_logs_png_decode_failure(self) -> None:
+        resource = SimpleNamespace(
+            metadata=lambda _resource_id: SimpleNamespace(size=3, content_hash="bad"),
+            read_bytes=lambda _resource_id: b"bad",
+        )
+
+        def fail_decode(_stream: object) -> object:
+            raise ValueError("invalid PNG")
+
+        provider = PygameResourceProvider(
+            SimpleNamespace(image=SimpleNamespace(load=fail_decode)), resource
+        )
+
+        with self.assertLogs("expra_engine.runtime.pygame_renderer", level="ERROR") as logs:
+            assert provider("assets://ship.png") is None
+
+        assert any("[Texture] Failed to decode assets://ship.png" in message for message in logs.output)
+        self.assertEqual(provider.last_failure[0], "decode")  # type: ignore[index]
+
+    def test_resource_provider_reports_resolution_and_read_failures(self) -> None:
+        missing_metadata = SimpleNamespace(
+            metadata=lambda _resource_id: (_ for _ in ()).throw(FileNotFoundError("missing")),
+            read_bytes=lambda _resource_id: b"unused",
+        )
+        provider = PygameResourceProvider(
+            SimpleNamespace(image=SimpleNamespace(load=lambda _stream: object())),
+            missing_metadata,
+        )
+
+        self.assertIsNone(provider("assets://missing.png"))
+        self.assertEqual(provider.last_failure[0], "resolve")  # type: ignore[index]
+
+        unreadable = SimpleNamespace(
+            metadata=lambda _resource_id: SimpleNamespace(size=1, content_hash="one"),
+            read_bytes=lambda _resource_id: (_ for _ in ()).throw(OSError("unreadable")),
+        )
+        provider = PygameResourceProvider(
+            SimpleNamespace(image=SimpleNamespace(load=lambda _stream: object())), unreadable
+        )
+
+        self.assertIsNone(provider("assets://unreadable.png"))
+        self.assertEqual(provider.last_failure[0], "read")  # type: ignore[index]
+
+    def test_resource_provider_clears_failure_after_success(self) -> None:
+        resource = SimpleNamespace(
+            metadata=lambda _resource_id: SimpleNamespace(size=1, content_hash="one"),
+            read_bytes=lambda _resource_id: b"ok",
+        )
+        provider = PygameResourceProvider(
+            SimpleNamespace(image=SimpleNamespace(load=lambda stream: stream.read())), resource
+        )
+
+        self.assertEqual(provider("assets://ship.png"), b"ok")
+        self.assertIsNone(provider.last_failure)
+
     def test_resource_provider_reloads_when_content_identity_changes(self) -> None:
         resources = _MutableResource()
 
@@ -754,7 +809,7 @@ class TestPygameRenderer(unittest.TestCase):
             (item.sprite_transform.position[0], item.sprite_transform.position[1]),
             RenderContext(Viewport(0, 0, 100, 100)).viewport,
         )
-        self.assertEqual(getattr(destination, "center"), (round(expected[0]), round(expected[1])))
+        self.assertEqual(destination.center, (round(expected[0]), round(expected[1])))
 
     def test_texture_modulation_uses_copy_and_preserves_source_texture(self) -> None:
         texture = _TintableTexture()

@@ -2,19 +2,28 @@
 
 from __future__ import annotations
 
+import logging
+import tkinter as tk
+from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
-from expra_engine.core.engine import EngineRunState
+import pytest
+
+from expra_engine.core.component import TransformComponent
+from expra_engine.core.engine import Engine, EngineRunState
 from expra_engine.core.project import Project
 from expra_engine.core.scene import Scene
 from expra_engine.editor.contributions import EditorContext
 from expra_engine.editor.preferences import EditorPreferences
 from expra_engine.editor.project_workflow import ProjectWorkflow
-from expra_engine.runtime.pygame_renderer import PygameRenderer
+from expra_engine.filesystem import ResourceId
+from expra_engine.runtime.input import PhysicalInput
+from expra_engine.runtime.pygame_renderer import PygameRenderer, PygameResourceProvider
 from expra_engine.runtime.render_extractor import extract_render_frame
 from expra_engine.runtime.rendering import (
+    OrthographicCamera,
     PrimitiveDescriptor,
     RenderContext,
     RenderFrame,
@@ -23,11 +32,18 @@ from expra_engine.runtime.rendering import (
     Viewport,
 )
 from expra_engine.runtime.visual_components import SpriteComponent
-from expra_engine.ui.editor_pixel_renderer import EditorPixelRenderer, frame_textures_available
-from expra_engine.ui.editor_pixel_renderer import encode_pygame_surface as _encode_pygame_surface
+from expra_engine.ui.editor_pixel_renderer import (
+    EditorPixelRenderer,
+    frame_textures_available,
+    render_editor_frame_to_tk_image,
+)
+from expra_engine.ui.editor_pixel_renderer import (
+    encode_pygame_surface as _encode_pygame_surface,
+)
 from expra_engine.ui.editor_pixel_renderer import (
     render_editor_frame_to_image as _render_editor_frame_to_image,
 )
+from expra_engine.ui.editor_window import EditorWindow
 from expra_engine.ui.viewport import (
     EditorRenderTarget,
     ViewportCamera,
@@ -97,7 +113,7 @@ def test_editor_pixel_bridge_returns_none_for_backend_failures() -> None:
     assert image is None
 
 
-def test_editor_pixel_bridge_returns_none_for_incomplete_backend_frames() -> None:
+def test_editor_pixel_bridge_returns_none_for_incomplete_backend_frames(caplog) -> None:
     class Renderer:
         draw_failed = True
 
@@ -107,16 +123,164 @@ def test_editor_pixel_bridge_returns_none_for_incomplete_backend_frames() -> Non
         def render(self, _frame: RenderFrame) -> None:
             return None
 
-    image = _render_editor_frame_to_image(
-        RenderFrame(),
-        RenderContext(Viewport(0, 0, 160, 90)),
-        surface_factory=lambda _size: object(),
-        renderer_factory=lambda _surface: Renderer(),
-        encode_surface=lambda _surface: b"png",
-        image_factory=lambda value: value,
-    )
+    with caplog.at_level(logging.ERROR, logger="expra_engine.ui.editor_pixel_renderer"):
+        image = _render_editor_frame_to_image(
+            RenderFrame(),
+            RenderContext(Viewport(0, 0, 160, 90)),
+            surface_factory=lambda _size: object(),
+            renderer_factory=lambda _surface: Renderer(),
+            encode_surface=lambda _surface: b"png",
+            image_factory=lambda value: value,
+        )
 
     assert image is None
+    assert "[Texture] Editor renderer reported an incomplete frame" in caplog.text
+
+
+def test_editor_pixel_bridge_logs_missing_resource_provider(caplog) -> None:
+    with caplog.at_level(logging.ERROR, logger="expra_engine.ui.editor_pixel_renderer"):
+        image = render_editor_frame_to_tk_image(
+            RenderFrame(),
+            RenderContext(Viewport(0, 0, 160, 90)),
+            width=160,
+            height=90,
+            resource_service=object(),
+            resource_provider=None,
+            pygame_module=object(),
+            image_master=object(),
+        )
+
+    assert image is None
+    assert "[Texture] No resource provider attached to editor renderer" in caplog.text
+
+
+def test_real_blacksite_png_reaches_editor_pixel_output() -> None:
+    pygame = pytest.importorskip("pygame")
+    project = Project.load(Path(__file__).parents[1] / "examples" / "blacksite_relay")
+    scene = project.load_scene()
+    entity = next(entity for entity in scene.entities if entity.name == "Operative")
+    sprite = entity.get_component(SpriteComponent)
+    assert sprite is not None
+    asset = "assets://kenney/player_survivor_gun.png"
+    assert sprite.asset == asset
+
+    frame = extract_render_frame(scene)
+    item = next(item for item in frame.items if item.key == entity.entity_id)
+    assert item.material.texture_id == asset
+
+    service = project.resource_service()
+    handle = service.resolver.resolve(ResourceId.parse(asset))
+    assert handle.physical_path == project.assets_dir / "kenney/player_survivor_gun.png"
+    data = service.read_bytes(asset)
+    assert data.startswith(b"\x89PNG\r\n\x1a\n")
+
+    pygame.init()
+    try:
+        provider = PygameResourceProvider(pygame, service)
+        texture = provider(asset)
+        assert texture is not None
+        assert texture.get_size() == (51, 43)
+
+        context = RenderContext(
+            Viewport(0, 0, 320, 240),
+            OrthographicCamera(width=88.0, height=66.0),
+        )
+        assert frame_textures_available(RenderFrame((item,)), context, provider)
+
+        encoded = _render_editor_frame_to_image(
+            RenderFrame((item,)),
+            context,
+            surface_factory=lambda size: pygame.Surface(size, flags=pygame.SRCALPHA),
+            renderer_factory=lambda surface: PygameRenderer(
+                pygame,
+                surface,
+                resource_provider=provider,
+                clear_color=None,
+            ),
+            encode_surface=lambda surface: _save_pygame_png(pygame, surface),
+            image_factory=lambda value: value,
+        )
+
+        assert encoded is not None
+        decoded = pygame.image.load(BytesIO(encoded))
+        assert decoded.get_bounding_rect().width > 0
+        assert decoded.get_bounding_rect().height > 0
+    finally:
+        pygame.quit()
+
+
+def test_blacksite_editor_edit_and_play_keep_real_pixels() -> None:
+    pytest.importorskip("pygame")
+    try:
+        probe = tk.Tk()
+    except tk.TclError:
+        pytest.skip("no display for real Tk editor test")
+    probe.destroy()
+
+    project = Project.load(Path(__file__).parents[1] / "examples" / "blacksite_relay")
+    engine = Engine()
+    window = EditorWindow(engine)
+    try:
+        window._project_workflow.open_loaded(project)
+        window._viewport.frame_scene()
+        for _ in range(5):
+            window._root.update()
+
+        assert engine.run_state is EngineRunState.EDIT
+        assert window._viewport._pixel_image is not None
+        assert window._viewport._canvas.itemcget(
+            window._viewport._pixel_image_item, "state"
+        ) == "normal"
+        provider = window._viewport._pixel_renderer._provider
+        assert provider is not None
+        decoded_assets = set(provider._textures)
+        assert {
+            "assets://kenney/player_survivor_gun.png",
+            "assets://kenney/survivor_blue.png",
+            "assets://kenney/zombie.png",
+        } <= decoded_assets
+
+        assert engine.play()
+        window._present_all()
+        for _ in range(5):
+            window._root.update()
+
+        assert engine.run_state is EngineRunState.PLAY
+        assert window._viewport._pixel_image is not None
+        assert window._viewport._canvas.itemcget(
+            window._viewport._pixel_image_item, "state"
+        ) == "normal"
+        runtime_scene = engine.active_scene
+        assert runtime_scene is not None
+        player = next(entity for entity in runtime_scene.entities if entity.name == "Operative")
+        transform = player.get_component(TransformComponent)
+        assert transform is not None
+        before = (transform.x, transform.y)
+
+        for event in engine.input_map.press(PhysicalInput("keyboard", "d")):
+            engine.signal(event)
+        engine.tick(0.25)
+        for event in engine.input_map.release(PhysicalInput("keyboard", "d")):
+            engine.signal(event)
+        window._present_all()
+        for _ in range(5):
+            window._root.update()
+
+        assert (transform.x, transform.y) != before
+        assert window._viewport._pixel_image is not None
+        assert window._viewport._canvas.itemcget(
+            window._viewport._pixel_image_item, "state"
+        ) == "normal"
+    finally:
+        if engine.run_state is not EngineRunState.EDIT:
+            engine.stop()
+        window._on_close()
+
+
+def _save_pygame_png(pygame: Any, surface: Any) -> bytes:
+    stream = BytesIO()
+    pygame.image.save(surface, stream, "PNG")
+    return stream.getvalue()
 
 
 def test_editor_pixel_bridge_rejects_backend_without_draw_module() -> None:

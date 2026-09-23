@@ -57,7 +57,6 @@ from expra_engine.runtime.events import (
 from expra_engine.runtime.invoke import Repeater, after, every, invoke
 from expra_engine.runtime.physics import AreaEffect2D
 from expra_engine.runtime.platformer import PlatformerController2d, PlatformerPhase
-from expra_engine.runtime.pygame_screen_pipeline import PygameScreenPipeline
 from expra_engine.runtime.pygame_renderer import (
     PygameRenderer,
     PygameRenderFrame,
@@ -65,6 +64,7 @@ from expra_engine.runtime.pygame_renderer import (
     RenderFrame,
 )
 from expra_engine.runtime.pygame_runtime import PygameRuntime
+from expra_engine.runtime.pygame_screen_pipeline import PygameScreenPipeline
 from expra_engine.runtime.render_pipeline import RenderPlan, RenderPlanBuilder
 from expra_engine.runtime.rendering import (
     Color,
@@ -98,6 +98,11 @@ from expra_engine.runtime.script_registry import ScriptLoadError, ScriptRegistry
 from expra_engine.runtime.sequence import Func, Sequence, Wait
 from expra_engine.runtime.smooth_follow import SmoothFollow
 from expra_engine.runtime.system import RuntimeSystem
+from expra_engine.runtime.texture_diagnostics import (
+    TextureDiagnosticReport,
+    TextureDiagnosticStage,
+    diagnose_texture,
+)
 from expra_engine.runtime.trail import TrailPoint, TrailRenderer
 from expra_engine.runtime.transform_interpolation import TransformInterpolator
 from expra_engine.runtime.tween import Tween
@@ -171,9 +176,9 @@ __all__ = [
     "RenderEffect",
     "RenderFrame",
     "RenderItem",
+    "RenderPhase",
     "RenderPlan",
     "RenderPlanBuilder",
-    "RenderPhase",
     "Renderer",
     "RendererCapabilities",
     "Repeater",
@@ -187,13 +192,13 @@ __all__ = [
     "ScenePaused",
     "SceneStarted",
     "SceneStopped",
+    "ScreenTextureComponent",
+    "ScreenTextureDrawRequest",
+    "ScreenTextureFilter",
     "ScriptComponent",
     "ScriptLoadError",
     "ScriptRegistry",
     "Sequence",
-    "ScreenTextureComponent",
-    "ScreenTextureDrawRequest",
-    "ScreenTextureFilter",
     "SmoothFollow",
     "SpaceOverride",
     "SpatialAudioMix2D",
@@ -206,6 +211,8 @@ __all__ = [
     "StartScene",
     "StopScene",
     "TextDescriptor",
+    "TextureDiagnosticReport",
+    "TextureDiagnosticStage",
     "TrailPoint",
     "TrailRenderer",
     "Transform",
@@ -220,6 +227,7 @@ __all__ = [
     "Wait",
     "after",
     "db_to_linear",
+    "diagnose_texture",
     "every",
     "exposed",
     "invoke",

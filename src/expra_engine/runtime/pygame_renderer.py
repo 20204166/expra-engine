@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import math
+from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass, field, replace
 from io import BytesIO
-from typing import Any, Callable, cast
+from typing import Any, cast
 
 from expra_engine.core.component import TransformComponent
 from expra_engine.core.scene import Scene
@@ -27,6 +29,8 @@ from expra_engine.runtime.transform_interpolation import TransformInterpolator
 from expra_engine.ui_model.geometry import Insets, Rect
 
 __all__ = ("PygameRenderFrame", "PygameRenderer", "PygameResourceProvider", "RenderFrame")
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class _ResourceUnavailable:
@@ -72,8 +76,15 @@ class PygameResourceProvider:
         self._resources = resources
         self._textures: dict[str, Any] = {}
         self._texture_identities: dict[str, tuple[int, str] | None] = {}
+        self._last_failure: tuple[str, str] | None = None
+
+    @property
+    def last_failure(self) -> tuple[str, str] | None:
+        """Return the most recent failure from the last provider call."""
+        return self._last_failure
 
     def __call__(self, texture_id: str) -> Any | None:
+        self._last_failure = None
         identity = self._content_identity(texture_id)
         if isinstance(identity, _ResourceUnavailable):
             self._textures.pop(texture_id, None)
@@ -84,8 +95,16 @@ class PygameResourceProvider:
         ):
             return self._textures[texture_id]
         try:
-            texture = self._pygame.image.load(BytesIO(self._resources.read_bytes(texture_id)))
-        except Exception:  # noqa: BLE001 - resource and decoder failures are frame-local
+            data = self._resources.read_bytes(texture_id)
+        except Exception as exc:  # noqa: BLE001 - resource failures are frame-local
+            self._last_failure = ("read", str(exc))
+            _LOGGER.error("[Texture] Failed to read %s: %s", texture_id, exc)
+            return None
+        try:
+            texture = self._pygame.image.load(BytesIO(data))
+        except Exception as exc:  # noqa: BLE001 - decoder failures are frame-local
+            self._last_failure = ("decode", str(exc))
+            _LOGGER.error("[Texture] Failed to decode %s: %s", texture_id, exc)
             return None
         self._textures[texture_id] = texture
         self._texture_identities[texture_id] = identity
@@ -98,7 +117,9 @@ class PygameResourceProvider:
         try:
             value = cast(Any, metadata(texture_id))
             return (int(value.size), str(value.content_hash))
-        except Exception:  # noqa: BLE001 - metadata is an optional cache hint
+        except Exception as exc:  # noqa: BLE001 - metadata failures are frame-local
+            self._last_failure = ("resolve", str(exc))
+            _LOGGER.error("[Texture] Failed to resolve %s: %s", texture_id, exc)
             return _RESOURCE_UNAVAILABLE
 
 
@@ -225,7 +246,7 @@ class PygameRenderer:
                 return False
             rect(surface, self._clear_color, self._rect(self.arena_bounds))
             return True
-        except Exception:  # backend clear failures require fallback
+        except Exception:  # noqa: BLE001 - backend clear failures require fallback
             return False
 
     def render(self, frame: ContractRenderFrame) -> None:
@@ -286,10 +307,18 @@ class PygameRenderer:
             if item.material.texture_id is not None:
                 if self._resource_provider is None:
                     self._draw_failed = True
+                    _LOGGER.error(
+                        "[Texture] No resource provider attached to renderer for %s",
+                        item.material.texture_id,
+                    )
                     return
                 texture = self._resource_provider(item.material.texture_id)
                 if texture is None:
                     self._draw_failed = True
+                    _LOGGER.error(
+                        "[Texture] Renderer received no texture for %s",
+                        item.material.texture_id,
+                    )
                     return
                 source_region = item.material.source_region
                 if source_region is not None:
@@ -422,9 +451,11 @@ class PygameRenderer:
                 draw.circle(surface, color, position, pixels)
             elif item.primitive.kind == "point":
                 draw.circle(surface, color, position, 1)
-        except Exception:  # noqa: BLE001 - backend draw failures are frame-local
+        except Exception as exc:  # noqa: BLE001 - backend draw failures are frame-local
             self._draw_failed = True
-            pass
+            texture_id = item.material.texture_id
+            if texture_id is not None:
+                _LOGGER.error("[Texture] Renderer draw failed for %s: %s", texture_id, exc)
 
     def _prepare_texture_for_transform(self, texture: Any, *, require_alpha: bool) -> Any:
         get_bitsize = cast(Callable[[], int] | None, getattr(texture, "get_bitsize", None))
@@ -446,7 +477,7 @@ class PygameRenderer:
             converted = surface_factory(get_size(), flags=alpha_flag, depth=32)
             converted.blit(texture, (0, 0))
             return converted
-        except Exception:
+        except Exception:  # noqa: BLE001 - backend conversion failures use the source texture
             return texture
 
     @staticmethod
