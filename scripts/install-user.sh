@@ -41,9 +41,57 @@ if not wheels:
     raise SystemExit("no matching Expra wheel found")
 print(max(wheels)[1].resolve())' "$here/dist" "$version")"
 
-export PYTHONPATH="$here/src${PYTHONPATH:+:$PYTHONPATH}"
+expected_version="$($py -c 'import re, sys; print(re.search(r"-(\d+\.\d+\.\d+\.\d+)-", sys.argv[1]).group(1))' "$wheel")"
+site_scheme="posix_user"
+if [[ "$mode" == "system" ]]; then
+    site_scheme="posix_prefix"
+fi
+site_dir="$($py -c 'import sys, sysconfig; print(sysconfig.get_path("purelib", scheme=sys.argv[1]))' "$site_scheme")"
+
+if [[ "$mode" == "system" ]]; then
+    command -v sudo >/dev/null 2>&1 || {
+        echo "sudo is required for --system" >&2
+        exit 1
+    }
+fi
+
+run_target_python() {
+    if [[ "$mode" == "system" ]]; then
+        sudo -H env -u PYTHONPATH "$py" "$@"
+    else
+        env -u PYTHONPATH "$py" "$@"
+    fi
+}
+
+remove_stale_metadata() {
+    run_target_python - "$site_dir" "$expected_version" <<'PY'
+from pathlib import Path
+import re
+import shutil
+import sys
+
+site_dir = Path(sys.argv[1])
+expected = sys.argv[2]
+pattern = re.compile(r"^expra_engine-\d+\.\d+\.\d+\.\d+\.dist-info$")
+
+for metadata in sorted(site_dir.glob("expra_engine-*.dist-info")):
+    if metadata.name == f"expra_engine-{expected}.dist-info":
+        continue
+    if pattern.fullmatch(metadata.name):
+        print(f"Removing stale Expra metadata: {metadata}", file=sys.stderr)
+        shutil.rmtree(metadata)
+
+editable_metadata = site_dir / "expra_engine.egg-info"
+if editable_metadata.is_dir():
+    print(f"Removing stale Expra metadata: {editable_metadata}", file=sys.stderr)
+    shutil.rmtree(editable_metadata)
+PY
+}
+
 echo "Verifying wheel: $(basename "$wheel")"
-"$py" -m expra_engine._release verify-wheel "$wheel"
+PYTHONPATH="$here/src${PYTHONPATH:+:$PYTHONPATH}" "$py" -m expra_engine._release verify-wheel "$wheel"
+
+remove_stale_metadata
 
 pip_install() {
     local -a command=("$py" -m pip install --upgrade --upgrade-strategy eager)
@@ -59,15 +107,13 @@ pip_install() {
 }
 
 if [[ "$mode" == "system" ]]; then
-    command -v sudo >/dev/null 2>&1 || { echo "sudo is required for --system" >&2; exit 1; }
     echo "Installing Expra system-wide with $py..."
 else
     echo "Installing Expra for the current user with $py (outside the repo venv)..."
 fi
 pip_install
 
-installed_version="$($py -c 'import importlib.metadata as m; print(m.version("expra-engine"))')"
-expected_version="$($py -c 'import re, sys; print(re.search(r"-(\d+\.\d+\.\d+\.\d+)-", sys.argv[1]).group(1))' "$wheel")"
+installed_version="$(run_target_python -c 'import importlib.metadata as m; print(m.version("expra-engine"))')"
 [[ "$installed_version" == "$expected_version" ]] || {
     echo "ERROR: installed $installed_version, expected $expected_version" >&2
     exit 1
