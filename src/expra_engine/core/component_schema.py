@@ -20,6 +20,8 @@ class PropertyDescriptor:
     minimum: float | None = None
     maximum: float | None = None
     tuple_length: int | None = None
+    tuple_minimum: tuple[float, ...] | None = None
+    tuple_integer: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "enum_values", tuple(self.enum_values))
@@ -45,7 +47,18 @@ class PropertyDescriptor:
                 if (
                     not converted
                     or not all(math.isfinite(part) for part in converted)
+                    or (self.tuple_integer and not all(part.is_integer() for part in converted))
                     or (self.tuple_length is not None and len(converted) != self.tuple_length)
+                    or (
+                        self.tuple_minimum is not None
+                        and (
+                            len(converted) != len(self.tuple_minimum)
+                            or any(
+                                part < minimum
+                                for part, minimum in zip(converted, self.tuple_minimum, strict=True)
+                            )
+                        )
+                    )
                 ):
                     return fallback
             elif hasattr(self.value_type, "from_dict"):

@@ -6,6 +6,7 @@ from typing import get_type_hints
 
 import pytest
 
+from expra_engine.core.scene.camera import Camera2D
 from expra_engine.runtime.rendering import (
     Color,
     MaterialDescriptor,
@@ -22,7 +23,6 @@ from expra_engine.runtime.rendering import (
     Transform,
     Viewport,
 )
-from expra_engine.core.scene.camera import Camera2D
 
 
 def test_contract_values_are_immutable_and_validate_finite_inputs() -> None:
@@ -100,6 +100,17 @@ def test_render_frame_culls_items_outside_viewport_and_keeps_boundary() -> None:
     frame = RenderFrame((outside, boundary, inside))
 
     assert [item.key for item in frame.visible_items(context)] == ["boundary", "inside"]
+
+
+def test_rotated_item_remains_visible_when_unrotated_bounds_miss_edge() -> None:
+    context = RenderContext(Viewport(0, 0, 100, 100), OrthographicCamera(width=10, height=10))
+    item = RenderItem(
+        "rotated-edge",
+        PrimitiveDescriptor("rectangle", size=(2.0, 2.0)),
+        Transform(position=(6.1, 0.0, 0.0), rotation=45.0),
+    )
+
+    assert item.is_visible(context)
 
 
 def test_parent_transforms_are_composed_before_projection() -> None:

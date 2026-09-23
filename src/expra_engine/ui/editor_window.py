@@ -255,6 +255,11 @@ class EditorWindow:
             on_entity_click=self._on_viewport_entity_click,
             camera_state=self._preferences.viewport_camera,
             on_camera_change=self._save_viewport_camera,
+            resource_service=(
+                self._engine.project.resource_service()
+                if self._engine.project is not None
+                else None
+            ),
         )
         self._viewport.pack(fill="both", expand=True)
         self._viewport_host = view_frame

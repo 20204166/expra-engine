@@ -25,16 +25,11 @@ from expra_engine.runtime.animated_sprite_2d import (
     AnimatedSpritePlayer2D,
 )
 from expra_engine.runtime.canvas_effects import modulate_color
-from expra_engine.runtime.collider import ColliderComponent
-from expra_engine.runtime.render_extractor import extract_render_frame
 from expra_engine.runtime.rendering import (
-    OrthographicCamera,
-    RenderContext,
     RenderFrame,
     RenderItem,
-    Viewport,
 )
-from expra_engine.runtime.screen_texture import RenderEffect
+from expra_engine.ui.editor_pixel_renderer import EditorPixelRenderer
 from expra_engine.ui.layout import resize_aware
 from expra_engine.ui.styles import COLORS, editor_entity_kind
 from expra_engine.ui.viewport_camera import (
@@ -42,6 +37,12 @@ from expra_engine.ui.viewport_camera import (
     _MIN_ZOOM,
     VIEWPORT_BASE_PPU,
     ViewportCamera,
+)
+from expra_engine.ui.viewport_overlays import draw_collider_overlays
+from expra_engine.ui.viewport_render_target import (
+    ColliderOutline,
+    EditorRenderTarget,
+    build_editor_render_target,
 )
 
 __all__ = [
@@ -54,30 +55,12 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True)
-class ColliderOutline:
-    entity_id: str
-    outline: dict[str, Any]
-    position: tuple[float, float]
-
-
-@dataclass(frozen=True)
-class EditorRenderTarget:
-    """Renderer-neutral preview data plus editor-only overlay inputs."""
-
-    frame: RenderFrame
-    items: tuple[RenderItem, ...]
-    selected_id: str | None
-    colliders: tuple[ColliderOutline, ...] = ()
-    unsupported_effects: tuple[str, ...] = ()
-
-
 @dataclass
 class _CanvasEntry:
     """Retained canvas item IDs for one render-item entity."""
 
-    shape: str  # "rect" | "circle" | "poly" | "text"
-    body: int  # main shape canvas item ID
+    shape: str  # "pixels" | "rect" | "circle" | "poly" | "text"
+    body: int | None  # main shape canvas item ID, absent for pixel rendering
     label: int | None = None  # name label canvas item ID
 
 
@@ -87,69 +70,6 @@ class _MarkerEntry:
 
     kind: str  # "default" | "camera" | "camera_compact" | "player" | "player_compact"
     ids: list[int] = field(default_factory=list)  # all canvas IDs in draw order
-
-
-def build_editor_render_target(
-    scene: Scene | None,
-    *,
-    viewport: tuple[int, int] = (400, 300),
-    selected_id: str | None = None,
-    camera: Any | None = None,
-    interpolator: Any | None = None,
-    interpolation_fraction: float = 0.0,
-    animated_players: dict[AnimatedSprite2DComponent, AnimatedSpritePlayer2D] | None = None,
-) -> EditorRenderTarget:
-    """Extract the runtime frame once and apply editor preview clipping."""
-    if scene is None:
-        return EditorRenderTarget(RenderFrame(), (), None)
-    frame = extract_render_frame(
-        scene,
-        interpolator=interpolator,
-        interpolation_fraction=interpolation_fraction,
-        animated_players=animated_players,
-    )
-    unsupported_effects = tuple(
-        effect.request.entity_id
-        for effect in frame.submissions
-        if isinstance(effect, RenderEffect)
-    )
-    width, height = viewport
-    if width <= 0 or height <= 0:
-        return EditorRenderTarget(frame, (), None, unsupported_effects=unsupported_effects)
-    # Use the editor camera's actual visible width so culling matches rendering.
-    if camera is not None:
-        cam_width = camera._camera.width
-        cam_height = cam_width * height / width
-    else:
-        cam_width = 20.0
-        cam_height = 20.0 * height / width
-    preview_camera = OrthographicCamera(width=cam_width, height=cam_height)
-    preview_camera.apply_dict(scene.camera)
-    if camera is not None:
-        preview_camera.position = camera.position
-        preview_camera.rotation = camera._camera.rotation
-    context = RenderContext(Viewport(0, 0, width, height), preview_camera)
-    items = frame.visible_items(context)
-    entity_ids = {entity.entity_id for entity in scene.entities}
-    colliders: list[ColliderOutline] = []
-    for entity in scene.entities:
-        collider = entity.get_component(ColliderComponent)
-        transform = entity.get_component(TransformComponent)
-        if entity.enabled and collider is not None and collider.enabled and transform is not None:
-            colliders.append(
-                ColliderOutline(
-                    entity.entity_id,
-                    collider.editor_outline,
-                    (transform.x + collider.offset[0], transform.y + collider.offset[1]),
-                )
-            )
-    return EditorRenderTarget(
-        frame,
-        items,
-        selected_id if selected_id in entity_ids else None,
-        tuple(colliders),
-        unsupported_effects,
-    )
 
 
 class ViewportPanel(tk.Frame):
@@ -168,6 +88,7 @@ class ViewportPanel(tk.Frame):
         on_entity_click: Any = None,
         camera_state: dict[str, object] | None = None,
         on_camera_change: Any = None,
+        resource_service: Any | None = None,
     ) -> None:
         c = colors or COLORS
         super().__init__(
@@ -180,10 +101,13 @@ class ViewportPanel(tk.Frame):
         self._scene: Scene | None = None
         self._selected_id: str | None = None
         self._target = EditorRenderTarget(RenderFrame(), (), None)
+        self._target_dirty = False
         self._camera = ViewportCamera()
         self._editor_overlays = True
         self._interpolator: Any | None = None
         self._interpolation_fraction = 0.0
+        self._pixel_renderer = EditorPixelRenderer(resource_service)
+        self._pixel_image: Any | None = None
         if camera_state:
             self._camera.apply_dict(camera_state)
         self._pan_anchor: tuple[float, float] | None = None
@@ -204,6 +128,9 @@ class ViewportPanel(tk.Frame):
             highlightthickness=0,
         )
         self._canvas.pack(fill="both", expand=True)
+        self._pixel_image_item = self._canvas.create_image(
+            0, 0, anchor="nw", state="hidden", tags="runtime_pixels"
+        )
         self._canvas.bind("<Button-1>", self._on_click)
         self._canvas.bind("<ButtonPress-2>", self._on_pan_start)
         self._canvas.bind("<B2-Motion>", self._on_pan_motion)
@@ -277,16 +204,29 @@ class ViewportPanel(tk.Frame):
             interpolation_fraction=interpolation_fraction,
             animated_players=animated_players,
         )
+        self._target_dirty = False
         self._redraw()
+
+    def set_resource_service(self, resource_service: Any | None) -> None:
+        """Replace project resources and discard backend-owned decoded textures."""
+        if resource_service is self._pixel_renderer.resource_service:
+            return
+        self._pixel_renderer.set_resource_service(resource_service)
+        if hasattr(self, "_canvas"):
+            self._canvas.itemconfigure(self._pixel_image_item, state="hidden", image="")
+            self._pixel_image = None
+            self._schedule_redraw()
 
     def pan(self, x: float, y: float) -> None:
         self._camera.pan(x, y)
+        self._target_dirty = True
         self._grid_dirty = True
         self._notify_camera_change()
         self._redraw()
 
     def zoom(self, percent: float) -> None:
         self._camera.zoom(percent)
+        self._target_dirty = True
         self._grid_dirty = True
         self._notify_camera_change()
         self._redraw()
@@ -298,6 +238,7 @@ class ViewportPanel(tk.Frame):
         transform = entity.get_component(TransformComponent) if entity else None
         framed = self._camera.frame_selected((transform.x, transform.y) if transform else None)
         if framed:
+            self._target_dirty = True
             self._grid_dirty = True
             self._notify_camera_change()
             self._redraw()
@@ -341,6 +282,7 @@ class ViewportPanel(tk.Frame):
             viewport=(vw, vh),
             target_width=vw / (self._camera._base_ppu * new_zoom),
         )
+        self._target_dirty = True
         self._grid_dirty = True
         self._notify_camera_change()
         self._redraw()
@@ -374,9 +316,25 @@ class ViewportPanel(tk.Frame):
             interpolation_fraction=self._interpolation_fraction,
             animated_players=getattr(self, "_animated_players", None),
         )
+        self._target_dirty = False
         self._schedule_redraw()
 
+    def _refresh_target_if_dirty(self) -> None:
+        if not self._target_dirty:
+            return
+        self._target = build_editor_render_target(
+            self._scene,
+            viewport=(max(1, self._canvas.winfo_width()), max(1, self._canvas.winfo_height())),
+            selected_id=self._selected_id,
+            camera=self._camera,
+            interpolator=self._interpolator,
+            interpolation_fraction=self._interpolation_fraction,
+            animated_players=getattr(self, "_animated_players", None),
+        )
+        self._target_dirty = False
+
     def _redraw(self) -> None:
+        self._refresh_target_if_dirty()
         canvas = self._canvas
         w = canvas.winfo_width() or 400
         h = canvas.winfo_height() or 300
@@ -397,6 +355,8 @@ class ViewportPanel(tk.Frame):
         canvas.delete("no_scene_text")
         if self._scene is None:
             self._clear_all_items()
+            self._canvas.itemconfigure(self._pixel_image_item, state="hidden", image="")
+            self._pixel_image = None
             canvas.create_text(
                 w // 2,
                 h // 2,
@@ -407,11 +367,34 @@ class ViewportPanel(tk.Frame):
             )
             return
 
+        pixel_image = self._pixel_renderer.render(
+            self._target.frame,
+            self._camera,
+            max(1, int(w)),
+            max(1, int(h)),
+            self._canvas,
+        )
+        runtime_pixels = pixel_image is not None
+        if runtime_pixels:
+            self._pixel_image = pixel_image
+            canvas.itemconfigure(
+                self._pixel_image_item,
+                image=pixel_image,
+                state="normal",
+            )
+        else:
+            self._pixel_image = None
+            canvas.itemconfigure(self._pixel_image_item, state="hidden", image="")
+
         # Render items — retained model: update existing canvas items in-place.
         current_keys = {item.key for item in self._target.items}
         canvas.delete("selection")
         for item in self._target.items:
-            self._draw_render_item(item, editor_overlays=self._editor_overlays)
+            self._draw_render_item(
+                item,
+                editor_overlays=self._editor_overlays,
+                runtime_pixels=runtime_pixels,
+            )
         # Remove canvas items for entities that left the scene.
         for stale in set(self._canvas_items) - current_keys:
             self._delete_canvas_entry(self._canvas_items.pop(stale))
@@ -420,7 +403,9 @@ class ViewportPanel(tk.Frame):
         # Always clear collider outlines; only redraw them in editor mode.
         canvas.delete("collider")
         if self._editor_overlays:
-            self._draw_colliders()
+            draw_collider_overlays(
+                canvas, self._target.colliders, self._camera, self._colors["warning"]
+            )
 
         # Icon markers — clear when overlays are turned off, draw when on.
         if self._editor_overlays:
@@ -448,7 +433,8 @@ class ViewportPanel(tk.Frame):
         canvas.tag_lower("grid")
 
     def _delete_canvas_entry(self, entry: _CanvasEntry) -> None:
-        self._canvas.delete(entry.body)
+        if entry.body is not None:
+            self._canvas.delete(entry.body)
         if entry.label is not None:
             self._canvas.delete(entry.label)
 
@@ -462,7 +448,13 @@ class ViewportPanel(tk.Frame):
         self._canvas.delete("collider")
         self._canvas.delete("selection")
 
-    def _draw_render_item(self, item: RenderItem, *, editor_overlays: bool = True) -> None:
+    def _draw_render_item(
+        self,
+        item: RenderItem,
+        *,
+        editor_overlays: bool = True,
+        runtime_pixels: bool = False,
+    ) -> None:
         transform = (
             item.sprite_transform if item.primitive.kind == "sprite" else item.world_transform
         )
@@ -479,7 +471,9 @@ class ViewportPanel(tk.Frame):
         )
 
         # Determine which canvas primitive matches the current state.
-        if item.primitive.kind == "circle":
+        if runtime_pixels:
+            new_shape = "pixels"
+        elif item.primitive.kind == "circle":
             new_shape = "circle"
         elif item.primitive.kind == "text":
             new_shape = "text"
@@ -494,8 +488,11 @@ class ViewportPanel(tk.Frame):
             entry = None
 
         # Update existing item in-place, or create a new one.
-        if new_shape == "circle":
+        if new_shape == "pixels":
+            body_id = entry.body if entry is not None else None
+        elif new_shape == "circle":
             if entry is not None:
+                assert entry.body is not None
                 self._canvas.coords(entry.body, ex - sx, ey - sy, ex + sx, ey + sy)
                 self._canvas.itemconfig(entry.body, fill=color, outline=outline)
                 body_id = entry.body
@@ -511,6 +508,7 @@ class ViewportPanel(tk.Frame):
             text_val = item.text.text if item.text else ""
             font_val = (item.text.font, round(item.text.size)) if item.text else "TkDefaultFont"
             if entry is not None:
+                assert entry.body is not None
                 self._canvas.coords(entry.body, ex, ey)
                 self._canvas.itemconfig(entry.body, text=text_val, fill=color, font=font_val)
                 body_id = entry.body
@@ -525,6 +523,7 @@ class ViewportPanel(tk.Frame):
         elif new_shape == "poly":
             corners = self._projected_corners(item)
             if entry is not None:
+                assert entry.body is not None
                 self._canvas.coords(entry.body, *corners)
                 self._canvas.itemconfig(entry.body, fill=color, outline=outline)
                 body_id = entry.body
@@ -538,6 +537,7 @@ class ViewportPanel(tk.Frame):
                     )
         else:  # rect
             if entry is not None:
+                assert entry.body is not None
                 self._canvas.coords(entry.body, ex - sx, ey - sy, ex + sx, ey + sy)
                 self._canvas.itemconfig(entry.body, fill=color, outline=outline)
                 body_id = entry.body
@@ -572,6 +572,10 @@ class ViewportPanel(tk.Frame):
                     font=("Helvetica", 9),
                     tags=tag,
                 )
+                if runtime_pixels:
+                    self._canvas.tag_bind(
+                        tag, "<Button-1>", lambda _e, eid=item.key: self._click_entity(eid)
+                    )
         elif entry is not None and entry.label is not None:
             # Overlays turned off — remove stale label.
             self._canvas.delete(entry.label)
@@ -611,34 +615,6 @@ class ViewportPanel(tk.Frame):
             points.extend(projected)
         return tuple(points)
 
-    def _draw_colliders(self) -> None:
-        for collider in self._target.colliders:
-            ex, ey = self._camera.project(collider.position)
-            data = collider.outline
-            if data["shape"] == "circle":
-                radius = float(data["radius"]) * self._camera._camera.pixel_ratio
-                self._canvas.create_oval(
-                    ex - radius,
-                    ey - radius,
-                    ex + radius,
-                    ey + radius,
-                    outline=self._colors["warning"],
-                    dash=(4, 2),
-                    tags="collider",
-                )
-            else:
-                width = float(data["width"]) * self._camera._camera.pixel_ratio / 2
-                height = float(data["height"]) * self._camera._camera.pixel_ratio / 2
-                self._canvas.create_rectangle(
-                    ex - width,
-                    ey - height,
-                    ex + width,
-                    ey + height,
-                    outline=self._colors["warning"],
-                    dash=(4, 2),
-                    tags="collider",
-                )
-
     def _draw_entity_markers(self, visual_ids: set[str]) -> None:
         """Draw icon markers for non-visual entities; retain bindings across frames."""
         if self._scene is None:
@@ -654,7 +630,7 @@ class ViewportPanel(tk.Frame):
             )
             if transform is None and has_script:
                 continue
-            needed[entity.entity_id] = editor_entity_kind(entity.name)
+            needed[entity.entity_id] = editor_entity_kind(entity.name) or "default"
 
         # Delete stale markers.
         for stale in set(self._marker_entries) - set(needed):
@@ -904,7 +880,10 @@ class ViewportPanel(tk.Frame):
 
     @staticmethod
     def _tk_color(color: Any) -> str:
-        return f"#{round(color.red * 255):02x}{round(color.green * 255):02x}{round(color.blue * 255):02x}"
+        return (
+            f"#{round(color.red * 255):02x}"
+            f"{round(color.green * 255):02x}{round(color.blue * 255):02x}"
+        )
 
     # ------------------------------------------------------------------
     # Input handlers
@@ -918,7 +897,9 @@ class ViewportPanel(tk.Frame):
             return
         world = self._camera.unproject((float(event.x), float(event.y)))
         for item in reversed(self._target.items):
-            transform = item.world_transform
+            transform = (
+                item.sprite_transform if item.primitive.kind == "sprite" else item.world_transform
+            )
             half_width = abs(item.primitive.size[0] * transform.scale[0]) / 2
             half_height = abs(item.primitive.size[1] * transform.scale[1]) / 2
             if (
@@ -940,6 +921,7 @@ class ViewportPanel(tk.Frame):
         ratio = self._camera._camera.pixel_ratio or 1.0
         self._camera.pan((previous_x - event.x) / ratio, (event.y - previous_y) / ratio)
         self._pan_anchor = (float(event.x), float(event.y))
+        self._target_dirty = True
         self._grid_dirty = True
         self._schedule_redraw()
 
@@ -954,6 +936,7 @@ class ViewportPanel(tk.Frame):
             return "break"
         self._camera.zoom_at_cursor(factor, (float(event.x), float(event.y)))
         self._notify_camera_change()
+        self._target_dirty = True
         self._grid_dirty = True
         self._schedule_redraw()
         return "break"
@@ -963,6 +946,7 @@ class ViewportPanel(tk.Frame):
         vh = self._canvas.winfo_height() or 300
         self._camera.zoom_at_cursor(factor, (vw / 2.0, vh / 2.0))
         self._notify_camera_change()
+        self._target_dirty = True
         self._grid_dirty = True
         self._schedule_redraw()
         return "break"
@@ -993,11 +977,13 @@ class ViewportPanel(tk.Frame):
         ratio = self._camera._camera.pixel_ratio or 1.0
         self._camera.pan((px - event.x) / ratio, (event.y - py) / ratio)
         self._space_pan_anchor = (float(event.x), float(event.y))
+        self._target_dirty = True
         self._grid_dirty = True
         self._schedule_redraw()
 
     def _rotate_camera(self, degrees: float) -> str:
         self._camera.rotate(degrees)
+        self._target_dirty = True
         self._grid_dirty = True
         self._notify_camera_change()
         self._redraw()
@@ -1005,6 +991,7 @@ class ViewportPanel(tk.Frame):
 
     def _reset_camera(self) -> str:
         self._camera.reset_view()
+        self._target_dirty = True
         self._grid_dirty = True
         self._notify_camera_change()
         self._redraw()

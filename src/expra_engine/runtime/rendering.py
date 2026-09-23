@@ -312,18 +312,32 @@ class RenderItem:
         )
 
     def _projected_bounds(self, context: RenderContext) -> tuple[float, float, float, float]:
-        transform = self.sprite_transform if self.primitive.kind == "sprite" else self.world_transform
+        transform = (
+            self.sprite_transform if self.primitive.kind == "sprite" else self.world_transform
+        )
         center = context.camera.project(transform.position, context.viewport)
-        if context.camera.rotation and self.primitive.radius is None:
+        if self.primitive.radius is None and (transform.rotation or context.camera.rotation):
             half_width = abs(self.primitive.size[0] * transform.scale[0]) / 2
             half_height = abs(self.primitive.size[1] * transform.scale[1]) / 2
+            angle = math.radians(transform.rotation)
+            cos_angle = math.cos(angle)
+            sin_angle = math.sin(angle)
             corners = (
-                (transform.position[0] - half_width, transform.position[1] - half_height),
-                (transform.position[0] - half_width, transform.position[1] + half_height),
-                (transform.position[0] + half_width, transform.position[1] - half_height),
-                (transform.position[0] + half_width, transform.position[1] + half_height),
+                (-half_width, -half_height),
+                (-half_width, half_height),
+                (half_width, -half_height),
+                (half_width, half_height),
             )
-            projected = tuple(context.camera.project(corner, context.viewport) for corner in corners)
+            projected = tuple(
+                context.camera.project(
+                    (
+                        transform.position[0] + local_x * cos_angle - local_y * sin_angle,
+                        transform.position[1] + local_x * sin_angle + local_y * cos_angle,
+                    ),
+                    context.viewport,
+                )
+                for local_x, local_y in corners
+            )
             xs = tuple(point[0] for point in projected)
             ys = tuple(point[1] for point in projected)
             return min(xs), min(ys), max(xs), max(ys)

@@ -12,6 +12,7 @@ from expra_engine.runtime import (
     PrimitiveDescriptor,
     PygameRenderer,
     PygameRenderFrame,
+    PygameResourceProvider,
     RenderContext,
     RenderContractFrame,
     RendererCapabilities,
@@ -45,6 +46,23 @@ class _FakeSurface:
 
     def blit(self, rendered: object, position: object) -> None:
         self.blits.append((rendered, position))
+
+
+class _ClearSurface(_FakeSurface):
+    def __init__(self) -> None:
+        super().__init__()
+        self.fills: list[object] = []
+
+    def fill(self, color: object) -> None:
+        self.fills.append(color)
+
+
+class _SourceTrackingSurface:
+    def __init__(self) -> None:
+        self.blit_calls: list[tuple[object, ...]] = []
+
+    def blit(self, *args: object) -> None:
+        self.blit_calls.append(args)
 
 
 class _FakeDraw:
@@ -95,6 +113,34 @@ class _TintableTexture(_FakeTexture):
 
     def fill(self, color: object, *, special_flags: object) -> None:
         self.fill_calls.append((color, special_flags))
+
+
+class _MutableResource:
+    def __init__(self) -> None:
+        self.payload = b"first"
+        self.identity = "first"
+        self.loads = 0
+
+    def metadata(self, _resource_id: str) -> SimpleNamespace:
+        return SimpleNamespace(size=len(self.payload), content_hash=self.identity)
+
+    def read_bytes(self, _resource_id: str) -> bytes:
+        return self.payload
+
+
+class _DeletableResource:
+    def __init__(self) -> None:
+        self.deleted = False
+
+    def metadata(self, _resource_id: str) -> SimpleNamespace:
+        if self.deleted:
+            raise FileNotFoundError("asset deleted")
+        return SimpleNamespace(size=5, content_hash="asset")
+
+    def read_bytes(self, _resource_id: str) -> bytes:
+        if self.deleted:
+            raise FileNotFoundError("asset deleted")
+        return b"asset"
 
 
 class _FakePygame:
@@ -197,6 +243,85 @@ def _screen_effect_scene() -> Scene:
 
 
 class TestPygameRenderer(unittest.TestCase):
+    def test_resource_provider_reloads_when_content_identity_changes(self) -> None:
+        resources = _MutableResource()
+
+        def load(stream: object) -> object:
+            resources.loads += 1
+            return stream.read()  # type: ignore[union-attr]
+
+        pygame = SimpleNamespace(image=SimpleNamespace(load=load))
+        provider = PygameResourceProvider(pygame, resources)
+
+        first = provider("assets://ship.png")
+        assert first == b"first"
+        assert provider("assets://ship.png") is first
+        self.assertEqual(resources.loads, 1)
+
+        resources.payload = b"second"
+        resources.identity = "second"
+
+        second = provider("assets://ship.png")
+
+        self.assertEqual(second, b"second")
+        self.assertIsNot(second, first)
+        self.assertEqual(resources.loads, 2)
+
+    def test_resource_provider_drops_cached_texture_when_metadata_disappears(self) -> None:
+        resources = _DeletableResource()
+        pygame = SimpleNamespace(image=SimpleNamespace(load=lambda stream: stream.read()))
+        provider = PygameResourceProvider(pygame, resources)
+
+        first = provider("assets://ship.png")
+        resources.deleted = True
+
+        self.assertIsNone(provider("assets://ship.png"))
+        self.assertIsNotNone(first)
+
+    def test_transparent_clear_mode_preserves_editor_surface_alpha(self) -> None:
+        surface = _ClearSurface()
+        renderer = PygameRenderer(_FakePygame(_FakeFont()), surface, clear_color=None)
+        renderer.start(RenderContext(Viewport(0, 0, 100, 100)))
+
+        renderer.render(RenderContractFrame())
+
+        self.assertEqual(surface.fills, [(0, 0, 0, 0)])
+        self.assertEqual(renderer.pygame.draw.rects, [])
+
+    def test_clear_failure_marks_frame_incomplete_for_editor_fallback(self) -> None:
+        class FailingClearSurface(_ClearSurface):
+            def fill(self, color: object) -> None:
+                raise RuntimeError(f"clear failed: {color!r}")
+
+        renderer = PygameRenderer(
+            _FakePygame(_FakeFont()),
+            FailingClearSurface(),
+            clear_color=None,
+        )
+        renderer.start(RenderContext(Viewport(0, 0, 100, 100)))
+
+        renderer.render(RenderContractFrame())
+
+        self.assertTrue(renderer.draw_failed)
+
+    def test_missing_texture_marks_frame_incomplete_for_editor_fallback(self) -> None:
+        renderer = PygameRenderer(
+            _FakePygame(_FakeFont()),
+            _FakeSurface(),
+            resource_provider=lambda _texture_id: None,
+        )
+        renderer.start(RenderContext(Viewport(0, 0, 100, 100)))
+        item = RenderItem(
+            "sprite",
+            PrimitiveDescriptor("sprite", size=(2.0, 1.0)),
+            Transform(),
+            material=MaterialDescriptor(texture_id="ship"),
+        )
+
+        renderer.render(RenderContractFrame((item,)))
+
+        self.assertTrue(renderer.draw_failed)
+
     def test_default_capabilities_do_not_claim_screen_support(self) -> None:
         capabilities = RendererCapabilities()
 
@@ -417,6 +542,29 @@ class TestPygameRenderer(unittest.TestCase):
         self.assertEqual(len(surface.blits), 9)
         self.assertTrue(all(entry[0] is resource for entry in surface.blits))
 
+    def test_nine_slice_source_patches_ignore_destination_outset(self) -> None:
+        surface = _SourceTrackingSurface()
+        renderer = PygameRenderer(
+            _FakePygame(_FakeFont()),
+            surface,
+            resource_provider=lambda _resource_id: _FakeTexture(),
+        )
+        descriptor = NineSliceDescriptor(
+            "panel",
+            Rect(0, 0, 20, 20),
+            NineSlice(Insets(2, 2, 2, 2), outset=Insets(1, 1, 1, 1)),
+        )
+
+        renderer.draw_nine_slice(descriptor, Color(1, 1, 1))
+
+        source_rects = [call[2] for call in surface.blit_calls]
+        self.assertEqual(len(source_rects), 9)
+        for source_rect in source_rects:
+            self.assertGreaterEqual(source_rect.x, 0)
+            self.assertGreaterEqual(source_rect.y, 0)
+            self.assertLessEqual(source_rect.x + source_rect.width, 32)
+            self.assertLessEqual(source_rect.y + source_rect.height, 16)
+
     def test_capabilities_explicitly_report_optional_support(self) -> None:
         renderer = PygameRenderer(
             _FakePygame(_FakeFont()), _FakeSurface(), resource_provider=lambda _: object()
@@ -577,8 +725,36 @@ class TestPygameRenderer(unittest.TestCase):
 
         renderer.render(RenderContractFrame((item,)))
 
-        self.assertEqual(calls[0], ("rotate", 20.0))
-        self.assertEqual(calls[1], ("scale", (20, 10)))
+        self.assertEqual(calls[0], ("scale", (20, 10)))
+        self.assertEqual(calls[1], ("rotate", 20.0))
+
+    def test_non_centered_sprite_uses_visual_transform_as_rotated_center(self) -> None:
+        texture = _FakeTexture()
+        pygame = _FakePygame(_FakeFont())
+        pygame.transform = SimpleNamespace(
+            smoothscale=lambda value, _size: value,
+            rotate=lambda value, _angle: value,
+        )
+        surface = _FakeSurface()
+        renderer = PygameRenderer(pygame, surface, resource_provider=lambda _: texture)
+        camera = OrthographicCamera(width=10, height=10)
+        renderer.start(RenderContext(Viewport(0, 0, 100, 100), camera))
+        item = RenderItem(
+            "sprite",
+            PrimitiveDescriptor("sprite", size=(2.0, 1.0)),
+            Transform(rotation=90.0),
+            material=MaterialDescriptor(texture_id="ship"),
+            sprite_centered=False,
+        )
+
+        renderer.render(RenderContractFrame((item,)))
+
+        destination = surface.blits[0][1]
+        expected = camera.project(
+            (item.sprite_transform.position[0], item.sprite_transform.position[1]),
+            RenderContext(Viewport(0, 0, 100, 100)).viewport,
+        )
+        self.assertEqual(getattr(destination, "center"), (round(expected[0]), round(expected[1])))
 
     def test_texture_modulation_uses_copy_and_preserves_source_texture(self) -> None:
         texture = _TintableTexture()

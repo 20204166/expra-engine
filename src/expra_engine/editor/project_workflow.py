@@ -116,6 +116,7 @@ class ProjectWorkflow:
             window._engine.stop()
         window._engine.set_project(None)
         window._engine.set_scene(None)
+        window._viewport.set_resource_service(None)
         window._editor_context = replace(window._editor_context, project=None)
         window._command_stack.clear()
         window._selected_id = None
@@ -145,6 +146,7 @@ class ProjectWorkflow:
         scene = project.load_scene()
         window._engine.set_project(project)
         window._engine.set_scene(scene)
+        window._viewport.set_resource_service(project.resource_service())
         window._engine.set_script_registry(ScriptRegistry(project.path))
         window._editor_context = replace(window._editor_context, project=project)
         window._command_stack.clear()

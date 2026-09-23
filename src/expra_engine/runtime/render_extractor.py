@@ -104,7 +104,12 @@ def _item(
             raise ValueError("invalid sprite")
         primitive = PrimitiveDescriptor("sprite", (visual.width, visual.height))
         color = visual.tint
-        material = MaterialDescriptor(color=color, tint=color, texture_id=visual.asset)
+        material = MaterialDescriptor(
+            color=color,
+            tint=color,
+            texture_id=visual.asset,
+            source_region=visual.region,
+        )
         payload = visual.to_dict()
         layer = visual.layer
     elif isinstance(visual, AnimatedSprite2DComponent):
@@ -139,10 +144,34 @@ def _item(
         phase=phase,
         layer=entity.layer + layer,
         payload=payload,
-        sprite_offset=view.offset if isinstance(visual, AnimatedSprite2DComponent) and view is not None else (0.0, 0.0),
-        sprite_centered=view.centered if isinstance(visual, AnimatedSprite2DComponent) and view is not None else True,
-        sprite_flip_h=view.flip_h if isinstance(visual, AnimatedSprite2DComponent) and view is not None else False,
-        sprite_flip_v=view.flip_v if isinstance(visual, AnimatedSprite2DComponent) and view is not None else False,
+        sprite_offset=(
+            visual.offset
+            if isinstance(visual, SpriteComponent)
+            else view.offset
+            if isinstance(visual, AnimatedSprite2DComponent) and view is not None
+            else (0.0, 0.0)
+        ),
+        sprite_centered=(
+            visual.centered
+            if isinstance(visual, SpriteComponent)
+            else view.centered
+            if isinstance(visual, AnimatedSprite2DComponent) and view is not None
+            else True
+        ),
+        sprite_flip_h=(
+            visual.flip_h
+            if isinstance(visual, SpriteComponent)
+            else view.flip_h
+            if isinstance(visual, AnimatedSprite2DComponent) and view is not None
+            else False
+        ),
+        sprite_flip_v=(
+            visual.flip_v
+            if isinstance(visual, SpriteComponent)
+            else view.flip_v
+            if isinstance(visual, AnimatedSprite2DComponent) and view is not None
+            else False
+        ),
         text=TextDescriptor(
             visual.text,
             visual.font,

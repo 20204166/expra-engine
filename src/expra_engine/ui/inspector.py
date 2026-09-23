@@ -232,6 +232,12 @@ class InspectorPanel(tk.Frame):
     def convert_component_value(descriptor: PropertyDescriptor, value: Any, original: Any) -> Any:
         return descriptor.convert(value, original=original)
 
+    @staticmethod
+    def format_component_value(value: Any) -> str:
+        if isinstance(value, (tuple, list)):
+            return ", ".join(str(part) for part in value)
+        return str(value)
+
     def _component_section(self, entity: Entity, component: Component) -> None:
         try:
             spec = next(spec for spec in registered_component_specs() if isinstance(component, spec.cls))
@@ -250,7 +256,7 @@ class InspectorPanel(tk.Frame):
         for row, descriptor in enumerate(spec.fields):
             self._label(form, descriptor.label, row)
             original = getattr(component, descriptor.name)
-            variable = tk.StringVar(value=str(original))
+            variable = tk.StringVar(value=self.format_component_value(original))
             entry = ttk.Entry(form, textvariable=variable, style=STYLE_ENTRY)
             entry.grid(row=row, column=1, sticky="ew", pady=3)
             if not descriptor.editable:

@@ -39,8 +39,13 @@ class SpriteRegion:
     height: int
 
     def __post_init__(self) -> None:
+        if any(type(value) is not int for value in (self.x, self.y, self.width, self.height)):
+            raise ValueError("sprite regions require integer pixel values")
         if self.x < 0 or self.y < 0 or self.width <= 0 or self.height <= 0:
             raise ValueError("sprite regions require non-negative origins and positive size")
+
+    def __str__(self) -> str:
+        return f"{self.x}, {self.y}, {self.width}, {self.height}"
 
 
 @dataclass(frozen=True)

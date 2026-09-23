@@ -2,14 +2,30 @@ import json
 
 import pytest
 
-from expra_engine.core.component import TransformComponent, component_from_dict, registered_component_types
+from expra_engine.core.component import (
+    TransformComponent,
+    component_from_dict,
+    registered_component_types,
+)
 from expra_engine.core.component_schema import component_type_spec
 from expra_engine.core.scene import Scene
+from expra_engine.editor.commands import SetComponentPropertyCommand
+from expra_engine.runtime.animation import SpriteRegion
 from expra_engine.runtime.canvas_effects import CanvasModulateComponent
 from expra_engine.runtime.render_extractor import extract_render_frame
-from expra_engine.runtime.rendering import Color, MaterialDescriptor, RenderFrame, RenderPhase, Transform
+from expra_engine.runtime.rendering import (
+    Color,
+    MaterialDescriptor,
+    RenderFrame,
+    RenderPhase,
+    Transform,
+)
 from expra_engine.runtime.transform_interpolation import TransformInterpolator
-from expra_engine.runtime.visual_components import PrimitiveComponent, SpriteComponent, TextComponent
+from expra_engine.runtime.visual_components import (
+    PrimitiveComponent,
+    SpriteComponent,
+    TextComponent,
+)
 
 
 def test_visual_components_round_trip_as_additive_json_payloads() -> None:
@@ -42,7 +58,17 @@ def test_visual_components_expose_registry_field_metadata() -> None:
         "kind", "width", "height", "radius", "fill", "outline", "outline_width", "layer", "visible"
     )
     assert tuple(field.name for field in component_type_spec("sprite").fields) == (
-        "asset", "tint", "width", "height", "layer", "visible"
+        "asset",
+        "tint",
+        "width",
+        "height",
+        "region",
+        "centered",
+        "offset",
+        "flip_h",
+        "flip_v",
+        "layer",
+        "visible",
     )
     assert tuple(field.name for field in component_type_spec("text").fields) == (
         "text", "font", "size", "color", "max_width", "align", "layer", "visible"
@@ -91,6 +117,11 @@ def test_visual_components_reject_non_finite_values_but_allow_backend_neutral_co
         TextComponent("score", size=float("-inf"))
 
 
+def test_sprite_component_rejects_fractional_region_values() -> None:
+    with pytest.raises(ValueError, match="region must contain integer pixel values"):
+        SpriteComponent("ship.png", region=(1.5, 2, 3, 4))
+
+
 def test_extractor_composes_transforms_and_orders_phase_layer_and_entity_stably() -> None:
     scene = Scene("visuals")
     parent = scene.create_entity("parent", entity_id="parent", layer=1)
@@ -130,6 +161,59 @@ def test_extractor_can_sample_runtime_interpolated_world_transforms() -> None:
     frame = extract_render_frame(scene, interpolator=interpolator, interpolation_fraction=0.5)
 
     assert frame.items[0].transform.position == pytest.approx((5.0, 0.0, 0.0))
+
+
+def test_static_sprite_maps_region_offset_centering_and_flips() -> None:
+    scene = Scene("static sprite")
+    entity = scene.create_entity("ship", entity_id="ship")
+    entity.add_component(
+        SpriteComponent(
+            "assets://ship.png",
+            region=SpriteRegion(4, 8, 16, 12),
+            offset=(1.5, -2.0),
+            centered=False,
+            flip_h=True,
+            flip_v=True,
+        )
+    )
+
+    item = extract_render_frame(scene).items[0]
+
+    assert item.material.source_region == SpriteRegion(4, 8, 16, 12)
+    assert item.sprite_offset == (1.5, -2.0)
+    assert item.sprite_centered is False
+    assert item.sprite_flip_h is True
+    assert item.sprite_flip_v is True
+
+
+def test_static_sprite_accepts_legacy_payload_defaults() -> None:
+    component = component_from_dict({"type": "sprite", "asset": "assets://ship.png"})
+
+    assert isinstance(component, SpriteComponent)
+    assert component.region is None
+    assert component.offset == (0.0, 0.0)
+    assert component.centered is True
+    assert component.flip_h is False
+    assert component.flip_v is False
+
+
+def test_sprite_region_inspector_values_remain_typed_after_edit() -> None:
+    component = SpriteComponent("assets://ship.png", region=SpriteRegion(4, 8, 16, 12))
+    descriptor = next(
+        field for field in component_type_spec("sprite").fields if field.name == "region"
+    )
+
+    edited = descriptor.convert(str(component.region), original=component.region)
+
+    assert edited == (4.0, 8.0, 16.0, 12.0)
+    assert descriptor.convert("-1, 2, 3, 4", original=component.region) is component.region
+    scene = Scene("region edit")
+    entity = scene.create_entity("ship", entity_id="ship")
+    entity.add_component(component)
+    SetComponentPropertyCommand(scene, "ship", SpriteComponent, "region", edited).execute()
+
+    assert component.region == SpriteRegion(4, 8, 16, 12)
+    assert component.to_dict()["region"] == [4, 8, 16, 12]
 
 
 def test_extractor_skips_disabled_hidden_and_malformed_visuals_deterministically() -> None:

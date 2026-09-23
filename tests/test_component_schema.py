@@ -10,6 +10,7 @@ from expra_engine.core.component_schema import (
     component_type_spec,
     register_component_spec,
 )
+from expra_engine.runtime.visual_components import SpriteComponent
 
 
 def test_property_descriptor_converts_supported_editor_values() -> None:
@@ -29,6 +30,14 @@ def test_property_descriptor_rejects_invalid_input_and_non_finite_numbers() -> N
     assert descriptor.convert("not-a-number", original=4.0) == 4.0
     assert descriptor.convert("-1", original=4.0) == 4.0
     assert descriptor.convert(str(math.inf), original=4.0) == 4.0
+
+
+def test_sprite_region_descriptor_rejects_fractional_pixel_values() -> None:
+    spec = component_type_spec("sprite")
+    assert spec.cls is SpriteComponent
+    region = next(field for field in spec.fields if field.name == "region")
+
+    assert region.convert("1.5, 2, 3, 4", original=(1, 2, 3, 4)) == (1, 2, 3, 4)
 
 
 def test_read_only_descriptor_returns_original_value() -> None:

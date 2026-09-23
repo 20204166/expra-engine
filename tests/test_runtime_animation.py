@@ -34,6 +34,10 @@ class TestSpriteMetadata(unittest.TestCase):
 
 
 class TestSpriteSheetAndClips(unittest.TestCase):
+    def test_sprite_regions_require_integer_pixel_coordinates(self) -> None:
+        with self.assertRaises(ValueError):
+            SpriteRegion(1.5, 0, 8, 8)  # type: ignore[arg-type]
+
     def test_sprite_sheet_returns_renderer_neutral_tile_region(self) -> None:
         sheet = SpriteSheet("atlas", tile_width=16, tile_height=24, columns=3, rows=2)
 
