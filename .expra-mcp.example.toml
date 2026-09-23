@@ -1,0 +1,77 @@
+# Example expra-mcp configuration. Copy to .expra-mcp.toml (gitignored,
+# machine-local) or generate one with:
+#
+#   tools/expra_mcp/.venv/bin/expra-mcp init \
+#       --expra /path/to/expra-engine \
+#       --default-project examples/blacksite_relay \
+#       --reference godot=/path/to/godot-master \
+#       --reference ppb=/path/to/pursuedpybear-canon \
+#       --reference minipy=/path/to/MiniPyEngine-main \
+#       --reference ursina=/path/to/ursina-master \
+#       --reference exp_ui=/path/to/exp
+#
+# Paths below are this development machine's real local layout, kept here
+# only as example data (never hardcoded in Python source -- see
+# tools/expra_mcp/src/expra_dev_mcp/paths.py).
+
+schema_version = 1
+
+[workspace]
+expra_root = "/home/btn17/Downloads/expra-engine"
+default_project = "examples/blacksite_relay"
+python = "auto"
+trusted_project_roots = ["examples"]
+
+[references.godot]
+path = "/home/btn17/Downloads/godot-master"
+read_only = true
+domains = ["rendering", "editor", "resources", "physics", "audio", "animation"]
+
+[references.ppb]
+path = "/home/btn17/Downloads/pursuedpybear-canon"
+read_only = true
+domains = ["runtime", "events", "scene", "loop", "python"]
+
+[references.minipy]
+path = "/home/btn17/Downloads/MiniPyEngine-main"
+read_only = true
+domains = ["runtime", "rendering", "small-engine", "python"]
+
+[references.ursina]
+path = "/home/btn17/Downloads/ursina-master"
+read_only = true
+domains = ["entities", "rendering", "input", "camera", "python-api"]
+
+[references.exp_ui]
+path = "/home/btn17/Downloads/exp"
+read_only = true
+domains = [
+    "tk",
+    "ui",
+    "coordinator",
+    "threading",
+    "scheduling",
+    "cancellation",
+    "background-work",
+    "render-coalescing",
+]
+
+[execution]
+allow_source_writes = false
+allow_network = false
+command_timeout_seconds = 600
+max_output_kb = 256
+max_parallel_commands = 2
+
+[editor]
+display_mode = "auto"
+default_width = 1280
+default_height = 720
+session_timeout_seconds = 1800
+
+[artifacts]
+directory = ".expra-mcp/artifacts"
+
+[diagnostics]
+directory = ".expra-mcp/runs"
+deduplicate = true

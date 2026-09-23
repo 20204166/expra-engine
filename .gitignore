@@ -14,3 +14,6 @@ venv/
 .claude/
 .opencode/
 .ui/
+.expra-mcp/
+.expra-mcp.toml
+/opencode.json

@@ -1,0 +1,6 @@
+{
+  "venvPath": ".",
+  "venv": ".venv",
+  "include": ["src", "tests"],
+  "exclude": ["src/expra_dev_mcp/_static_runner.py", "src/expra_dev_mcp/_editor_worker.py"]
+}
