@@ -57,6 +57,7 @@ from expra_engine.runtime.events import (
 from expra_engine.runtime.invoke import Repeater, after, every, invoke
 from expra_engine.runtime.physics import AreaEffect2D
 from expra_engine.runtime.platformer import PlatformerController2d, PlatformerPhase
+from expra_engine.runtime.pygame_screen_pipeline import PygameScreenPipeline
 from expra_engine.runtime.pygame_renderer import (
     PygameRenderer,
     PygameRenderFrame,
@@ -64,6 +65,7 @@ from expra_engine.runtime.pygame_renderer import (
     RenderFrame,
 )
 from expra_engine.runtime.pygame_runtime import PygameRuntime
+from expra_engine.runtime.render_pipeline import RenderPlan, RenderPlanBuilder
 from expra_engine.runtime.rendering import (
     Color,
     MaterialDescriptor,
@@ -81,6 +83,15 @@ from expra_engine.runtime.rendering import (
 )
 from expra_engine.runtime.rendering import (
     RenderFrame as RenderContractFrame,
+)
+from expra_engine.runtime.screen_texture import (
+    BackBufferCopyComponent,
+    BackBufferCopyMode,
+    BackBufferCopyRequest,
+    RenderEffect,
+    ScreenTextureComponent,
+    ScreenTextureDrawRequest,
+    ScreenTextureFilter,
 )
 from expra_engine.runtime.script_component import ScriptComponent, UnresolvedScriptComponent
 from expra_engine.runtime.script_registry import ScriptLoadError, ScriptRegistry
@@ -125,6 +136,9 @@ __all__ = [
     "AudioPlaybackRequest2D",
     "AudioStreamPlayer2DComponent",
     "AudioStreamPlayer2DState",
+    "BackBufferCopyComponent",
+    "BackBufferCopyMode",
+    "BackBufferCopyRequest",
     "Behaviour",
     "BehaviourContext",
     "BehaviourFactory",
@@ -150,11 +164,15 @@ __all__ = [
     "PygameRenderer",
     "PygameResourceProvider",
     "PygameRuntime",
+    "PygameScreenPipeline",
     "Quit",
     "RenderContext",
     "RenderContractFrame",
+    "RenderEffect",
     "RenderFrame",
     "RenderItem",
+    "RenderPlan",
+    "RenderPlanBuilder",
     "RenderPhase",
     "Renderer",
     "RendererCapabilities",
@@ -173,6 +191,9 @@ __all__ = [
     "ScriptLoadError",
     "ScriptRegistry",
     "Sequence",
+    "ScreenTextureComponent",
+    "ScreenTextureDrawRequest",
+    "ScreenTextureFilter",
     "SmoothFollow",
     "SpaceOverride",
     "SpatialAudioMix2D",

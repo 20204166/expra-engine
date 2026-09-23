@@ -120,6 +120,7 @@ def component_from_dict(data: dict[str, Any]) -> Component:
     _register_visual_components()
     _register_physics_components()
     _register_audio_components()
+    _register_screen_components()
     component_type = data.get("type", "")
     if component_type == "script":
         from expra_engine.runtime.script_component import (
@@ -154,6 +155,7 @@ def registered_component_types() -> tuple[tuple[str, type[Component]], ...]:
     _register_visual_components()
     _register_physics_components()
     _register_audio_components()
+    _register_screen_components()
     return tuple(_COMPONENT_REGISTRY.items())
 
 
@@ -237,6 +239,87 @@ def _register_visual_components() -> None:
             CanvasModulateComponent,
             (
                 PropertyDescriptor("color", "Color", tuple, (1.0, 1.0, 1.0, 1.0)),
+                PropertyDescriptor("enabled", "Enabled", bool, True),
+            ),
+        ),
+    )
+    for component_type, component_cls, fields in registrations:
+        _COMPONENT_REGISTRY[component_type] = component_cls
+        register_component_spec(ComponentTypeSpec(component_type, component_cls, fields))
+
+
+def _register_screen_components() -> None:
+    if "back_buffer_copy" in _COMPONENT_REGISTRY:
+        return
+    from expra_engine.runtime.screen_texture import (
+        BackBufferCopyComponent,
+        ScreenTextureComponent,
+    )
+
+    registrations: tuple[tuple[str, type[Component], tuple[PropertyDescriptor, ...]], ...] = (
+        (
+            BackBufferCopyComponent.component_type,
+            BackBufferCopyComponent,
+            (
+                PropertyDescriptor(
+                    "copy_mode",
+                    "Copy Mode",
+                    str,
+                    "rect",
+                    enum_values=("disabled", "rect", "viewport"),
+                ),
+                PropertyDescriptor(
+                    "rect",
+                    "Rect",
+                    tuple,
+                    (-100.0, -100.0, 200.0, 200.0),
+                    tuple_length=4,
+                ),
+                PropertyDescriptor("capture_id", "Capture ID", str, "screen"),
+                PropertyDescriptor("layer", "Layer", int, 0),
+                PropertyDescriptor(
+                    "phase",
+                    "Phase",
+                    str,
+                    "opaque",
+                    enum_values=("opaque", "transparent", "overlay"),
+                ),
+                PropertyDescriptor("enabled", "Enabled", bool, True),
+            ),
+        ),
+        (
+            ScreenTextureComponent.component_type,
+            ScreenTextureComponent,
+            (
+                PropertyDescriptor("capture_id", "Capture ID", str, "screen"),
+                PropertyDescriptor(
+                    "uv_rect",
+                    "UV Rect",
+                    tuple,
+                    (0.0, 0.0, 1.0, 1.0),
+                    tuple_length=4,
+                ),
+                PropertyDescriptor("width", "Width", float, 1.0, minimum=0.0),
+                PropertyDescriptor("height", "Height", float, 1.0, minimum=0.0),
+                PropertyDescriptor(
+                    "filter",
+                    "Filter",
+                    str,
+                    "linear",
+                    enum_values=("nearest", "linear", "nearest_mipmap", "linear_mipmap"),
+                ),
+                PropertyDescriptor("lod", "LOD", float, 0.0, minimum=0.0),
+                PropertyDescriptor("tint", "Tint", tuple, (1.0, 1.0, 1.0, 1.0)),
+                PropertyDescriptor("opacity", "Opacity", float, 1.0, minimum=0.0, maximum=1.0),
+                PropertyDescriptor("layer", "Layer", int, 0),
+                PropertyDescriptor(
+                    "phase",
+                    "Phase",
+                    str,
+                    "transparent",
+                    enum_values=("opaque", "transparent", "overlay"),
+                ),
+                PropertyDescriptor("visible", "Visible", bool, True),
                 PropertyDescriptor("enabled", "Enabled", bool, True),
             ),
         ),

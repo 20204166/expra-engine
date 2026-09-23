@@ -22,6 +22,14 @@ from expra_engine.runtime.rendering import (
     TextDescriptor,
     Transform,
 )
+from expra_engine.runtime.screen_texture import (
+    BackBufferCopyComponent,
+    BackBufferCopyRequest,
+    RenderEffect,
+    ScreenTextureComponent,
+    ScreenTextureDrawRequest,
+    render_phase_from_value,
+)
 from expra_engine.runtime.transform_interpolation import TransformInterpolator
 from expra_engine.runtime.visual_components import (
     PrimitiveComponent,
@@ -157,6 +165,8 @@ def extract_render_frame(
     """Convert registered scene visuals into backend-neutral render data."""
     entities = {entity.entity_id: entity for entity in scene.entities}
     items: list[RenderItem] = []
+    submissions: list[object] = []
+    any_effect = False
     for entity in scene.entities:
         if not entity.enabled:
             continue
@@ -171,23 +181,64 @@ def extract_render_frame(
         except (TypeError, ValueError, OverflowError):
             continue
         for visual in entity.components:
-            if not isinstance(
+            if isinstance(
                 visual, (PrimitiveComponent, SpriteComponent, TextComponent, AnimatedSprite2DComponent)
-            ) or not visual.enabled or not visual.visible:
-                continue
-            try:
-                items.append(
-                    _item(
+            ):
+                if not visual.enabled or not visual.visible:
+                    continue
+                try:
+                    item = _item(
                         entity,
                         visual,
                         transform,
                         animated_players.get(visual) if animated_players else None,
                     )
-                )
+                except (TypeError, ValueError, OverflowError):
+                    continue
+                items.append(item)
+                submissions.append(item)
+                continue
+
+            if not isinstance(visual, (BackBufferCopyComponent, ScreenTextureComponent)):
+                continue
+
+            if not visual.enabled or (
+                isinstance(visual, ScreenTextureComponent) and not visual.visible
+            ):
+                continue
+
+            try:
+                phase = render_phase_from_value(visual.phase)
+                layer = entity.layer + visual.layer
+                if isinstance(visual, BackBufferCopyComponent):
+                    request = BackBufferCopyRequest(
+                        entity.entity_id,
+                        visual.capture_id,
+                        visual.copy_mode,
+                        transform,
+                        visual.rect,
+                    )
+                else:
+                    request = ScreenTextureDrawRequest(
+                        entity.entity_id,
+                        visual.capture_id,
+                        transform,
+                        visual.width,
+                        visual.height,
+                        visual.uv_rect,
+                        visual.filter,
+                        visual.lod,
+                        visual.tint,
+                        visual.opacity,
+                    )
+                effect = RenderEffect(request, phase, layer)
             except (TypeError, ValueError, OverflowError):
                 continue
+            submissions.append(effect)
+            any_effect = True
     return RenderFrame(
         tuple(items),
         elapsed=elapsed,
         modulation=resolve_canvas_modulation(scene).color,
+        submissions=tuple(submissions) if any_effect else (),
     )

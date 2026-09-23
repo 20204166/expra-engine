@@ -34,6 +34,7 @@ from expra_engine.runtime.rendering import (
     RenderItem,
     Viewport,
 )
+from expra_engine.runtime.screen_texture import RenderEffect
 from expra_engine.ui.layout import resize_aware
 from expra_engine.ui.styles import COLORS, editor_entity_kind
 from expra_engine.ui.viewport_camera import (
@@ -68,6 +69,7 @@ class EditorRenderTarget:
     items: tuple[RenderItem, ...]
     selected_id: str | None
     colliders: tuple[ColliderOutline, ...] = ()
+    unsupported_effects: tuple[str, ...] = ()
 
 
 @dataclass
@@ -106,9 +108,14 @@ def build_editor_render_target(
         interpolation_fraction=interpolation_fraction,
         animated_players=animated_players,
     )
+    unsupported_effects = tuple(
+        effect.request.entity_id
+        for effect in frame.submissions
+        if isinstance(effect, RenderEffect)
+    )
     width, height = viewport
     if width <= 0 or height <= 0:
-        return EditorRenderTarget(frame, (), None)
+        return EditorRenderTarget(frame, (), None, unsupported_effects=unsupported_effects)
     # Use the editor camera's actual visible width so culling matches rendering.
     if camera is not None:
         cam_width = camera._camera.width
@@ -137,7 +144,11 @@ def build_editor_render_target(
                 )
             )
     return EditorRenderTarget(
-        frame, items, selected_id if selected_id in entity_ids else None, tuple(colliders)
+        frame,
+        items,
+        selected_id if selected_id in entity_ids else None,
+        tuple(colliders),
+        unsupported_effects,
     )
 
 

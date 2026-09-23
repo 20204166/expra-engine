@@ -58,6 +58,9 @@ class RendererCapabilities:
     blend_mode: bool = False
     resize: bool = True
     headless: bool = False
+    screen_capture: bool = False
+    screen_texture: bool = False
+    screen_texture_mipmaps: bool = False
 
 
 @dataclass(frozen=True)
@@ -356,9 +359,11 @@ class RenderFrame:
     elapsed: float = 0.0
     payload: object | None = None
     modulation: Color = field(default_factory=lambda: Color(1.0, 1.0, 1.0, 1.0))
+    submissions: tuple[object, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "items", tuple(self.items))
+        object.__setattr__(self, "submissions", tuple(self.submissions))
         _finite(self.elapsed, "elapsed")
         if not isinstance(self.modulation, Color):
             raise TypeError("modulation must be a Color")

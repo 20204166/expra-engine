@@ -14,6 +14,7 @@ from expra_engine.runtime import (
     PygameRenderFrame,
     RenderContext,
     RenderContractFrame,
+    RendererCapabilities,
     RenderFrame,
     RenderItem,
     RenderPhase,
@@ -22,12 +23,20 @@ from expra_engine.runtime import (
 )
 from expra_engine.runtime.canvas_effects import CanvasModulateComponent
 from expra_engine.runtime.render_extractor import extract_render_frame
-from expra_engine.runtime.visual_components import PrimitiveComponent
 from expra_engine.runtime.rendering import MaterialDescriptor, NineSliceDescriptor, TextDescriptor
+from expra_engine.runtime.screen_texture import (
+    BackBufferCopyComponent,
+    BackBufferCopyMode,
+    BackBufferCopyRequest,
+    RenderEffect,
+    ScreenTextureComponent,
+)
 from expra_engine.runtime.transform_interpolation import TransformInterpolator
+from expra_engine.runtime.ui import Button, GameCanvas, LayoutSpec
+from expra_engine.runtime.ui import Viewport as UIViewport
+from expra_engine.runtime.visual_components import PrimitiveComponent
 from expra_engine.ui_model.geometry import Insets, Rect
 from expra_engine.ui_model.nine_slice import NineSlice
-from expra_engine.runtime.ui import Button, GameCanvas, LayoutSpec, UIEvent, Viewport as UIViewport
 
 
 class _FakeSurface:
@@ -94,7 +103,257 @@ class _FakePygame:
         self.font = SimpleNamespace(Font=lambda name, size: font)
 
 
+class _ScreenSurface:
+    def __init__(
+        self,
+        size: tuple[int, int] = (100, 100),
+        *,
+        events: list[str] | None = None,
+        name: str = "surface",
+    ) -> None:
+        self._size = size
+        self.events = events if events is not None else []
+        self.name = name
+        self.subsurfaces: list[tuple[int, int, int, int]] = []
+        self.blits: list[tuple[object, object]] = []
+
+    def get_size(self) -> tuple[int, int]:
+        return self._size
+
+    def copy(self) -> "_ScreenSurface":
+        return _ScreenSurface(self._size, events=self.events, name=f"{self.name}.copy")
+
+    def subsurface(self, rectangle: tuple[int, int, int, int]) -> "_ScreenSurface":
+        self.subsurfaces.append(tuple(rectangle))
+        self.events.append("capture")
+        return _ScreenSurface(
+            (rectangle[2], rectangle[3]),
+            events=self.events,
+            name=f"{self.name}.subsurface",
+        )
+
+    def blit(self, rendered: object, position: object) -> None:
+        self.blits.append((rendered, position))
+        self.events.append("blit:screen_texture")
+
+    def get_rect(self, **kwargs: object) -> object:
+        center = kwargs.get("center", (0, 0))
+        assert isinstance(center, tuple)
+        return SimpleNamespace(
+            x=center[0] - self._size[0] // 2,
+            y=center[1] - self._size[1] // 2,
+            width=self._size[0],
+            height=self._size[1],
+        )
+
+
+class _ScreenDraw(_FakeDraw):
+    def rect(self, surface: object, color: object, rectangle: object, width: int = 0) -> None:
+        super().rect(surface, color, rectangle, width)
+        if not isinstance(surface, _ScreenSurface):
+            return
+        if color == (10, 14, 30):
+            surface.events.append("clear")
+        elif color == (255, 0, 0):
+            surface.events.append("draw:background")
+        elif color == (0, 0, 255):
+            surface.events.append("draw:later")
+
+
+class _ScreenTransform:
+    def __init__(self, events: list[str]) -> None:
+        self.events = events
+
+    def scale(self, surface: _ScreenSurface, size: tuple[int, int]) -> _ScreenSurface:
+        return _ScreenSurface(size, events=self.events, name="scaled")
+
+    def smoothscale(self, surface: _ScreenSurface, size: tuple[int, int]) -> _ScreenSurface:
+        return _ScreenSurface(size, events=self.events, name="smoothscaled")
+
+    def rotate(self, surface: _ScreenSurface, angle: float) -> _ScreenSurface:
+        return surface
+
+
+class _ScreenPygame(_FakePygame):
+    BLEND_RGBA_MULT = 7
+
+    def __init__(self, font: _FakeFont, events: list[str]) -> None:
+        super().__init__(font)
+        self.draw = _ScreenDraw()
+        self.transform = _ScreenTransform(events)
+
+
+def _screen_effect_scene() -> Scene:
+    scene = Scene("effects")
+    background = scene.create_entity("background", entity_id="background")
+    background.add_component(PrimitiveComponent(fill=Color(1.0, 0.0, 0.0)))
+    capture = scene.create_entity("capture", entity_id="capture")
+    capture.add_component(BackBufferCopyComponent(copy_mode="viewport"))
+    later = scene.create_entity("later", entity_id="later")
+    later.add_component(PrimitiveComponent(fill=Color(0.0, 0.0, 1.0)))
+    consumer = scene.create_entity("consumer", entity_id="consumer")
+    consumer.add_component(ScreenTextureComponent(width=2.0, height=2.0))
+    return scene
+
+
 class TestPygameRenderer(unittest.TestCase):
+    def test_default_capabilities_do_not_claim_screen_support(self) -> None:
+        capabilities = RendererCapabilities()
+
+        self.assertFalse(capabilities.screen_capture)
+        self.assertFalse(capabilities.screen_texture)
+        self.assertFalse(capabilities.screen_texture_mipmaps)
+
+    def test_renderer_reports_only_available_injected_screen_capabilities(self) -> None:
+        font = _FakeFont()
+        events: list[str] = []
+        renderer = PygameRenderer(_ScreenPygame(font, events), None)
+
+        self.assertFalse(renderer.capabilities.screen_capture)
+        self.assertFalse(renderer.capabilities.screen_texture)
+        self.assertFalse(renderer.capabilities.screen_texture_mipmaps)
+
+        renderer.set_surface(_ScreenSurface(events=events))
+
+        self.assertTrue(renderer.capabilities.screen_capture)
+        self.assertTrue(renderer.capabilities.screen_texture)
+        self.assertTrue(renderer.capabilities.screen_texture_mipmaps)
+
+        limited = PygameRenderer(_FakePygame(_FakeFont()), _FakeSurface())
+        self.assertFalse(limited.capabilities.screen_capture)
+        self.assertFalse(limited.capabilities.screen_texture)
+        self.assertFalse(limited.capabilities.screen_texture_mipmaps)
+
+    def test_screen_capabilities_require_the_operations_the_pipeline_uses(self) -> None:
+        class _PartialSurface:
+            def copy(self) -> object:
+                return self
+
+            def subsurface(self, _rectangle: object) -> object:
+                return self
+
+            def blit(self, _source: object, _destination: object) -> None:
+                return None
+
+        pygame = _FakePygame(_FakeFont())
+        pygame.transform = SimpleNamespace(scale=lambda surface, size: surface)
+        renderer = PygameRenderer(pygame, _PartialSurface())
+
+        self.assertFalse(renderer.capabilities.screen_capture)
+        self.assertFalse(renderer.capabilities.screen_texture)
+        self.assertFalse(renderer.capabilities.screen_texture_mipmaps)
+
+    def test_renderer_executes_capture_at_ordered_point_and_reuses_draw_logic(self) -> None:
+        events: list[str] = []
+        surface = _ScreenSurface(events=events)
+        renderer = PygameRenderer(_ScreenPygame(_FakeFont(), events), surface)
+        renderer.start(RenderContext(Viewport(0, 0, 100, 100)))
+
+        renderer.render(extract_render_frame(_screen_effect_scene()))
+
+        self.assertEqual(
+            events,
+            ["clear", "draw:background", "capture", "draw:later", "blit:screen_texture"],
+        )
+        self.assertEqual(surface.subsurfaces, [(0, 0, 100, 100)])
+        self.assertEqual(len(surface.blits), 1)
+
+    def test_effect_frame_applies_canvas_modulation_to_contract_items_once(self) -> None:
+        scene = _screen_effect_scene()
+        background = scene.find_entity("background")
+        assert background is not None
+        background.add_component(CanvasModulateComponent((0.5, 0.5, 0.5, 0.5)))
+        events: list[str] = []
+        pygame = _ScreenPygame(_FakeFont(), events)
+        renderer = PygameRenderer(pygame, _ScreenSurface(events=events))
+        renderer.start(RenderContext(Viewport(0, 0, 100, 100)))
+
+        renderer.render(extract_render_frame(scene))
+
+        self.assertEqual(pygame.draw.rects[1][1], (128, 0, 0, 128))
+
+    def test_ordinary_frames_bypass_screen_pipeline_and_keep_existing_draw_path(self) -> None:
+        renderer = PygameRenderer(_FakePygame(_FakeFont()), _FakeSurface())
+        renderer.start(RenderContext(Viewport(0, 0, 100, 100)))
+
+        def fail_if_executed(*args: object, **kwargs: object) -> None:
+            raise AssertionError("ordinary frames must not execute the screen pipeline")
+
+        renderer._screen_pipeline.execute = fail_if_executed  # type: ignore[method-assign]
+        renderer.render(
+            RenderContractFrame(
+                (
+                    RenderItem(
+                        "ordinary",
+                        PrimitiveDescriptor("rectangle", size=(2, 2)),
+                        Transform(),
+                    ),
+                )
+            )
+        )
+
+        self.assertEqual(len(renderer.pygame.draw.rects), 2)
+
+    def test_screen_captures_clear_on_renderer_lifecycle_changes(self) -> None:
+        events: list[str] = []
+        renderer = PygameRenderer(
+            _ScreenPygame(_FakeFont(), events),
+            _ScreenSurface(events=events),
+        )
+        renderer.start(RenderContext(Viewport(0, 0, 100, 100)))
+        frame = RenderContractFrame(
+            submissions=(
+                RenderEffect(
+                    BackBufferCopyRequest(
+                        "capture",
+                        "screen",
+                        BackBufferCopyMode.VIEWPORT,
+                    ),
+                    RenderPhase.OPAQUE,
+                    0,
+                ),
+            )
+        )
+
+        renderer.render(frame)
+        self.assertEqual(renderer._screen_pipeline.capture_ids, ("screen",))
+        renderer.resize(Viewport(0, 0, 80, 80))
+        self.assertEqual(renderer._screen_pipeline.capture_ids, ())
+
+        renderer.render(frame)
+        renderer.set_surface(_ScreenSurface((80, 80), events=events))
+        self.assertEqual(renderer._screen_pipeline.capture_ids, ())
+
+        renderer.render(frame)
+        renderer.stop()
+        self.assertEqual(renderer._screen_pipeline.capture_ids, ())
+
+    def test_screen_captures_clear_before_an_ordinary_frame(self) -> None:
+        events: list[str] = []
+        renderer = PygameRenderer(
+            _ScreenPygame(_FakeFont(), events),
+            _ScreenSurface(events=events),
+        )
+        renderer.start(RenderContext(Viewport(0, 0, 100, 100)))
+        capture_frame = RenderContractFrame(
+            submissions=(
+                RenderEffect(
+                    BackBufferCopyRequest(
+                        "capture",
+                        "screen",
+                        BackBufferCopyMode.VIEWPORT,
+                    ),
+                    RenderPhase.OPAQUE,
+                    0,
+                ),
+            )
+        )
+
+        renderer.render(capture_frame)
+        self.assertEqual(renderer._screen_pipeline.capture_ids, ("screen",))
+        renderer.render(RenderContractFrame())
+        self.assertEqual(renderer._screen_pipeline.capture_ids, ())
+
     def test_draws_renderer_neutral_runtime_ui_commands(self) -> None:
         font = _FakeFont()
         surface = _FakeSurface()

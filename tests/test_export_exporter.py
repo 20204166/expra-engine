@@ -126,6 +126,8 @@ class TestGameExporter(unittest.TestCase):
         self.assertTrue((runtime_package / "core" / "component_schema.py").exists())
         self.assertTrue((runtime_package / "ui_model" / "geometry.py").exists())
         self.assertTrue((runtime_package / "runtime" / "pygame_runtime.py").exists())
+        for name in ("screen_texture.py", "render_pipeline.py", "pygame_screen_pipeline.py"):
+            self.assertTrue((runtime_package / "runtime" / name).is_file())
         self.assertFalse((runtime_package / "editor").exists())
         self.assertEqual(packager.packages, ["pygame>=2.6"])
 

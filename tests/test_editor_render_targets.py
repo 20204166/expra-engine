@@ -14,6 +14,10 @@ from expra_engine.editor.contributions import RenderTargetRegistry
 from expra_engine.runtime.canvas_effects import CanvasModulateComponent
 from expra_engine.runtime.collider import ColliderComponent
 from expra_engine.runtime.rendering import Color
+from expra_engine.runtime.screen_texture import (
+    BackBufferCopyComponent,
+    ScreenTextureComponent,
+)
 from expra_engine.runtime.transform_interpolation import TransformInterpolator
 from expra_engine.runtime.visual_components import (
     PrimitiveComponent,
@@ -172,6 +176,20 @@ class EditorRenderTargetTests(unittest.TestCase):
         target = build_editor_render_target(scene, viewport=(200, 100))
 
         self.assertEqual([item.key for item in target.items], ["good"])
+
+    def test_target_reports_screen_effects_without_fake_pixels(self) -> None:
+        scene = Scene("effects")
+        background = scene.create_entity("background", entity_id="background")
+        background.add_component(PrimitiveComponent("rectangle"))
+        capture = scene.create_entity("capture", entity_id="capture")
+        capture.add_component(BackBufferCopyComponent(copy_mode="viewport"))
+        consumer = scene.create_entity("consumer", entity_id="consumer")
+        consumer.add_component(ScreenTextureComponent())
+
+        target = build_editor_render_target(scene, viewport=(200, 100))
+
+        self.assertEqual([item.key for item in target.items], ["background"])
+        self.assertEqual(target.unsupported_effects, ("capture", "consumer"))
 
     def test_target_uses_runtime_interpolation_when_supplied(self) -> None:
         scene = Scene("runtime preview")

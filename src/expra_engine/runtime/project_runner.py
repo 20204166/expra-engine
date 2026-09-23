@@ -54,6 +54,7 @@ def run_project(project_dir: Path | str = ".") -> None:
                 interpolation_fraction=current_engine.interpolation_fraction,
                 modulation=extracted.modulation,
             ),
+            submissions=extracted.submissions,
         )
 
     runtime = PygameRuntime(

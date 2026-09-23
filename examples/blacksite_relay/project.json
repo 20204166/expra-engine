@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "name": "Blacksite Relay",
+  "game_version": "1.0.0",
+  "scenes": [
+    "scenes/main.json"
+  ],
+  "start_scene": "scenes/main.json",
+  "input": {
+    "move_up": "keyboard:w",
+    "move_down": "keyboard:s",
+    "move_left": "keyboard:a",
+    "move_right": "keyboard:d",
+    "move_up_alt": "keyboard:up",
+    "move_down_alt": "keyboard:down",
+    "move_left_alt": "keyboard:left",
+    "move_right_alt": "keyboard:right",
+    "fire": "keyboard:space",
+    "fire_alt": "keyboard:f",
+    "pause": "keyboard:p",
+    "restart": "keyboard:r",
+    "quit": "keyboard:escape"
+  }
+}

@@ -60,13 +60,31 @@ parent transform composition, render phases, and backend-neutral primitive and
 material descriptors. These are 3D graphics principles applied to the 2D game
 path; meshes, lighting, and perspective are not required by the sample yet.
 
-## Running The Neon Arena Sample
+Screen effects use the same renderer-neutral path. `BackBufferCopyComponent`
+captures a viewport or transformed rectangle, while `ScreenTextureComponent`
+consumes a named capture with nearest/linear filtering, optional mipmaps, UV
+cropping, tint, opacity, and rotation. The runtime carries these operations in
+an ordered `RenderFrame.submissions` stream; Pygame owns copied surfaces and
+sampling, while the editor reports screen effects as unsupported preview data
+instead of attempting fake pixel rendering. Capture surfaces remain
+runtime-owned; only the renderer-neutral component requests are serialized.
 
-The repository includes a real Pygame/SDL game at `examples/neon_arena`. Install
-the optional game runtime dependency for source runs:
+## Running The Example Games
+
+The repository includes several project-owned dogfood games. They exercise the
+real editor, scene loader, scripts, renderer, physics, input, lifecycle, and
+export paths rather than a test-only harness. Install the optional game runtime
+dependency for source runs:
 
 ```bash
 pip install -e ".[runtime-pygame]"
+```
+
+### Neon Arena
+
+Neon Arena is the renderer/runtime sample with legacy and scripted modes:
+
+```bash
 SDL_VIDEODRIVER=x11 python examples/neon_arena
 ```
 
@@ -96,6 +114,43 @@ The smoke report confirms the bundled runtime started and rendered the exact
 requested number of frames. Use `xvfb-run` instead of `SDL_VIDEODRIVER=dummy`
 to exercise a real SDL window in CI or on a desktop without changing the game.
 
+### Space Pong
+
+Space Pong is the small editor/runtime acceptance project for generic scene
+components, scripts, colliders, HUD layout, save/reopen, and export behavior:
+
+```bash
+SDL_VIDEODRIVER=x11 python examples/space_pong
+PYTHONPATH=src python -m pytest -q tests/test_space_pong.py
+```
+
+### Blacksite Relay
+
+Blacksite Relay is the larger combat dogfood project. It exercises sprite
+resources, hierarchy, triggers, physics overlap/raycast queries, scripted input,
+mission state, and a real asset-backed Pygame runtime. Controls are WASD or
+arrow keys to move/aim, Space/F to fire, P to pause, and R to restart:
+
+```bash
+SDL_VIDEODRIVER=x11 python examples/blacksite_relay
+```
+
+Its Kenney Top-down Shooter assets are credited in
+`examples/blacksite_relay/ASSET_CREDITS.md` and covered by the repository's
+third-party notices.
+
+To export either project, pass its directory to the existing exporter. For
+example:
+
+```bash
+python -m expra_engine.export.cli examples/blacksite_relay \
+  --target linux \
+  --output "$PWD/builds" \
+  --game-name Blacksite_Relay \
+  --runtime-profile pygame \
+  --no-bytecode
+```
+
 ## Development
 
 ```bash
@@ -112,11 +167,13 @@ Builds automatically compare package inputs with the newest local wheel, bump
 the Expra version when needed, refresh `dist/SHA256SUMS`, and verify the wheel:
 
 ```bash
-./scripts/build-wheel.sh
+EXPRA_VERSION_BUMP=auto ./scripts/build-wheel.sh
 ```
 
-The build does not install the wheel. Use `EXPRA_VERSION_BUMP=patch|feature|minor|none`
-to override automatic version selection.
+`auto` is the normal release mode: it selects `patch`, `feature`, `minor`, or
+`none` from the package-input diff. Do not use `none` for a release that should
+publish the current changes. The build does not install the wheel. Explicit
+overrides are `EXPRA_VERSION_BUMP=patch|feature|minor|none`.
 
 Install the latest built wheel outside the repository virtual environment:
 

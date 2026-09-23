@@ -4,18 +4,21 @@ from __future__ import annotations
 
 import math
 from contextlib import suppress
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from io import BytesIO
 from typing import Any
 
 from expra_engine.core.component import TransformComponent
 from expra_engine.core.scene import Scene
 from expra_engine.runtime.canvas_effects import modulate_color
+from expra_engine.runtime.pygame_screen_pipeline import PygameScreenPipeline
+from expra_engine.runtime.render_pipeline import RenderPlanBuilder
 from expra_engine.runtime.rendering import (
     Color,
     NineSliceDescriptor,
     RenderContext,
     RendererCapabilities,
+    RenderItem,
     TextDescriptor,
     Transform,
 )
@@ -101,6 +104,7 @@ class PygameRenderer:
         self._validate_bounds(self.arena_bounds, "arena_bounds")
         self._font_provider = font_provider or self._default_font_provider
         self._resource_provider = resource_provider
+        self._screen_pipeline = PygameScreenPipeline(pygame_module)
         try:
             self.font = self._font_provider(None, font_size)
         except Exception:  # noqa: BLE001 - backend/font failures must not abort a frame
@@ -116,12 +120,18 @@ class PygameRenderer:
             blend_mode=False,
             resize=True,
             headless=True,
+            screen_capture=False,
+            screen_texture=False,
+            screen_texture_mipmaps=False,
         )
+        self._update_screen_capabilities()
 
     def start(self, context: RenderContext) -> None:
+        self._screen_pipeline.clear()
         self.context = context
 
     def resize(self, viewport: Any) -> None:
+        self._screen_pipeline.clear()
         self.context = (
             RenderContext(viewport, self.context.camera)
             if self.context
@@ -137,175 +147,226 @@ class PygameRenderer:
 
     def set_surface(self, surface: Any) -> None:
         self.surface = surface
+        self._screen_pipeline.clear()
+        self._update_screen_capabilities()
 
     def stop(self) -> None:
+        self._screen_pipeline.clear()
         self._engine = None
         self.context = None
 
+    def _update_screen_capabilities(self) -> None:
+        surface = self.surface
+        transform = getattr(self.pygame, "transform", None)
+        can_capture = surface is not None and all(
+            callable(getattr(surface, name, None))
+            for name in ("subsurface", "copy", "get_size")
+        )
+        can_scale = callable(getattr(transform, "scale", None))
+        can_linear_scale = callable(getattr(transform, "smoothscale", None))
+        can_sample = (
+            can_capture
+            and callable(getattr(surface, "blit", None))
+            and can_scale
+            and can_linear_scale
+        )
+        self.capabilities = replace(
+            self.capabilities,
+            screen_capture=can_capture,
+            screen_texture=can_sample,
+            screen_texture_mipmaps=can_sample,
+        )
+
     def render(self, frame: ContractRenderFrame) -> None:
         """Render a backend-neutral frame of primitive descriptors."""
+        self._screen_pipeline.clear()
         context = self.context
         if context is None:
             return
         draw = getattr(self.pygame, "draw", None)
-        if draw is None or self.surface is None:
+        surface = self.surface
+        if draw is None or surface is None:
             return
         with suppress(Exception):
-            draw.rect(self.surface, (10, 14, 30), self._rect(self.arena_bounds))
-        for item in frame.visible_items(context):
-            transform = item.world_transform
-            center = context.camera.project(transform.position, context.viewport)
-            position = (round(center[0]), round(center[1]))
-            color = self._color(
-                modulate_color(
-                    self._tint(item.material.color, item.material.tint),
-                    frame.modulation,
+            draw.rect(surface, (10, 14, 30), self._rect(self.arena_bounds))
+        if frame.submissions:
+            self._screen_pipeline.execute(
+                RenderPlanBuilder.from_frame(frame, context),
+                surface=surface,
+                context=context,
+                draw_item=lambda item, target: self._draw_contract_item(
+                    item, target, frame.modulation, context
                 ),
-                item.material.opacity,
             )
-            try:
-                if item.material.texture_id is not None:
-                    if self._resource_provider is None:
-                        continue
-                    texture = self._resource_provider(item.material.texture_id)
-                    if texture is None:
-                        continue
-                    source_region = item.material.source_region
-                    if source_region is not None:
-                        subsurface = getattr(texture, "subsurface", None)
-                        if callable(subsurface):
-                            texture = subsurface(
-                                (
-                                    source_region.x,
-                                    source_region.y,
-                                    source_region.width,
-                                    source_region.height,
-                                )
-                            )
-                    width = round(
-                        abs(
-                            item.primitive.size[0]
-                            * transform.scale[0]
-                            / context.camera.width
-                            * context.viewport.width
-                        )
-                    )
-                    height = round(
-                        abs(
-                            item.primitive.size[1]
-                            * transform.scale[1]
-                            / context.camera.height
-                            * context.viewport.height
-                        )
-                    )
-                    angle = transform.rotation - math.degrees(context.camera.rotation)
-                    rendered_texture = (
-                        texture
-                        if frame.modulation == Color(1.0, 1.0, 1.0, 1.0)
-                        else self._tinted_texture(
-                            texture,
-                            modulate_color(item.material.tint, frame.modulation),
-                        )
-                    )
-                    if rendered_texture is None:
-                        continue
-                    transform_api = getattr(self.pygame, "transform", None)
-                    if transform_api is not None and (item.sprite_flip_h or item.sprite_flip_v):
-                        flip = getattr(transform_api, "flip", None)
-                        if callable(flip):
-                            rendered_texture = flip(
-                                rendered_texture, item.sprite_flip_h, item.sprite_flip_v
-                            )
-                    if angle and transform_api is not None:
-                        rendered_texture = transform_api.rotate(rendered_texture, angle)
-                    if transform_api is not None and hasattr(transform_api, "smoothscale"):
-                        rendered_texture = transform_api.smoothscale(
-                            rendered_texture, (width, height)
-                        )
-                    get_size = getattr(rendered_texture, "get_size", None)
-                    texture_size = get_size() if callable(get_size) else (width, height)
-                    draw_position = self._sprite_position(item, transform, context)
-                    if item.sprite_centered:
-                        destination = self._rect_from_center(
-                            draw_position, round(texture_size[0]), round(texture_size[1])
-                        )
-                    else:
-                        destination = self._rect(
-                            (
-                                draw_position[0],
-                                draw_position[1],
-                                round(texture_size[0]),
-                                round(texture_size[1]),
-                            )
-                        )
-                    self.surface.blit(rendered_texture, destination)
-                    continue
-                if item.text is not None:
-                    self.draw_text(
-                        TextDescriptor(
-                            item.text.text,
-                            item.text.font,
-                            item.text.size,
-                            modulate_color(item.text.color, frame.modulation),
-                            item.text.max_width,
-                            item.text.align,
-                        ),
-                        position,
-                        item.material.opacity,
-                    )
-                    continue
-                if item.nine_slice is not None:
-                    self.draw_nine_slice(
-                        item.nine_slice,
-                        modulate_color(item.material.tint, frame.modulation),
-                        apply_tint=frame.modulation != Color(1.0, 1.0, 1.0, 1.0),
-                    )
-                    continue
-                if item.primitive.kind in ("rectangle", "rect"):
-                    width = round(
-                        abs(
-                            item.primitive.size[0]
-                            * transform.scale[0]
-                            / context.camera.width
-                            * context.viewport.width
-                        )
-                    )
-                    height = round(
-                        abs(
-                            item.primitive.size[1]
-                            * transform.scale[1]
-                            / context.camera.height
-                            * context.viewport.height
-                        )
-                    )
-                    draw.rect(self.surface, color, self._rect_from_center(position, width, height))
-                    if item.material.outline is not None and item.material.outline_width:
-                        draw.rect(
-                            self.surface,
-                            self._color(
-                                modulate_color(item.material.outline, frame.modulation),
-                                item.material.opacity,
-                            ),
-                            self._rect_from_center(position, width, height),
-                            round(item.material.outline_width),
-                        )
-                elif item.primitive.kind == "circle":
-                    radius = item.primitive.radius or item.primitive.size[0] / 2
-                    pixels = round(
-                        abs(
-                            radius
-                            * max(transform.scale[0], transform.scale[1])
-                            / context.camera.width
-                            * context.viewport.width
-                        )
-                    )
-                    draw.circle(self.surface, color, position, pixels)
-                elif item.primitive.kind == "point":
-                    draw.circle(self.surface, color, position, 1)
-            except Exception:  # noqa: BLE001 - backend draw failures are frame-local
-                pass
+        else:
+            for item in frame.visible_items(context):
+                self._draw_contract_item(item, surface, frame.modulation, context)
         if isinstance(frame.payload, RenderFrame):
-            self.on_render(frame.payload)
+            self.on_render(frame.payload, clear=False)
+
+    def _draw_contract_item(
+        self,
+        item: RenderItem,
+        surface: Any,
+        modulation: Color,
+        context: RenderContext,
+    ) -> None:
+        transform = item.world_transform
+        center = context.camera.project(transform.position, context.viewport)
+        position = (round(center[0]), round(center[1]))
+        color = self._color(
+            modulate_color(
+                self._tint(item.material.color, item.material.tint),
+                modulation,
+            ),
+            item.material.opacity,
+        )
+        draw = getattr(self.pygame, "draw", None)
+        if draw is None:
+            return
+        try:
+            if item.material.texture_id is not None:
+                if self._resource_provider is None:
+                    return
+                texture = self._resource_provider(item.material.texture_id)
+                if texture is None:
+                    return
+                source_region = item.material.source_region
+                if source_region is not None:
+                    subsurface = getattr(texture, "subsurface", None)
+                    if callable(subsurface):
+                        texture = subsurface(
+                            (
+                                source_region.x,
+                                source_region.y,
+                                source_region.width,
+                                source_region.height,
+                            )
+                        )
+                width = round(
+                    abs(
+                        item.primitive.size[0]
+                        * transform.scale[0]
+                        / context.camera.width
+                        * context.viewport.width
+                    )
+                )
+                height = round(
+                    abs(
+                        item.primitive.size[1]
+                        * transform.scale[1]
+                        / context.camera.height
+                        * context.viewport.height
+                    )
+                )
+                angle = transform.rotation - math.degrees(context.camera.rotation)
+                rendered_texture = (
+                    texture
+                    if modulation == Color(1.0, 1.0, 1.0, 1.0)
+                    else self._tinted_texture(
+                        texture,
+                        modulate_color(item.material.tint, modulation),
+                    )
+                )
+                if rendered_texture is None:
+                    return
+                transform_api = getattr(self.pygame, "transform", None)
+                if transform_api is not None and (item.sprite_flip_h or item.sprite_flip_v):
+                    flip = getattr(transform_api, "flip", None)
+                    if callable(flip):
+                        rendered_texture = flip(
+                            rendered_texture, item.sprite_flip_h, item.sprite_flip_v
+                        )
+                if angle and transform_api is not None:
+                    rendered_texture = transform_api.rotate(rendered_texture, angle)
+                if transform_api is not None and hasattr(transform_api, "smoothscale"):
+                    rendered_texture = transform_api.smoothscale(
+                        rendered_texture, (width, height)
+                    )
+                get_size = getattr(rendered_texture, "get_size", None)
+                texture_size = get_size() if callable(get_size) else (width, height)
+                draw_position = self._sprite_position(item, transform, context)
+                if item.sprite_centered:
+                    destination = self._rect_from_center(
+                        draw_position, round(texture_size[0]), round(texture_size[1])
+                    )
+                else:
+                    destination = self._rect(
+                        (
+                            draw_position[0],
+                            draw_position[1],
+                            round(texture_size[0]),
+                            round(texture_size[1]),
+                        )
+                    )
+                surface.blit(rendered_texture, destination)
+                return
+            if item.text is not None:
+                self._draw_text_to_surface(
+                    TextDescriptor(
+                        item.text.text,
+                        item.text.font,
+                        item.text.size,
+                        modulate_color(item.text.color, modulation),
+                        item.text.max_width,
+                        item.text.align,
+                    ),
+                    position,
+                    item.material.opacity,
+                    surface,
+                )
+                return
+            if item.nine_slice is not None:
+                self._draw_nine_slice_to_surface(
+                    item.nine_slice,
+                    modulate_color(item.material.tint, modulation),
+                    apply_tint=modulation != Color(1.0, 1.0, 1.0, 1.0),
+                    surface=surface,
+                )
+                return
+            if item.primitive.kind in ("rectangle", "rect"):
+                width = round(
+                    abs(
+                        item.primitive.size[0]
+                        * transform.scale[0]
+                        / context.camera.width
+                        * context.viewport.width
+                    )
+                )
+                height = round(
+                    abs(
+                        item.primitive.size[1]
+                        * transform.scale[1]
+                        / context.camera.height
+                        * context.viewport.height
+                    )
+                )
+                draw.rect(surface, color, self._rect_from_center(position, width, height))
+                if item.material.outline is not None and item.material.outline_width:
+                    draw.rect(
+                        surface,
+                        self._color(
+                            modulate_color(item.material.outline, modulation),
+                            item.material.opacity,
+                        ),
+                        self._rect_from_center(position, width, height),
+                        round(item.material.outline_width),
+                    )
+            elif item.primitive.kind == "circle":
+                radius = item.primitive.radius or item.primitive.size[0] / 2
+                pixels = round(
+                    abs(
+                        radius
+                        * max(transform.scale[0], transform.scale[1])
+                        / context.camera.width
+                        * context.viewport.width
+                    )
+                )
+                draw.circle(surface, color, position, pixels)
+            elif item.primitive.kind == "point":
+                draw.circle(surface, color, position, 1)
+        except Exception:  # noqa: BLE001 - backend draw failures are frame-local
+            pass
 
     @staticmethod
     def _color(color: Color, opacity: float) -> tuple[int, ...]:
@@ -374,7 +435,16 @@ class PygameRenderer:
         position: tuple[int, int],
         opacity: float = 1.0,
     ) -> None:
-        if self.surface is None or not descriptor.text:
+        self._draw_text_to_surface(descriptor, position, opacity, self.surface)
+
+    def _draw_text_to_surface(
+        self,
+        descriptor: TextDescriptor,
+        position: tuple[int, int],
+        opacity: float,
+        surface: Any | None,
+    ) -> None:
+        if surface is None or not descriptor.text:
             return
         font = self._font(descriptor)
         lines: list[str] = []
@@ -404,7 +474,7 @@ class PygameRenderer:
             elif descriptor.align == "right":
                 x -= width
             rendered = font.render(line, True, self._color(descriptor.color, opacity))
-            self.surface.blit(rendered, (x, position[1] + index * line_height))
+            surface.blit(rendered, (x, position[1] + index * line_height))
 
     def draw_nine_slice(
         self,
@@ -413,7 +483,22 @@ class PygameRenderer:
         *,
         apply_tint: bool = False,
     ) -> None:
-        if self.surface is None or self._resource_provider is None:
+        self._draw_nine_slice_to_surface(
+            descriptor,
+            tint,
+            apply_tint=apply_tint,
+            surface=self.surface,
+        )
+
+    def _draw_nine_slice_to_surface(
+        self,
+        descriptor: NineSliceDescriptor,
+        tint: Color,
+        *,
+        apply_tint: bool,
+        surface: Any | None,
+    ) -> None:
+        if surface is None or self._resource_provider is None:
             return
         texture = self._resource_provider(descriptor.texture_id)
         if texture is None:
@@ -435,10 +520,10 @@ class PygameRenderer:
             )
             try:
                 if source is None:
-                    self.surface.blit(texture, destination_rect)
+                    surface.blit(texture, destination_rect)
                 else:
                     source_rect = source[index].rect
-                    self.surface.blit(
+                    surface.blit(
                         texture,
                         destination_rect,
                         self._rect(
@@ -451,7 +536,7 @@ class PygameRenderer:
                         ),
                     )
             except TypeError:
-                self.surface.blit(texture, destination_rect)
+                surface.blit(texture, destination_rect)
 
     def draw_ui_commands(self, commands: tuple[Any, ...]) -> None:
         """Translate pure UI draw commands without exposing backend objects to models."""
@@ -516,11 +601,12 @@ class PygameRenderer:
                             ),
                         )
 
-    def on_render(self, frame: RenderFrame) -> None:
+    def on_render(self, frame: RenderFrame, *, clear: bool = True) -> None:
         """Render one frame of scene primitives and HUD text."""
         draw = self.pygame.draw
-        with suppress(Exception):
-            draw.rect(self.surface, (10, 14, 30), self._rect(self.arena_bounds))
+        if clear:
+            with suppress(Exception):
+                draw.rect(self.surface, (10, 14, 30), self._rect(self.arena_bounds))
         scene = frame.active_scene
         if scene is not None:
             for entity in scene.entities_by_layer():

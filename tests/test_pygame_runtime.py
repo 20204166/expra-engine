@@ -1,13 +1,38 @@
 """Tests for the injected Pygame runtime adapter."""
 
 import unittest
+import sys
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-from expra_engine.runtime import PygameRuntime, RenderContext, RenderContractFrame, Viewport
 from expra_engine.core.component import TransformComponent
+from expra_engine.core.project import Project
 from expra_engine.core.scene import Scene
-from expra_engine.runtime.ui import Button, GameCanvas, LayoutSpec, Viewport as UIViewport
+from expra_engine.runtime import project_runner
+from expra_engine.runtime import (
+    PygameRenderer,
+    PygameRuntime,
+    RenderContext,
+    RenderContractFrame,
+    Viewport,
+)
+from expra_engine.runtime.pygame_renderer import PygameRenderFrame
+from expra_engine.runtime.pygame_screen_pipeline import PygameScreenSnapshot
+from expra_engine.runtime.pygame_screen_pipeline import PygameScreenPipeline
+from expra_engine.runtime.render_pipeline import RenderPlan, RenderPlanBuilder
+from expra_engine.runtime.screen_texture import (
+    BackBufferCopyComponent,
+    BackBufferCopyMode,
+    BackBufferCopyRequest,
+    RenderEffect,
+    ScreenTextureComponent,
+    ScreenTextureDrawRequest,
+    ScreenTextureFilter,
+)
+from expra_engine.runtime.ui import Button, GameCanvas, LayoutSpec
+from expra_engine.runtime.ui import Viewport as UIViewport
+from expra_engine.runtime.visual_components import PrimitiveComponent
 
 
 class _FakeSurface:
@@ -72,6 +97,23 @@ class _FakeEngine:
 
     def signal(self, event: object) -> None:
         self.signals.append(event)
+
+
+class _ResizeProbeRenderer(PygameRenderer):
+    def __init__(self, pygame_module: object) -> None:
+        super().__init__(pygame_module, None)
+        self.render_count = 0
+        self.after_resize_captures: tuple[str, ...] | None = None
+
+    def render(self, frame: object) -> None:
+        self.render_count += 1
+        if self.render_count == 1:
+            self._screen_pipeline._captures["screen"] = PygameScreenSnapshot(
+                (0, 0), (object(),)
+            )
+        elif self.render_count == 2:
+            self.after_resize_captures = self._screen_pipeline.capture_ids
+        super().render(frame)  # type: ignore[arg-type]
 
 
 class _RecordingRenderer:
@@ -298,6 +340,55 @@ class TestPygameRuntime(unittest.TestCase):
 
         self.assertIn(("resize", Viewport(0, 0, 640, 480)), renderer.calls)
 
+    def test_resize_clears_renderer_screen_captures_before_next_frame(self) -> None:
+        pygame = _FakePygame(
+            [
+                [],
+                [SimpleNamespace(type=4, size=(640, 480))],
+                [SimpleNamespace(type=_FakePygame.QUIT)],
+            ]
+        )
+        pygame.VIDEORESIZE = 4
+        renderer = _ResizeProbeRenderer(pygame)
+        runtime = PygameRuntime(
+            _FakeEngine(),
+            renderer=renderer,
+            pygame_module=pygame,
+            clock=_FakeClock([16, 16, 16]),
+            surface_factory=pygame.display.set_mode,
+        )
+
+        runtime.run()
+
+        self.assertEqual(renderer.after_resize_captures, ())
+
+    def test_runtime_restart_clears_stale_renderer_screen_captures(self) -> None:
+        pygame = _FakePygame([[SimpleNamespace(type=_FakePygame.QUIT)]])
+        renderer = PygameRenderer(pygame, None)
+        renderer._screen_pipeline._captures["screen"] = PygameScreenSnapshot(
+            (0, 0), (object(),)
+        )
+        runtime = PygameRuntime(
+            _FakeEngine(),
+            renderer=renderer,
+            pygame_module=pygame,
+            clock=_FakeClock([16, 16]),
+            surface_factory=pygame.display.set_mode,
+        )
+
+        runtime.run()
+        self.assertEqual(renderer._screen_pipeline.capture_ids, ())
+
+        pygame.event = SimpleNamespace(
+            get=lambda: [SimpleNamespace(type=_FakePygame.QUIT)]
+        )
+        renderer._screen_pipeline._captures["screen"] = PygameScreenSnapshot(
+            (0, 0), (object(),)
+        )
+        runtime.run()
+
+        self.assertEqual(renderer._screen_pipeline.capture_ids, ())
+
     def test_renderer_stops_and_pygame_quits_when_render_raises(self) -> None:
         pygame = _FakePygame([[]])
         renderer = _RecordingRenderer()
@@ -457,6 +548,88 @@ class TestPygameRuntime(unittest.TestCase):
         runtime.run()
 
         self.assertEqual(runtime.keys, frozenset())
+
+
+def test_project_runner_carries_effect_submissions_and_legacy_payload(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+    project = Project.create("Effects", tmp_path / "effects")
+    scene = Scene("effects")
+    background = scene.create_entity("background", entity_id="background")
+    background.add_component(PrimitiveComponent("rectangle"))
+    capture = scene.create_entity("capture", entity_id="capture")
+    capture.add_component(BackBufferCopyComponent(copy_mode=BackBufferCopyMode.VIEWPORT))
+    consumer = scene.create_entity("consumer", entity_id="consumer")
+    consumer.add_component(ScreenTextureComponent())
+    project.save_scene(scene)
+
+    captured: dict[str, Any] = {}
+
+    class Renderer:
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            pass
+
+    class Runtime:
+        def __init__(self, engine: Any, _renderer: Any, **kwargs: Any) -> None:
+            self.engine = engine
+            self.frame_factory = kwargs["frame_factory"]
+
+        def run(self) -> None:
+            captured["engine"] = self.engine
+            captured["frame"] = self.frame_factory(self.engine, 0.25)
+            captured["empty_frame"] = self.frame_factory(
+                SimpleNamespace(
+                    active_scene=None,
+                    transform_interpolator=None,
+                    interpolation_fraction=0.0,
+                    animated_sprite_system=SimpleNamespace(players={}),
+                ),
+                0.5,
+            )
+
+    pygame = SimpleNamespace(image=SimpleNamespace(load=lambda stream: stream.read()))
+    monkeypatch.setitem(sys.modules, "pygame", pygame)
+    monkeypatch.setattr(project_runner, "PygameRenderer", Renderer)
+    monkeypatch.setattr(project_runner, "PygameRuntime", Runtime)
+
+    project_runner.run_project(project.path)
+
+    frame = captured["frame"]
+    assert [
+        entry.request.entity_id
+        for entry in frame.submissions
+        if isinstance(entry, RenderEffect)
+    ] == ["capture", "consumer"]
+    assert frame.items[0].key == "background"
+    assert isinstance(frame.payload, PygameRenderFrame)
+    assert frame.payload.active_scene is captured["engine"].active_scene
+
+    empty_frame = captured["empty_frame"]
+    assert empty_frame.items == ()
+    assert empty_frame.submissions == ()
+    assert isinstance(empty_frame.payload, PygameRenderFrame)
+    assert empty_frame.payload.active_scene is None
+
+
+def test_runtime_package_exports_screen_texture_integration_types() -> None:
+    import expra_engine.runtime as runtime_package
+
+    expected = {
+        "BackBufferCopyComponent": BackBufferCopyComponent,
+        "BackBufferCopyMode": BackBufferCopyMode,
+        "BackBufferCopyRequest": BackBufferCopyRequest,
+        "RenderEffect": RenderEffect,
+        "ScreenTextureComponent": ScreenTextureComponent,
+        "ScreenTextureDrawRequest": ScreenTextureDrawRequest,
+        "ScreenTextureFilter": ScreenTextureFilter,
+        "RenderPlan": RenderPlan,
+        "RenderPlanBuilder": RenderPlanBuilder,
+        "PygameScreenPipeline": PygameScreenPipeline,
+    }
+
+    for name, expected_type in expected.items():
+        assert name in runtime_package.__all__
+        assert getattr(runtime_package, name) is expected_type
 
 
 if __name__ == "__main__":
