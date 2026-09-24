@@ -17,29 +17,6 @@
           "rotation": 0.0,
           "scale_x": 1.0,
           "scale_y": 1.0
-        },
-        {
-          "type": "sprite",
-          "enabled": true,
-          "asset": "",
-          "tint": [
-            1.0,
-            1.0,
-            1.0,
-            1.0
-          ],
-          "width": 1.0,
-          "height": 1.0,
-          "region": null,
-          "centered": true,
-          "offset": [
-            0.0,
-            0.0
-          ],
-          "flip_h": false,
-          "flip_v": false,
-          "layer": 0,
-          "visible": true
         }
       ],
       "tags": [

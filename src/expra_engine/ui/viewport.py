@@ -200,7 +200,15 @@ class ViewportPanel(tk.Frame):
             scene,
             viewport=(max(1, self._canvas.winfo_width()), max(1, self._canvas.winfo_height())),
             selected_id=selected_id,
-            camera=self._camera,
+            # During Play/Paused the rendered frame must come from the scene's
+            # own saved camera (position, width, rotation), not the editor's
+            # live pannable authoring camera -- passing None here makes
+            # build_editor_render_target derive the preview camera purely from
+            # scene.camera, so Play is deterministic across Play/Stop/Play and
+            # never inherits whatever pan/zoom the author happened to leave
+            # the Edit viewport at. Stop never touches self._camera, so the
+            # authoring camera is implicitly preserved/restored for free.
+            camera=self._camera if editor_overlays else None,
             interpolator=interpolator,
             interpolation_fraction=interpolation_fraction,
             animated_players=animated_players,
@@ -327,7 +335,7 @@ class ViewportPanel(tk.Frame):
             self._scene,
             viewport=(max(1, self._canvas.winfo_width()), max(1, self._canvas.winfo_height())),
             selected_id=self._selected_id,
-            camera=self._camera,
+            camera=self._camera if self._editor_overlays else None,
             interpolator=self._interpolator,
             interpolation_fraction=self._interpolation_fraction,
             animated_players=getattr(self, "_animated_players", None),

@@ -124,14 +124,24 @@ class ViewportCamera:
 
     def apply_dict(self, values: object) -> None:
         self._camera.apply_dict(values)
-        raw_zoom = self._camera.zoom
         saved_position = self.position
         saved_rotation = self._camera.rotation
+        vw, vh = self._viewport
+        # Derive zoom_level from the *effective width* Camera2D.apply_dict just
+        # applied, not from Camera2D.zoom directly -- setting "width" (as saved
+        # scene cameras do) never touches Camera2D._zoom, so reading .zoom here
+        # silently discarded any persisted "width" and fell back to the fixed
+        # VIEWPORT_BASE_PPU scale regardless of what the scene actually saved.
+        effective_width = self._camera.width
+        raw_zoom = (
+            vw / (self._base_ppu * effective_width)
+            if math.isfinite(effective_width) and effective_width > 0
+            else 1.0
+        )
         self.zoom_level = max(
             _MIN_ZOOM,
             min(_MAX_ZOOM, raw_zoom if math.isfinite(raw_zoom) and raw_zoom > 0 else 1.0),
         )
-        vw, vh = self._viewport
         self._camera = Camera2D(
             position=saved_position,
             viewport=(vw, vh),

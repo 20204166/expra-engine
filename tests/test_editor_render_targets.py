@@ -139,6 +139,69 @@ class EditorRenderTargetTests(unittest.TestCase):
 
         self.assertEqual([item.key for item in target.items], ["paddle"])
 
+    def test_play_camera_ignores_live_authoring_pan_when_camera_is_none(self) -> None:
+        """Regression: Space Pong Edit/Play camera parity bug hunt.
+
+        Passing camera=None (what ViewportPanel.render now does whenever
+        editor_overlays is False, i.e. Play/Paused) must derive the preview
+        camera purely from scene.camera, completely independent of any pan
+        applied to a live authoring ViewportCamera. Before the fix,
+        build_editor_render_target always overrode the preview camera's
+        position with the live editor camera's position, so panning the Edit
+        viewport before pressing Play silently changed -- or hid entirely --
+        the game's framing.
+        """
+        scene = Scene("space-pong-like", camera={"position": [0.0, 0.0], "width": 100.0})
+        ball = scene.create_entity("ball", entity_id="ball")
+        ball.add_component(TransformComponent(x=0.0, y=0.0))
+        ball.add_component(PrimitiveComponent(kind="circle", width=2.0, height=2.0, radius=1.0))
+
+        # Pan the authoring camera far enough that a ball sitting at scene
+        # origin would fall completely outside a width=100 frame centered
+        # there -- if Play leaked this pan, the ball would be clipped.
+        panned_authoring_camera = ViewportCamera((400, 300))
+        panned_authoring_camera.pan(500.0, 500.0)
+
+        edit_target = build_editor_render_target(
+            scene, viewport=(400, 300), camera=panned_authoring_camera
+        )
+        play_target = build_editor_render_target(scene, viewport=(400, 300), camera=None)
+
+        self.assertEqual(edit_target.items, (), "panned Edit camera should clip the origin ball")
+        self.assertEqual(
+            [item.key for item in play_target.items],
+            ["ball"],
+            "Play must frame the ball from scene.camera's saved (0, 0), ignoring the pan",
+        )
+
+    def test_play_camera_is_deterministic_across_repeated_play_stop_play(self) -> None:
+        """Three consecutive Play sessions of the same scene must project
+        identically -- the acceptance criterion from the camera parity bug
+        hunt's Play -> Stop -> Play repeatability test."""
+        scene = Scene("repeatable", camera={"position": [1.0, -2.0], "width": 80.0})
+        arena = scene.create_entity("arena", entity_id="arena")
+        arena.add_component(TransformComponent(x=0.0, y=0.0))
+        arena.add_component(PrimitiveComponent(kind="rectangle", width=60.0, height=60.0))
+
+        # Simulate a live authoring camera that drifts between Play sessions
+        # (e.g. the user panned/zoomed the Edit viewport between runs) --
+        # camera=None during Play must be immune to this drift entirely.
+        drifting_camera = ViewportCamera((400, 300))
+
+        keys_per_run = []
+        positions_per_run = []
+        for pan_amount in (0.0, 250.0, -400.0):
+            drifting_camera.pan(pan_amount, pan_amount / 2.0)
+            play_target = build_editor_render_target(scene, viewport=(400, 300), camera=None)
+            keys_per_run.append([item.key for item in play_target.items])
+            positions_per_run.append([item.world_transform.position for item in play_target.items])
+
+        self.assertEqual(keys_per_run[0], ["arena"])
+        self.assertEqual(keys_per_run[0], keys_per_run[1])
+        self.assertEqual(keys_per_run[1], keys_per_run[2])
+        self.assertEqual(positions_per_run[0], positions_per_run[1])
+        self.assertEqual(positions_per_run[1], positions_per_run[2])
+
     def test_target_clips_offscreen_items_and_clears_removed_selection(self) -> None:
         scene = Scene("preview")
         entity = scene.create_entity("visible", entity_id="visible")

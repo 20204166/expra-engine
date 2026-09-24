@@ -696,6 +696,7 @@ def test_viewport_refreshes_target_after_camera_moves() -> None:
     panel._scene = scene
     panel._selected_id = None
     panel._camera = ViewportCamera((200, 100))
+    panel._editor_overlays = True
     panel._interpolator = None
     panel._interpolation_fraction = 0.0
     panel._animated_players = None

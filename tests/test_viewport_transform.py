@@ -274,4 +274,40 @@ class RoundTripTests(unittest.TestCase):
         self.assertTrue(math.isfinite(cam._camera.pixel_ratio))
         self.assertGreater(cam._camera.pixel_ratio, 0.0)
         self.assertTrue(math.isfinite(cam.position[0]))
+
+
+class ApplyDictHonorsSceneWidthTests(unittest.TestCase):
+    """Regression for the Space Pong Edit/Play parity bug hunt.
+
+    ``apply_dict`` used to read ``Camera2D.zoom`` back out after applying a
+    scene-saved "width" -- but the width setter never touches ``_zoom``, so a
+    scene's declared camera width was silently discarded and the editor
+    always fell back to the fixed VIEWPORT_BASE_PPU scale regardless of what
+    the project actually saved. This decoupled the editor's own pan/zoom/
+    click coordinate math from what was actually rendered on screen.
+    """
+
+    def test_apply_dict_width_without_zoom_key_sets_effective_world_width(self) -> None:
+        cam = ViewportCamera(viewport=(800, 600))
+        cam.apply_dict({"position": [0.0, 0.0], "width": 100.0})
+        self.assertAlmostEqual(cam._camera.width, 100.0, places=4)
+        self.assertAlmostEqual(cam._camera.pixel_ratio, 800.0 / 100.0, places=4)
+
+    def test_apply_dict_width_matches_zoom_level_derivation(self) -> None:
+        # A scene camera declaring "zoom" (no "width") must still land on the
+        # same effective width/zoom_level as one declaring the equivalent
+        # "width" directly -- apply_dict's width- and zoom-key code paths
+        # must agree.
+        via_zoom = ViewportCamera(viewport=(800, 600))
+        via_zoom.apply_dict({"position": [0.0, 0.0], "zoom": 2.0})
+        via_width = ViewportCamera(viewport=(800, 600))
+        via_width.apply_dict({"position": [0.0, 0.0], "width": via_zoom._camera.width})
+        self.assertAlmostEqual(via_zoom.zoom_level, via_width.zoom_level, places=4)
+        self.assertAlmostEqual(via_zoom._camera.width, via_width._camera.width, places=4)
+
+    def test_apply_dict_without_width_or_zoom_key_keeps_base_ppu_default(self) -> None:
+        cam = ViewportCamera(viewport=(800, 600))
+        cam.apply_dict({"position": [1.0, 2.0]})
+        self.assertAlmostEqual(cam.zoom_level, 1.0, places=6)
+        self.assertAlmostEqual(cam._camera.pixel_ratio, VIEWPORT_BASE_PPU, places=4)
         self.assertTrue(math.isfinite(cam.position[1]))
