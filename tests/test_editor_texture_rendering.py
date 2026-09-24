@@ -37,6 +37,7 @@ from expra_engine.runtime.rendering import (
 from expra_engine.runtime.visual_components import PrimitiveComponent, SpriteComponent
 from expra_engine.ui.editor_pixel_renderer import (
     EditorPixelRenderer,
+    PillowEditorPhotoImage,
     frame_textures_available,
     render_editor_frame_to_tk_image,
 )
@@ -401,7 +402,7 @@ def test_real_blacksite_png_reaches_editor_pixel_output() -> None:
         pygame.quit()
 
 
-def test_final_editor_photoimage_preserves_nonuniform_png_pixels(tmp_path: Path) -> None:
+def test_final_editor_photoimage_preserves_nonuniform_pixels(tmp_path: Path) -> None:
     pygame = pytest.importorskip("pygame")
     try:
         root = tk.Tk()
@@ -908,13 +909,148 @@ def test_editor_pixel_renderer_records_pixelbridge_observability_stages(tmp_path
         targets = {m.target: m for m in snapshot.metrics}
         for stage in (
             "editor.pixelbridge.render",
+            "editor.pixelbridge.extract",
             "editor.pixelbridge.encode",
             "editor.pixelbridge.photoimage",
+            "editor.pixelbridge.total",
         ):
             assert stage in targets, f"missing observability stage: {stage}"
             assert targets[stage].count == 1
             assert targets[stage].successes == 1
     finally:
+        root.destroy()
+
+
+def test_pillow_bridge_preserves_alpha_exactly(tmp_path: Path) -> None:
+    """Chain-of-custody proof for the Pillow/ImageTk bridge that replaced the
+    PNG bridge as the live interactive path (see
+    ``editor_pixel_renderer._render_pillow_bridge``): five swatches --
+    transparent, 25/50/75% alpha, and opaque, each a distinct RGB -- must
+    survive pygame Surface -> tostring -> PIL.Image.frombuffer ->
+    PillowEditorPhotoImage.paste() with zero loss, exactly like the PNG
+    bridge it replaced (see
+    test_encode_pygame_surface_fast_preserves_alpha_and_matches_pixels).
+    """
+    pygame = pytest.importorskip("pygame")
+    pygame.init()
+    try:
+        root = tk.Tk()
+    except tk.TclError:
+        pygame.quit()
+        pytest.skip("no display for real Tk editor presentation")
+
+    try:
+        swatches = {
+            (0, 0): (255, 0, 0, 0),  # fully transparent
+            (1, 0): (0, 255, 0, 64),  # 25% alpha
+            (2, 0): (0, 0, 255, 128),  # 50% alpha
+            (3, 0): (255, 255, 0, 191),  # 75% alpha
+            (0, 1): (255, 0, 255, 255),  # fully opaque
+        }
+        surface = pygame.Surface((4, 4), flags=pygame.SRCALPHA)
+        surface.fill((0, 0, 0, 0))
+        for (x, y), rgba in swatches.items():
+            surface.set_at((x, y), rgba)
+
+        # 1. pygame's own extraction is lossless.
+        rgba_bytes = pygame.image.tostring(surface, "RGBA")
+        assert len(rgba_bytes) == 4 * 4 * 4
+        for (x, y), expected in swatches.items():
+            offset = (y * 4 + x) * 4
+            assert tuple(rgba_bytes[offset : offset + 4]) == expected
+
+        # 2. Pillow's raw decoder is a lossless reinterpret of those same bytes.
+        from PIL import Image
+
+        pil_image = Image.frombuffer("RGBA", (4, 4), rgba_bytes, "raw", "RGBA", 0, 1)
+        for (x, y), expected in swatches.items():
+            assert pil_image.getpixel((x, y)) == expected
+
+        # 3. PillowEditorPhotoImage.paste() writes the same pixels into a
+        #    real Tk photo image -- verify RGB via Tk's own .get() and the
+        #    fully-transparent swatch via Tk's own .transparency_get(),
+        #    the same two real-pixel-readback signals the previous PNG
+        #    bridge's regression test used.
+        photo = PillowEditorPhotoImage(pil_image, master=root)
+        assert photo.transparency_get(0, 0) is True
+        assert photo.transparency_get(0, 1) is False
+        for (x, y), expected in swatches.items():
+            if expected[3] == 0:
+                continue  # Tk .get() RGB is undefined for a fully transparent pixel
+            assert tuple(photo.get(x, y)) == expected[:3]
+    finally:
+        pygame.quit()
+        root.destroy()
+
+
+def test_pillow_bridge_reallocates_photoimage_on_resize(tmp_path: Path) -> None:
+    """paste() does not resize in place (unlike tk.PhotoImage.configure()),
+    so a viewport resize must allocate a fresh PillowEditorPhotoImage rather
+    than corrupt/truncate the reused one -- see PATCH spec section 9/13.
+    """
+    pygame = pytest.importorskip("pygame")
+    try:
+        root = tk.Tk()
+    except tk.TclError:
+        pytest.skip("no display for real Tk editor presentation")
+
+    try:
+        project, scene, _asset_id = make_texture_project(tmp_path)
+        frame = extract_render_frame(scene)
+        renderer = EditorPixelRenderer(project.resource_service())
+        camera = SimpleNamespace(
+            position=(0.0, 0.0), _camera=SimpleNamespace(width=10.0, rotation=0.0)
+        )
+
+        small = renderer.render(frame, camera, 160, 120, root)
+        assert small is not None
+        assert (small.width(), small.height()) == (160, 120)
+
+        same_size_again = renderer.render(frame, camera, 160, 120, root)
+        assert same_size_again is small, "same size must reuse the same photo image"
+
+        resized = renderer.render(frame, camera, 320, 240, root)
+        assert resized is not None
+        assert resized is not small, "a resize must allocate a fresh photo image"
+        assert (resized.width(), resized.height()) == (320, 240)
+    finally:
+        root.destroy()
+
+
+def test_pillow_photoimage_write_matches_tkinter_photoimage_write(tmp_path: Path) -> None:
+    """expra-mcp's capture_viewport calls ``.write(path, format="png")`` on
+    the live viewport's pixel image -- confirm PillowEditorPhotoImage
+    produces the identical real Tk-native PNG a plain tkinter.PhotoImage
+    would (same underlying Tcl ``<image> write`` command).
+    """
+    pygame = pytest.importorskip("pygame")
+    pygame.init()
+    try:
+        root = tk.Tk()
+    except tk.TclError:
+        pygame.quit()
+        pytest.skip("no display for real Tk editor presentation")
+
+    try:
+        from PIL import Image
+
+        surface = pygame.Surface((3, 3), flags=pygame.SRCALPHA)
+        surface.fill((10, 20, 30, 255))
+        rgba_bytes = pygame.image.tostring(surface, "RGBA")
+        pil_image = Image.frombuffer("RGBA", (3, 3), rgba_bytes, "raw", "RGBA", 0, 1)
+        photo = PillowEditorPhotoImage(pil_image, master=root)
+
+        out_path = tmp_path / "capture.png"
+        photo.write(str(out_path), format="png")
+
+        assert out_path.exists()
+        data = out_path.read_bytes()
+        assert data.startswith(b"\x89PNG\r\n\x1a\n")
+        decoded = pygame.image.load(BytesIO(data))
+        assert decoded.get_size() == (3, 3)
+        assert tuple(decoded.get_at((0, 0))) == (10, 20, 30, 255)
+    finally:
+        pygame.quit()
         root.destroy()
 
 
