@@ -16,6 +16,8 @@ class BlacksiteRelayBehaviour(Behaviour):
     shot_cooldown_seconds=exposed(0.28,min=0.05,max=2.0,step=0.01,category='Combat')
     mission_seconds=exposed(120.0,min=20.0,max=600.0,step=5.0,category='Mission')
     reinforcement_interval=exposed(26.0,min=5.0,max=90.0,step=1.0,category='Enemies')
+    arena_half_width=exposed(38.5,min=10.0,max=100.0,step=0.5,category='Arena')
+    arena_half_height=exposed(16.2,min=5.0,max=50.0,step=0.5,category='Arena')
     def __init__(self):
         super().__init__(); self.physics=None; self.health=5; self.shards=0; self.vip=0; self.kills=0; self.elapsed=0.0; self.state='playing'; self.invulnerable=0.0; self.shot_cooldown=0.0; self.beam_timer=0.0; self.last_aim=(1.0,0.0); self.next_reinforcement=0.0; self.reserve_ids=[]; self.reserve_cursor=0; self.message=''; self.message_timer=0.0
     def on_start(self):
@@ -45,7 +47,7 @@ class BlacksiteRelayBehaviour(Behaviour):
         p=self._entity('player'); t=self._transform('player')
         dx=float(self._held('move_right','move_right_alt'))-float(self._held('move_left','move_left_alt')); dy=float(self._held('move_up','move_up_alt'))-float(self._held('move_down','move_down_alt')); length=math.hypot(dx,dy)
         if length==0: return
-        dx,dy=dx/length,dy/length; self.last_aim=(dx,dy); old=(t.x,t.y); t.x=max(-38.5,min(38.5,t.x+dx*float(self.player_speed)*dt)); t.y=max(-16.2,min(16.2,t.y+dy*float(self.player_speed)*dt)); self._update_aim_indicator()
+        dx,dy=dx/length,dy/length; self.last_aim=(dx,dy); old=(t.x,t.y); hw=float(self.arena_half_width); hh=float(self.arena_half_height); t.x=max(-hw,min(hw,t.x+dx*float(self.player_speed)*dt)); t.y=max(-hh,min(hh,t.y+dy*float(self.player_speed)*dt)); self._update_aim_indicator()
         if self.physics:
             for oid in self.physics.overlap(p.entity_id):
                 other=cast(Any,self.scene).find_entity(oid)
@@ -53,14 +55,14 @@ class BlacksiteRelayBehaviour(Behaviour):
     def _update_aim_indicator(self):
         t=self._transform('aim_indicator'); dx,dy=self.last_aim; t.x=dx*3.0; t.y=dy*3.0; t.rotation=math.degrees(math.atan2(dy,dx))
     def _move_enemies(self,dt):
-        pt=self._transform('player'); speed=float(self.enemy_speed)*(1.0+0.05*(self.shards+self.vip))
+        pt=self._transform('player'); speed=float(self.enemy_speed)*(1.0+0.05*(self.shards+self.vip)); hw=float(self.arena_half_width); hh=float(self.arena_half_height)
         for e in cast(Any,self.scene).get_entities_by_tag('enemy'):
             if not e.enabled: continue
             t=e.get_component(TransformComponent)
             if t is None: continue
             dx,dy=pt.x-t.x,pt.y-t.y; dist=math.hypot(dx,dy)
             if dist<0.001: continue
-            factor=0.45 if dist<3.2 else 1.0; t.x=max(-38.5,min(38.5,t.x+dx/dist*speed*factor*dt)); t.y=max(-16.2,min(16.2,t.y+dy/dist*speed*factor*dt))
+            factor=0.45 if dist<3.2 else 1.0; t.x=max(-hw,min(hw,t.x+dx/dist*speed*factor*dt)); t.y=max(-hh,min(hh,t.y+dy/dist*speed*factor*dt))
     def _handle_contacts(self):
         if not self.physics: return
         p=self._entity('player'); touching=None
@@ -77,7 +79,7 @@ class BlacksiteRelayBehaviour(Behaviour):
     def _damage(self,enemy):
         self.health-=1; self.invulnerable=0.9; p=self._transform('player'); et=enemy.get_component(TransformComponent)
         if et is not None:
-            dx,dy=p.x-et.x,p.y-et.y; length=math.hypot(dx,dy) or 1.0; p.x=max(-38.5,min(38.5,p.x+dx/length*2.8)); p.y=max(-16.2,min(16.2,p.y+dy/length*2.8))
+            dx,dy=p.x-et.x,p.y-et.y; length=math.hypot(dx,dy) or 1.0; hw=float(self.arena_half_width); hh=float(self.arena_half_height); p.x=max(-hw,min(hw,p.x+dx/length*2.8)); p.y=max(-hh,min(hh,p.y+dy/length*2.8))
         if self.health<=0: self._lose('OPERATIVE DOWN // R RESTART')
         else: self._set_message(f'SUIT HIT // HP {self.health}/5',1.1)
     def _fire(self):

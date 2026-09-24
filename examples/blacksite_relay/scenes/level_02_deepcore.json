@@ -1,0 +1,4551 @@
+{
+  "scene_id": "blacksite-relay-level-02-deepcore",
+  "name": "Blacksite Relay - Deep Core",
+  "entities": [
+    {
+      "entity_id": "771334ac-bfdb-47f8-b093-f11368470f57",
+      "name": "Scene Grade",
+      "enabled": true,
+      "layer": -100,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "canvas_modulate",
+          "enabled": true,
+          "color": [
+            0.96,
+            0.98,
+            1.0,
+            1.0
+          ]
+        }
+      ],
+      "tags": []
+    },
+    {
+      "entity_id": "9679e51f-b2cc-4267-8752-6eec325a0480",
+      "name": "Blacksite Floor",
+      "enabled": true,
+      "layer": -40,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 0.0,
+          "y": 0.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 118.7939,
+          "height": 60.8112,
+          "radius": null,
+          "fill": [
+            0.025,
+            0.035,
+            0.055,
+            1.0
+          ],
+          "outline": null,
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "environment"
+      ]
+    },
+    {
+      "entity_id": "82cbe940-fa47-408f-babd-df3fbd741940",
+      "name": "North Rail",
+      "enabled": true,
+      "layer": -35,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 0.0,
+          "y": 29.2742,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 118.7939,
+          "height": 1.1314,
+          "radius": null,
+          "fill": [
+            0.05,
+            0.42,
+            0.52,
+            1
+          ],
+          "outline": null,
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "border",
+        "environment"
+      ]
+    },
+    {
+      "entity_id": "b0815c6d-2f3c-4afd-abdb-8618878faaa2",
+      "name": "South Rail",
+      "enabled": true,
+      "layer": -35,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 0.0,
+          "y": -29.2742,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 118.7939,
+          "height": 1.1314,
+          "radius": null,
+          "fill": [
+            0.05,
+            0.42,
+            0.52,
+            1
+          ],
+          "outline": null,
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "border",
+        "environment"
+      ]
+    },
+    {
+      "entity_id": "93989105-285c-480b-945e-c845f7b50b70",
+      "name": "West Rail",
+      "enabled": true,
+      "layer": -35,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": -58.8313,
+          "y": 0.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 1.1314,
+          "height": 57.4171,
+          "radius": null,
+          "fill": [
+            0.05,
+            0.42,
+            0.52,
+            1
+          ],
+          "outline": null,
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "border",
+        "environment"
+      ]
+    },
+    {
+      "entity_id": "11ccb7f0-00db-468f-912b-dfa4aec3d2d6",
+      "name": "East Rail",
+      "enabled": true,
+      "layer": -35,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 58.8313,
+          "y": 0.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 1.1314,
+          "height": 57.4171,
+          "radius": null,
+          "fill": [
+            0.05,
+            0.42,
+            0.52,
+            1
+          ],
+          "outline": null,
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "border",
+        "environment"
+      ]
+    },
+    {
+      "entity_id": "8bf3f05e-60c6-4a66-a554-2bb3a0808b60",
+      "name": "Lane Light 1",
+      "enabled": true,
+      "layer": -20,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": -36.7696,
+          "y": 0.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 16.9706,
+          "height": 0.6364,
+          "radius": null,
+          "fill": [
+            0.12,
+            0.62,
+            0.72,
+            0.55
+          ],
+          "outline": null,
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "decoration"
+      ]
+    },
+    {
+      "entity_id": "3973198f-1e97-4069-9219-3a85bbd4f774",
+      "name": "Lane Light 2",
+      "enabled": true,
+      "layer": -20,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 0.0,
+          "y": 0.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 21.2132,
+          "height": 0.6364,
+          "radius": null,
+          "fill": [
+            0.12,
+            0.62,
+            0.72,
+            0.55
+          ],
+          "outline": null,
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "decoration"
+      ]
+    },
+    {
+      "entity_id": "9b0ab8f9-08a4-4a37-915e-7ea49547c8f1",
+      "name": "Lane Light 3",
+      "enabled": true,
+      "layer": -20,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 38.1838,
+          "y": 0.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 14.1421,
+          "height": 0.6364,
+          "radius": null,
+          "fill": [
+            0.12,
+            0.62,
+            0.72,
+            0.55
+          ],
+          "outline": null,
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "decoration"
+      ]
+    },
+    {
+      "entity_id": "eb860d4b-7f34-4b5d-a701-d451b8026334",
+      "name": "Lane Light 4",
+      "enabled": true,
+      "layer": -20,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 0.0,
+          "y": 22.6274,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 28.2843,
+          "height": 0.495,
+          "radius": null,
+          "fill": [
+            0.12,
+            0.62,
+            0.72,
+            0.55
+          ],
+          "outline": null,
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "decoration"
+      ]
+    },
+    {
+      "entity_id": "f2b5fd4c-855b-499b-8f87-e16a09f1b751",
+      "name": "Lane Light 5",
+      "enabled": true,
+      "layer": -20,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 0.0,
+          "y": -22.6274,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 25.4558,
+          "height": 0.495,
+          "radius": null,
+          "fill": [
+            0.12,
+            0.62,
+            0.72,
+            0.55
+          ],
+          "outline": null,
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "decoration"
+      ]
+    },
+    {
+      "entity_id": "baa9f903-95d3-486e-974d-fb5e19b3bc68",
+      "name": "Barrier 1 Shadow",
+      "enabled": true,
+      "layer": -2,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": -27.5065,
+          "y": 14.7785,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 12.7279,
+          "height": 7.0711,
+          "radius": null,
+          "fill": [
+            0.0,
+            0.0,
+            0.0,
+            0.45
+          ],
+          "outline": null,
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "decoration"
+      ]
+    },
+    {
+      "entity_id": "47b149ed-4ad0-4df9-ac6d-79abf00a305a",
+      "name": "Barrier 1",
+      "enabled": true,
+      "layer": 1,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": -28.2843,
+          "y": 15.5563,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 12.7279,
+          "height": 7.0711,
+          "radius": null,
+          "fill": [
+            0.1,
+            0.15,
+            0.21,
+            1.0
+          ],
+          "outline": [
+            0.28,
+            0.52,
+            0.62,
+            1
+          ],
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        },
+        {
+          "type": "collider",
+          "enabled": true,
+          "shape": "rectangle",
+          "width": 12.7279,
+          "height": 7.0711,
+          "radius": null,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "solid": true,
+          "trigger": false,
+          "layer": 16,
+          "mask": 1
+        }
+      ],
+      "tags": [
+        "obstacle"
+      ]
+    },
+    {
+      "entity_id": "29fe7b25-e4e5-422e-a2ea-af64b2de0989",
+      "name": "Barrier 1 Stripe",
+      "enabled": true,
+      "layer": 2,
+      "parent_id": "47b149ed-4ad0-4df9-ac6d-79abf00a305a",
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 0.0,
+          "y": 0.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 11.0309,
+          "height": 0.7778,
+          "radius": null,
+          "fill": [
+            0.95,
+            0.62,
+            0.12,
+            0.9
+          ],
+          "outline": null,
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "decoration"
+      ]
+    },
+    {
+      "entity_id": "11ffbf83-bc30-4f1e-a86c-cd5ead56553c",
+      "name": "Barrier 2 Shadow",
+      "enabled": true,
+      "layer": -2,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 10.6773,
+          "y": 16.1927,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 11.3137,
+          "height": 8.4853,
+          "radius": null,
+          "fill": [
+            0.0,
+            0.0,
+            0.0,
+            0.45
+          ],
+          "outline": null,
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "decoration"
+      ]
+    },
+    {
+      "entity_id": "45de6564-b4c1-40a4-a7f0-7987e66a815b",
+      "name": "Barrier 2",
+      "enabled": true,
+      "layer": 1,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 9.8995,
+          "y": 16.9706,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 11.3137,
+          "height": 8.4853,
+          "radius": null,
+          "fill": [
+            0.1,
+            0.15,
+            0.21,
+            1.0
+          ],
+          "outline": [
+            0.28,
+            0.52,
+            0.62,
+            1
+          ],
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        },
+        {
+          "type": "collider",
+          "enabled": true,
+          "shape": "rectangle",
+          "width": 11.3137,
+          "height": 8.4853,
+          "radius": null,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "solid": true,
+          "trigger": false,
+          "layer": 16,
+          "mask": 1
+        }
+      ],
+      "tags": [
+        "obstacle"
+      ]
+    },
+    {
+      "entity_id": "bac62185-0fc9-4e02-9ac6-f639ab1cb2a8",
+      "name": "Barrier 2 Stripe",
+      "enabled": true,
+      "layer": 2,
+      "parent_id": "45de6564-b4c1-40a4-a7f0-7987e66a815b",
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 0.0,
+          "y": 0.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 9.6167,
+          "height": 0.7778,
+          "radius": null,
+          "fill": [
+            0.95,
+            0.62,
+            0.12,
+            0.9
+          ],
+          "outline": null,
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "decoration"
+      ]
+    },
+    {
+      "entity_id": "757c15b8-11fd-4f6a-9e0b-30b66c497655",
+      "name": "Barrier 3 Shadow",
+      "enabled": true,
+      "layer": -2,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 34.7189,
+          "y": 6.2933,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 12.7279,
+          "height": 7.0711,
+          "radius": null,
+          "fill": [
+            0.0,
+            0.0,
+            0.0,
+            0.45
+          ],
+          "outline": null,
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "decoration"
+      ]
+    },
+    {
+      "entity_id": "871be25d-de9c-4733-94e7-0d54a3e406eb",
+      "name": "Barrier 3",
+      "enabled": true,
+      "layer": 1,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 33.9411,
+          "y": 7.0711,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 12.7279,
+          "height": 7.0711,
+          "radius": null,
+          "fill": [
+            0.1,
+            0.15,
+            0.21,
+            1.0
+          ],
+          "outline": [
+            0.28,
+            0.52,
+            0.62,
+            1
+          ],
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        },
+        {
+          "type": "collider",
+          "enabled": true,
+          "shape": "rectangle",
+          "width": 12.7279,
+          "height": 7.0711,
+          "radius": null,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "solid": true,
+          "trigger": false,
+          "layer": 16,
+          "mask": 1
+        }
+      ],
+      "tags": [
+        "obstacle"
+      ]
+    },
+    {
+      "entity_id": "bb84d6a1-1232-4a9b-9749-e3b012ad6efa",
+      "name": "Barrier 3 Stripe",
+      "enabled": true,
+      "layer": 2,
+      "parent_id": "871be25d-de9c-4733-94e7-0d54a3e406eb",
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 0.0,
+          "y": 0.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 11.0309,
+          "height": 0.7778,
+          "radius": null,
+          "fill": [
+            0.95,
+            0.62,
+            0.12,
+            0.9
+          ],
+          "outline": null,
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "decoration"
+      ]
+    },
+    {
+      "entity_id": "4ac75d08-f471-4eaa-8d8e-48507c662927",
+      "name": "Barrier 4 Shadow",
+      "enabled": true,
+      "layer": -2,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": -6.2933,
+          "y": -14.92,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 14.1421,
+          "height": 7.0711,
+          "radius": null,
+          "fill": [
+            0.0,
+            0.0,
+            0.0,
+            0.45
+          ],
+          "outline": null,
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "decoration"
+      ]
+    },
+    {
+      "entity_id": "33504479-1f21-4bf4-9f4d-7a1760587a78",
+      "name": "Barrier 4",
+      "enabled": true,
+      "layer": 1,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": -7.0711,
+          "y": -14.1421,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 14.1421,
+          "height": 7.0711,
+          "radius": null,
+          "fill": [
+            0.1,
+            0.15,
+            0.21,
+            1.0
+          ],
+          "outline": [
+            0.28,
+            0.52,
+            0.62,
+            1
+          ],
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        },
+        {
+          "type": "collider",
+          "enabled": true,
+          "shape": "rectangle",
+          "width": 14.1421,
+          "height": 7.0711,
+          "radius": null,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "solid": true,
+          "trigger": false,
+          "layer": 16,
+          "mask": 1
+        }
+      ],
+      "tags": [
+        "obstacle"
+      ]
+    },
+    {
+      "entity_id": "e7f9b292-c577-4dda-bc9f-bfa9734a16d8",
+      "name": "Barrier 4 Stripe",
+      "enabled": true,
+      "layer": 2,
+      "parent_id": "33504479-1f21-4bf4-9f4d-7a1760587a78",
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 0.0,
+          "y": 0.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 12.4451,
+          "height": 0.7778,
+          "radius": null,
+          "fill": [
+            0.95,
+            0.62,
+            0.12,
+            0.9
+          ],
+          "outline": null,
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "decoration"
+      ]
+    },
+    {
+      "entity_id": "f1d27520-5b4c-4402-994f-8a837ca0d392",
+      "name": "Barrier 5 Shadow",
+      "enabled": true,
+      "layer": -2,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 31.8905,
+          "y": -17.7484,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 15.5563,
+          "height": 7.0711,
+          "radius": null,
+          "fill": [
+            0.0,
+            0.0,
+            0.0,
+            0.45
+          ],
+          "outline": null,
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "decoration"
+      ]
+    },
+    {
+      "entity_id": "9111d0b4-ef46-45a0-9507-deaf34098176",
+      "name": "Barrier 5",
+      "enabled": true,
+      "layer": 1,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 31.1127,
+          "y": -16.9706,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 15.5563,
+          "height": 7.0711,
+          "radius": null,
+          "fill": [
+            0.1,
+            0.15,
+            0.21,
+            1.0
+          ],
+          "outline": [
+            0.28,
+            0.52,
+            0.62,
+            1
+          ],
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        },
+        {
+          "type": "collider",
+          "enabled": true,
+          "shape": "rectangle",
+          "width": 15.5563,
+          "height": 7.0711,
+          "radius": null,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "solid": true,
+          "trigger": false,
+          "layer": 16,
+          "mask": 1
+        }
+      ],
+      "tags": [
+        "obstacle"
+      ]
+    },
+    {
+      "entity_id": "739a7f73-2abb-42ad-a80f-7669cc00a08b",
+      "name": "Barrier 5 Stripe",
+      "enabled": true,
+      "layer": 2,
+      "parent_id": "9111d0b4-ef46-45a0-9507-deaf34098176",
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 0.0,
+          "y": 0.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 13.8593,
+          "height": 0.7778,
+          "radius": null,
+          "fill": [
+            0.95,
+            0.62,
+            0.12,
+            0.9
+          ],
+          "outline": null,
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "decoration"
+      ]
+    },
+    {
+      "entity_id": "c2dd3232-f093-447a-b20e-bc373716f2d7",
+      "name": "Barrier 6 Shadow",
+      "enabled": true,
+      "layer": -2,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": -41.6486,
+          "y": -7.8489,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 8.4853,
+          "height": 14.1421,
+          "radius": null,
+          "fill": [
+            0.0,
+            0.0,
+            0.0,
+            0.45
+          ],
+          "outline": null,
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "decoration"
+      ]
+    },
+    {
+      "entity_id": "90a74a52-56bf-4559-a65e-555b37d3d243",
+      "name": "Barrier 6",
+      "enabled": true,
+      "layer": 1,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": -42.4264,
+          "y": -7.0711,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 8.4853,
+          "height": 14.1421,
+          "radius": null,
+          "fill": [
+            0.1,
+            0.15,
+            0.21,
+            1.0
+          ],
+          "outline": [
+            0.28,
+            0.52,
+            0.62,
+            1
+          ],
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        },
+        {
+          "type": "collider",
+          "enabled": true,
+          "shape": "rectangle",
+          "width": 8.4853,
+          "height": 14.1421,
+          "radius": null,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "solid": true,
+          "trigger": false,
+          "layer": 16,
+          "mask": 1
+        }
+      ],
+      "tags": [
+        "obstacle"
+      ]
+    },
+    {
+      "entity_id": "42c0b234-6ec0-4fec-bcaa-a253f8669a35",
+      "name": "Barrier 6 Stripe",
+      "enabled": true,
+      "layer": 2,
+      "parent_id": "90a74a52-56bf-4559-a65e-555b37d3d243",
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 0.0,
+          "y": 0.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 6.7882,
+          "height": 0.7778,
+          "radius": null,
+          "fill": [
+            0.95,
+            0.62,
+            0.12,
+            0.9
+          ],
+          "outline": null,
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "decoration"
+      ]
+    },
+    {
+      "entity_id": "98c07aa5-f63f-4add-98e2-8b82b71784ad",
+      "name": "Relay Station",
+      "enabled": true,
+      "layer": 3,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 0.0,
+          "y": 4.2426,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "circle",
+          "width": 10.6066,
+          "height": 10.6066,
+          "radius": 5.3033,
+          "fill": [
+            0.07,
+            0.22,
+            0.3,
+            1
+          ],
+          "outline": [
+            0.12,
+            0.75,
+            0.88,
+            1
+          ],
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "relay_station"
+      ]
+    },
+    {
+      "entity_id": "57d517dc-c8c4-485e-b848-5c54757b9f27",
+      "name": "Relay Core",
+      "enabled": true,
+      "layer": 1,
+      "parent_id": "98c07aa5-f63f-4add-98e2-8b82b71784ad",
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 0.0,
+          "y": 0.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "circle",
+          "width": 4.5255,
+          "height": 4.5255,
+          "radius": 2.2627,
+          "fill": [
+            0.12,
+            0.82,
+            0.96,
+            0.72
+          ],
+          "outline": null,
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "relay_core"
+      ]
+    },
+    {
+      "entity_id": "45542c26-ae2c-4be1-9d45-64dfcb0776f3",
+      "name": "Operative",
+      "enabled": true,
+      "layer": 10,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": -48.0833,
+          "y": -19.799,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "sprite",
+          "enabled": true,
+          "asset": "assets://kenney/player_survivor_gun.png",
+          "tint": [
+            0.72,
+            0.96,
+            1.0,
+            1.0
+          ],
+          "width": 7.3539,
+          "height": 6.2225,
+          "region": null,
+          "centered": true,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "flip_h": false,
+          "flip_v": false,
+          "layer": 0,
+          "visible": true
+        },
+        {
+          "type": "collider",
+          "enabled": true,
+          "shape": "circle",
+          "width": 4.2426,
+          "height": 4.2426,
+          "radius": 2.1213,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "solid": true,
+          "trigger": false,
+          "layer": 1,
+          "mask": 30
+        }
+      ],
+      "tags": [
+        "player"
+      ]
+    },
+    {
+      "entity_id": "6d2b5092-be0a-4ed9-87b1-242d631c56e3",
+      "name": "Operative Aura",
+      "enabled": true,
+      "layer": -1,
+      "parent_id": "45542c26-ae2c-4be1-9d45-64dfcb0776f3",
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 0.0,
+          "y": 0.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "circle",
+          "width": 7.7782,
+          "height": 7.7782,
+          "radius": 3.8891,
+          "fill": [
+            0.05,
+            0.58,
+            0.82,
+            0.15
+          ],
+          "outline": [
+            0.15,
+            0.8,
+            1.0,
+            0.55
+          ],
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "player_aura"
+      ]
+    },
+    {
+      "entity_id": "50209166-cdb5-4aae-b8c1-7e8483007d4f",
+      "name": "Aim Indicator",
+      "enabled": true,
+      "layer": 2,
+      "parent_id": "45542c26-ae2c-4be1-9d45-64dfcb0776f3",
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 3.9598,
+          "y": 0.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 3.1113,
+          "height": 0.5374,
+          "radius": null,
+          "fill": [
+            0.3,
+            0.95,
+            1.0,
+            0.95
+          ],
+          "outline": null,
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "aim_indicator"
+      ]
+    },
+    {
+      "entity_id": "6753ca49-f1cd-459b-b31d-cbcca14d01d4",
+      "name": "Pulse Trace",
+      "enabled": true,
+      "layer": 16,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 0.0,
+          "y": 0.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 1.4142,
+          "height": 0.396,
+          "radius": null,
+          "fill": [
+            0.45,
+            0.98,
+            1.0,
+            0.95
+          ],
+          "outline": null,
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": false
+        }
+      ],
+      "tags": [
+        "shot_beam"
+      ]
+    },
+    {
+      "entity_id": "13d026bc-39ec-4cd6-bceb-f3697998ed78",
+      "name": "Access Shard 1",
+      "enabled": true,
+      "layer": 7,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": -42.4264,
+          "y": 19.799,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "circle",
+          "width": 4.5255,
+          "height": 4.5255,
+          "radius": 2.2627,
+          "fill": [
+            0.98,
+            0.72,
+            0.12,
+            1
+          ],
+          "outline": [
+            1,
+            0.94,
+            0.52,
+            1
+          ],
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        },
+        {
+          "type": "collider",
+          "enabled": true,
+          "shape": "circle",
+          "width": 4.5255,
+          "height": 4.5255,
+          "radius": 2.2627,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "solid": false,
+          "trigger": true,
+          "layer": 4,
+          "mask": 1
+        }
+      ],
+      "tags": [
+        "objective",
+        "shard"
+      ]
+    },
+    {
+      "entity_id": "adff2031-b8e0-4ab2-a6f4-9894767b8ab3",
+      "name": "Access Shard 1 Core",
+      "enabled": true,
+      "layer": 1,
+      "parent_id": "13d026bc-39ec-4cd6-bceb-f3697998ed78",
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 0.0,
+          "y": 0.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "circle",
+          "width": 1.4142,
+          "height": 1.4142,
+          "radius": 0.7071,
+          "fill": [
+            1,
+            1,
+            0.86,
+            1
+          ],
+          "outline": null,
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "decoration"
+      ]
+    },
+    {
+      "entity_id": "3f85836c-cb31-4085-b499-e5289db91a5c",
+      "name": "Access Shard 2",
+      "enabled": true,
+      "layer": 7,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": -11.3137,
+          "y": 21.2132,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "circle",
+          "width": 4.5255,
+          "height": 4.5255,
+          "radius": 2.2627,
+          "fill": [
+            0.98,
+            0.72,
+            0.12,
+            1
+          ],
+          "outline": [
+            1,
+            0.94,
+            0.52,
+            1
+          ],
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        },
+        {
+          "type": "collider",
+          "enabled": true,
+          "shape": "circle",
+          "width": 4.5255,
+          "height": 4.5255,
+          "radius": 2.2627,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "solid": false,
+          "trigger": true,
+          "layer": 4,
+          "mask": 1
+        }
+      ],
+      "tags": [
+        "objective",
+        "shard"
+      ]
+    },
+    {
+      "entity_id": "23ae8a97-c66b-41df-90f9-561621183996",
+      "name": "Access Shard 2 Core",
+      "enabled": true,
+      "layer": 1,
+      "parent_id": "3f85836c-cb31-4085-b499-e5289db91a5c",
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 0.0,
+          "y": 0.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "circle",
+          "width": 1.4142,
+          "height": 1.4142,
+          "radius": 0.7071,
+          "fill": [
+            1,
+            1,
+            0.86,
+            1
+          ],
+          "outline": null,
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "decoration"
+      ]
+    },
+    {
+      "entity_id": "90595d4e-e5e7-4154-9457-79feb819a32d",
+      "name": "Access Shard 3",
+      "enabled": true,
+      "layer": 7,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 25.4558,
+          "y": 19.799,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "circle",
+          "width": 4.5255,
+          "height": 4.5255,
+          "radius": 2.2627,
+          "fill": [
+            0.98,
+            0.72,
+            0.12,
+            1
+          ],
+          "outline": [
+            1,
+            0.94,
+            0.52,
+            1
+          ],
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        },
+        {
+          "type": "collider",
+          "enabled": true,
+          "shape": "circle",
+          "width": 4.5255,
+          "height": 4.5255,
+          "radius": 2.2627,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "solid": false,
+          "trigger": true,
+          "layer": 4,
+          "mask": 1
+        }
+      ],
+      "tags": [
+        "objective",
+        "shard"
+      ]
+    },
+    {
+      "entity_id": "6e8f3510-6a45-4f9e-9d48-d9c46be94937",
+      "name": "Access Shard 3 Core",
+      "enabled": true,
+      "layer": 1,
+      "parent_id": "90595d4e-e5e7-4154-9457-79feb819a32d",
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 0.0,
+          "y": 0.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "circle",
+          "width": 1.4142,
+          "height": 1.4142,
+          "radius": 0.7071,
+          "fill": [
+            1,
+            1,
+            0.86,
+            1
+          ],
+          "outline": null,
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "decoration"
+      ]
+    },
+    {
+      "entity_id": "27c8d2c3-02dd-47f2-ae66-1e95fbe1e08b",
+      "name": "Access Shard 4",
+      "enabled": true,
+      "layer": 7,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 43.8406,
+          "y": -19.799,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "circle",
+          "width": 4.5255,
+          "height": 4.5255,
+          "radius": 2.2627,
+          "fill": [
+            0.98,
+            0.72,
+            0.12,
+            1
+          ],
+          "outline": [
+            1,
+            0.94,
+            0.52,
+            1
+          ],
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        },
+        {
+          "type": "collider",
+          "enabled": true,
+          "shape": "circle",
+          "width": 4.5255,
+          "height": 4.5255,
+          "radius": 2.2627,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "solid": false,
+          "trigger": true,
+          "layer": 4,
+          "mask": 1
+        }
+      ],
+      "tags": [
+        "objective",
+        "shard"
+      ]
+    },
+    {
+      "entity_id": "f594a4ef-8b94-4d64-9042-3458efa01e07",
+      "name": "Access Shard 4 Core",
+      "enabled": true,
+      "layer": 1,
+      "parent_id": "27c8d2c3-02dd-47f2-ae66-1e95fbe1e08b",
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 0.0,
+          "y": 0.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "circle",
+          "width": 1.4142,
+          "height": 1.4142,
+          "radius": 0.7071,
+          "fill": [
+            1,
+            1,
+            0.86,
+            1
+          ],
+          "outline": null,
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "decoration"
+      ]
+    },
+    {
+      "entity_id": "f460217d-4716-4816-94dc-fe2c01a017bc",
+      "name": "Relay Engineer",
+      "enabled": true,
+      "layer": 8,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": -43.8406,
+          "y": 7.0711,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "sprite",
+          "enabled": true,
+          "asset": "assets://kenney/survivor_blue.png",
+          "tint": [
+            0.7,
+            1.0,
+            0.78,
+            1.0
+          ],
+          "width": 4.9497,
+          "height": 6.2225,
+          "region": null,
+          "centered": true,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "flip_h": false,
+          "flip_v": false,
+          "layer": 0,
+          "visible": true
+        },
+        {
+          "type": "collider",
+          "enabled": true,
+          "shape": "circle",
+          "width": 4.2426,
+          "height": 4.2426,
+          "radius": 2.1213,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "solid": false,
+          "trigger": true,
+          "layer": 4,
+          "mask": 1
+        }
+      ],
+      "tags": [
+        "objective",
+        "vip"
+      ]
+    },
+    {
+      "entity_id": "64a34b5d-dfd2-4d66-bca8-c7e22b0b8605",
+      "name": "Engineer Ring",
+      "enabled": true,
+      "layer": -1,
+      "parent_id": "f460217d-4716-4816-94dc-fe2c01a017bc",
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 0.0,
+          "y": 0.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "circle",
+          "width": 7.0711,
+          "height": 7.0711,
+          "radius": 3.5355,
+          "fill": [
+            0.12,
+            0.78,
+            0.42,
+            0.1
+          ],
+          "outline": [
+            0.28,
+            1.0,
+            0.6,
+            0.55
+          ],
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "decoration"
+      ]
+    },
+    {
+      "entity_id": "3c9580c0-ea9e-4b4e-8d88-f0b835f5151b",
+      "name": "Extraction Gate",
+      "enabled": true,
+      "layer": 5,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 49.4975,
+          "y": 21.2132,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 12.0208,
+          "height": 8.4853,
+          "radius": null,
+          "fill": [
+            0.24,
+            0.055,
+            0.07,
+            0.85
+          ],
+          "outline": [
+            0.92,
+            0.22,
+            0.28,
+            1
+          ],
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        },
+        {
+          "type": "collider",
+          "enabled": true,
+          "shape": "rectangle",
+          "width": 11.3137,
+          "height": 7.7782,
+          "radius": null,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "solid": false,
+          "trigger": true,
+          "layer": 8,
+          "mask": 1
+        }
+      ],
+      "tags": [
+        "extraction",
+        "objective"
+      ]
+    },
+    {
+      "entity_id": "a0e8a4d5-130a-44a6-b607-84b7193b932e",
+      "name": "Extraction Beacon",
+      "enabled": true,
+      "layer": 1,
+      "parent_id": "3c9580c0-ea9e-4b4e-8d88-f0b835f5151b",
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 0.0,
+          "y": 0.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "circle",
+          "width": 3.3941,
+          "height": 3.3941,
+          "radius": 1.6971,
+          "fill": [
+            1.0,
+            0.24,
+            0.3,
+            0.9
+          ],
+          "outline": null,
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "extraction_beacon"
+      ]
+    },
+    {
+      "entity_id": "c678e2c6-999a-4293-8c8c-a4f9519186f8",
+      "name": "Security Drone 1",
+      "enabled": true,
+      "layer": 9,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": -16.9706,
+          "y": 9.8995,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "sprite",
+          "enabled": true,
+          "asset": "assets://kenney/zombie.png",
+          "tint": [
+            1.0,
+            0.58,
+            0.64,
+            1.0
+          ],
+          "width": 4.9497,
+          "height": 6.2225,
+          "region": null,
+          "centered": true,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "flip_h": false,
+          "flip_v": false,
+          "layer": 0,
+          "visible": true
+        },
+        {
+          "type": "collider",
+          "enabled": true,
+          "shape": "circle",
+          "width": 3.9598,
+          "height": 3.9598,
+          "radius": 1.9799,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "solid": true,
+          "trigger": false,
+          "layer": 2,
+          "mask": 1
+        }
+      ],
+      "tags": [
+        "enemy",
+        "enemy_start"
+      ]
+    },
+    {
+      "entity_id": "733bd88e-7fdd-44cd-9ffd-7ba718af4e7c",
+      "name": "Security Drone 2",
+      "enabled": true,
+      "layer": 9,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 19.799,
+          "y": 5.6569,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "sprite",
+          "enabled": true,
+          "asset": "assets://kenney/zombie.png",
+          "tint": [
+            1.0,
+            0.58,
+            0.64,
+            1.0
+          ],
+          "width": 4.9497,
+          "height": 6.2225,
+          "region": null,
+          "centered": true,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "flip_h": false,
+          "flip_v": false,
+          "layer": 0,
+          "visible": true
+        },
+        {
+          "type": "collider",
+          "enabled": true,
+          "shape": "circle",
+          "width": 3.9598,
+          "height": 3.9598,
+          "radius": 1.9799,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "solid": true,
+          "trigger": false,
+          "layer": 2,
+          "mask": 1
+        }
+      ],
+      "tags": [
+        "enemy",
+        "enemy_start"
+      ]
+    },
+    {
+      "entity_id": "5a427f71-3ce8-4cd3-9fa6-5c0c26716df0",
+      "name": "Security Drone 3",
+      "enabled": true,
+      "layer": 9,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 41.0122,
+          "y": -5.6569,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "sprite",
+          "enabled": true,
+          "asset": "assets://kenney/zombie.png",
+          "tint": [
+            1.0,
+            0.58,
+            0.64,
+            1.0
+          ],
+          "width": 4.9497,
+          "height": 6.2225,
+          "region": null,
+          "centered": true,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "flip_h": false,
+          "flip_v": false,
+          "layer": 0,
+          "visible": true
+        },
+        {
+          "type": "collider",
+          "enabled": true,
+          "shape": "circle",
+          "width": 3.9598,
+          "height": 3.9598,
+          "radius": 1.9799,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "solid": true,
+          "trigger": false,
+          "layer": 2,
+          "mask": 1
+        }
+      ],
+      "tags": [
+        "enemy",
+        "enemy_start"
+      ]
+    },
+    {
+      "entity_id": "569df339-022a-479f-97ef-2d17612a93d7",
+      "name": "Security Drone 4",
+      "enabled": true,
+      "layer": 9,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": -22.6274,
+          "y": -21.2132,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "sprite",
+          "enabled": true,
+          "asset": "assets://kenney/zombie.png",
+          "tint": [
+            1.0,
+            0.58,
+            0.64,
+            1.0
+          ],
+          "width": 4.9497,
+          "height": 6.2225,
+          "region": null,
+          "centered": true,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "flip_h": false,
+          "flip_v": false,
+          "layer": 0,
+          "visible": true
+        },
+        {
+          "type": "collider",
+          "enabled": true,
+          "shape": "circle",
+          "width": 3.9598,
+          "height": 3.9598,
+          "radius": 1.9799,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "solid": true,
+          "trigger": false,
+          "layer": 2,
+          "mask": 1
+        }
+      ],
+      "tags": [
+        "enemy",
+        "enemy_start"
+      ]
+    },
+    {
+      "entity_id": "21b3efcc-a68d-43a8-92b3-2718991bebf0",
+      "name": "Security Drone 5",
+      "enabled": true,
+      "layer": 9,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 12.7279,
+          "y": -22.6274,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "sprite",
+          "enabled": true,
+          "asset": "assets://kenney/zombie.png",
+          "tint": [
+            1.0,
+            0.58,
+            0.64,
+            1.0
+          ],
+          "width": 4.9497,
+          "height": 6.2225,
+          "region": null,
+          "centered": true,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "flip_h": false,
+          "flip_v": false,
+          "layer": 0,
+          "visible": true
+        },
+        {
+          "type": "collider",
+          "enabled": true,
+          "shape": "circle",
+          "width": 3.9598,
+          "height": 3.9598,
+          "radius": 1.9799,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "solid": true,
+          "trigger": false,
+          "layer": 2,
+          "mask": 1
+        }
+      ],
+      "tags": [
+        "enemy",
+        "enemy_start"
+      ]
+    },
+    {
+      "entity_id": "dd578c7a-66d4-4f49-8fb6-b6d528bfd601",
+      "name": "Security Drone 6",
+      "enabled": false,
+      "layer": 9,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": -50.9117,
+          "y": 19.799,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "sprite",
+          "enabled": true,
+          "asset": "assets://kenney/zombie.png",
+          "tint": [
+            1.0,
+            0.58,
+            0.64,
+            1.0
+          ],
+          "width": 4.9497,
+          "height": 6.2225,
+          "region": null,
+          "centered": true,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "flip_h": false,
+          "flip_v": false,
+          "layer": 0,
+          "visible": true
+        },
+        {
+          "type": "collider",
+          "enabled": true,
+          "shape": "circle",
+          "width": 3.9598,
+          "height": 3.9598,
+          "radius": 1.9799,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "solid": true,
+          "trigger": false,
+          "layer": 2,
+          "mask": 1
+        }
+      ],
+      "tags": [
+        "enemy",
+        "enemy_reserve"
+      ]
+    },
+    {
+      "entity_id": "1a3fb0bb-d107-4b18-98a5-ea02dab1f8a6",
+      "name": "Security Drone 7",
+      "enabled": false,
+      "layer": 9,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 49.4975,
+          "y": 0.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "sprite",
+          "enabled": true,
+          "asset": "assets://kenney/zombie.png",
+          "tint": [
+            1.0,
+            0.58,
+            0.64,
+            1.0
+          ],
+          "width": 4.9497,
+          "height": 6.2225,
+          "region": null,
+          "centered": true,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "flip_h": false,
+          "flip_v": false,
+          "layer": 0,
+          "visible": true
+        },
+        {
+          "type": "collider",
+          "enabled": true,
+          "shape": "circle",
+          "width": 3.9598,
+          "height": 3.9598,
+          "radius": 1.9799,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "solid": true,
+          "trigger": false,
+          "layer": 2,
+          "mask": 1
+        }
+      ],
+      "tags": [
+        "enemy",
+        "enemy_reserve"
+      ]
+    },
+    {
+      "entity_id": "b970e260-bc3f-483c-985f-4976a3f38f0f",
+      "name": "Security Drone 8",
+      "enabled": false,
+      "layer": 9,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 2.8284,
+          "y": 24.0416,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "sprite",
+          "enabled": true,
+          "asset": "assets://kenney/zombie.png",
+          "tint": [
+            1.0,
+            0.58,
+            0.64,
+            1.0
+          ],
+          "width": 4.9497,
+          "height": 6.2225,
+          "region": null,
+          "centered": true,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "flip_h": false,
+          "flip_v": false,
+          "layer": 0,
+          "visible": true
+        },
+        {
+          "type": "collider",
+          "enabled": true,
+          "shape": "circle",
+          "width": 3.9598,
+          "height": 3.9598,
+          "radius": 1.9799,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "solid": true,
+          "trigger": false,
+          "layer": 2,
+          "mask": 1
+        }
+      ],
+      "tags": [
+        "enemy",
+        "enemy_reserve"
+      ]
+    },
+    {
+      "entity_id": "15c68a81-4715-4c0b-ae2c-babdf7ce9900",
+      "name": "HUD Left",
+      "enabled": true,
+      "layer": 40,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": -41.0122,
+          "y": 31.1127,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 35.3553,
+          "height": 5.6569,
+          "radius": null,
+          "fill": [
+            0.018,
+            0.045,
+            0.07,
+            1.0
+          ],
+          "outline": [
+            0.08,
+            0.45,
+            0.58,
+            1
+          ],
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "hud_plate"
+      ]
+    },
+    {
+      "entity_id": "d8103dd7-968b-4893-8374-aa363a90e7d7",
+      "name": "HUD Centre",
+      "enabled": true,
+      "layer": 40,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 0.0,
+          "y": 31.1127,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 35.3553,
+          "height": 5.6569,
+          "radius": null,
+          "fill": [
+            0.018,
+            0.045,
+            0.07,
+            1.0
+          ],
+          "outline": [
+            0.08,
+            0.45,
+            0.58,
+            1
+          ],
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "hud_plate"
+      ]
+    },
+    {
+      "entity_id": "d6dc387e-2a85-4559-a4e9-883477674459",
+      "name": "HUD Right",
+      "enabled": true,
+      "layer": 40,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 41.0122,
+          "y": 31.1127,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 35.3553,
+          "height": 5.6569,
+          "radius": null,
+          "fill": [
+            0.018,
+            0.045,
+            0.07,
+            1.0
+          ],
+          "outline": [
+            0.08,
+            0.45,
+            0.58,
+            1
+          ],
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "hud_plate"
+      ]
+    },
+    {
+      "entity_id": "b084865a-e60a-45fb-888d-454b4e391c67",
+      "name": "HUD Health",
+      "enabled": true,
+      "layer": 42,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": -41.0122,
+          "y": 31.1127,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "text",
+          "enabled": true,
+          "text": "HP 5/5",
+          "font": "default",
+          "size": 25.4558,
+          "color": [
+            0.8,
+            0.96,
+            1.0,
+            1
+          ],
+          "max_width": null,
+          "align": "center",
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "hud_health"
+      ]
+    },
+    {
+      "entity_id": "5f18a549-ec91-4b3c-bc39-83f6bd7cf26c",
+      "name": "HUD Objective",
+      "enabled": true,
+      "layer": 42,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 0.0,
+          "y": 31.1127,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "text",
+          "enabled": true,
+          "text": "SHARDS 0/4  \u2022  VIP 0/1",
+          "font": "default",
+          "size": 24.0416,
+          "color": [
+            1.0,
+            0.82,
+            0.3,
+            1
+          ],
+          "max_width": null,
+          "align": "center",
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "hud_objective"
+      ]
+    },
+    {
+      "entity_id": "ae735ad0-47d6-43f8-a68a-d5d1f4a1483d",
+      "name": "HUD Time",
+      "enabled": true,
+      "layer": 42,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 41.0122,
+          "y": 31.1127,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "text",
+          "enabled": true,
+          "text": "TIME 120  \u2022  READY",
+          "font": "default",
+          "size": 24.0416,
+          "color": [
+            0.74,
+            0.9,
+            1.0,
+            1
+          ],
+          "max_width": null,
+          "align": "center",
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "hud_time"
+      ]
+    },
+    {
+      "entity_id": "263fde82-481c-4c27-9564-8c5c7f332adc",
+      "name": "Status Plate",
+      "enabled": true,
+      "layer": 40,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 0.0,
+          "y": -31.1127,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 98.9949,
+          "height": 5.6569,
+          "radius": null,
+          "fill": [
+            0.018,
+            0.045,
+            0.07,
+            1.0
+          ],
+          "outline": [
+            0.08,
+            0.45,
+            0.58,
+            1
+          ],
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "hud_plate"
+      ]
+    },
+    {
+      "entity_id": "65e18723-4e0d-4920-90e3-f54af38524b9",
+      "name": "Mission Status",
+      "enabled": true,
+      "layer": 42,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 0.0,
+          "y": -31.1127,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "text",
+          "enabled": true,
+          "text": "4 SHARDS + ENGINEER \u2192 EXIT",
+          "font": "default",
+          "size": 24.0416,
+          "color": [
+            0.88,
+            0.96,
+            1,
+            1
+          ],
+          "max_width": null,
+          "align": "center",
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "hud_status"
+      ]
+    },
+    {
+      "entity_id": "fa0304c5-264c-40a2-a69c-3dfed65ea46c",
+      "name": "Controls Help",
+      "enabled": true,
+      "layer": 42,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 0.0,
+          "y": -38.1838,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "text",
+          "enabled": true,
+          "text": "WASD / ARROWS MOVE   \u2022   SPACE / F FIRE   \u2022   P PAUSE   \u2022   R RESTART",
+          "font": "default",
+          "size": 19.799,
+          "color": [
+            0.53,
+            0.69,
+            0.78,
+            1
+          ],
+          "max_width": null,
+          "align": "center",
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "hud_controls"
+      ]
+    },
+    {
+      "entity_id": "02ddaeeb-3663-4a0f-88f1-4325f02938b2",
+      "name": "Mission Title",
+      "enabled": true,
+      "layer": 42,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 0.0,
+          "y": 38.1838,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "text",
+          "enabled": true,
+          "text": "BLACKSITE RELAY",
+          "font": "default",
+          "size": 36.7696,
+          "color": [
+            0.58,
+            0.94,
+            1.0,
+            1
+          ],
+          "max_width": null,
+          "align": "center",
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "mission_title"
+      ]
+    },
+    {
+      "entity_id": "a6f75c96-4977-46b5-9721-eb22a2f2da39",
+      "name": "Mission Controller",
+      "enabled": true,
+      "layer": 50,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "script",
+          "enabled": true,
+          "script_id": "project://scripts/blacksite_relay_behaviour.py",
+          "behaviour_class": "BlacksiteRelayBehaviour",
+          "exposed_values": {
+            "player_speed": 15.0,
+            "enemy_speed": 4.2,
+            "shot_range": 18.0,
+            "shot_cooldown_seconds": 0.28,
+            "mission_seconds": 165.0,
+            "reinforcement_interval": 24.0,
+            "arena_half_width": 54.5,
+            "arena_half_height": 23.0
+          },
+          "order": 0
+        }
+      ],
+      "tags": [
+        "game_controller"
+      ]
+    },
+    {
+      "entity_id": "0b92a14e-65e0-451c-9972-fe116c418963",
+      "name": "Northwing Barrier 1 Shadow",
+      "enabled": true,
+      "layer": 0,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": -37.6,
+          "y": 25.6,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 10.0,
+          "height": 5.0,
+          "radius": null,
+          "fill": [
+            0.0,
+            0.0,
+            0.0,
+            0.35
+          ],
+          "outline": null,
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "decoration"
+      ]
+    },
+    {
+      "entity_id": "6c1d709c-eab9-48c4-b547-d7656152716a",
+      "name": "Northwing Barrier 1",
+      "enabled": true,
+      "layer": 1,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": -38.0,
+          "y": 26.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 10.0,
+          "height": 5.0,
+          "radius": null,
+          "fill": [
+            0.1,
+            0.15,
+            0.21,
+            1.0
+          ],
+          "outline": [
+            0.28,
+            0.52,
+            0.62,
+            1
+          ],
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        },
+        {
+          "type": "collider",
+          "enabled": true,
+          "shape": "rectangle",
+          "width": 10.0,
+          "height": 5.0,
+          "radius": null,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "solid": true,
+          "trigger": false,
+          "layer": 16,
+          "mask": 1
+        }
+      ],
+      "tags": [
+        "obstacle"
+      ]
+    },
+    {
+      "entity_id": "306ca445-cf09-4a52-abd3-58d05b07afde",
+      "name": "Northwing Barrier 1 Stripe",
+      "enabled": true,
+      "layer": 2,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": -38.0,
+          "y": 26.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 8.0,
+          "height": 0.6,
+          "radius": null,
+          "fill": [
+            0.85,
+            0.62,
+            0.1,
+            0.9
+          ],
+          "outline": null,
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "decoration"
+      ]
+    },
+    {
+      "entity_id": "eee0f7f9-0334-4888-9fe4-4fdb9f08dd72",
+      "name": "Northwing Barrier 2 Shadow",
+      "enabled": true,
+      "layer": 0,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": -9.6,
+          "y": 26.6,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 8.0,
+          "height": 6.0,
+          "radius": null,
+          "fill": [
+            0.0,
+            0.0,
+            0.0,
+            0.35
+          ],
+          "outline": null,
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "decoration"
+      ]
+    },
+    {
+      "entity_id": "6f0dbff5-4490-4c98-9b1d-15b53a0f4f71",
+      "name": "Northwing Barrier 2",
+      "enabled": true,
+      "layer": 1,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": -10.0,
+          "y": 27.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 8.0,
+          "height": 6.0,
+          "radius": null,
+          "fill": [
+            0.1,
+            0.15,
+            0.21,
+            1.0
+          ],
+          "outline": [
+            0.28,
+            0.52,
+            0.62,
+            1
+          ],
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        },
+        {
+          "type": "collider",
+          "enabled": true,
+          "shape": "rectangle",
+          "width": 8.0,
+          "height": 6.0,
+          "radius": null,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "solid": true,
+          "trigger": false,
+          "layer": 16,
+          "mask": 1
+        }
+      ],
+      "tags": [
+        "obstacle"
+      ]
+    },
+    {
+      "entity_id": "0dced3fa-7d66-460b-8f5d-a952de462d44",
+      "name": "Northwing Barrier 2 Stripe",
+      "enabled": true,
+      "layer": 2,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": -10.0,
+          "y": 27.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 6.4,
+          "height": 0.6,
+          "radius": null,
+          "fill": [
+            0.85,
+            0.62,
+            0.1,
+            0.9
+          ],
+          "outline": null,
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "decoration"
+      ]
+    },
+    {
+      "entity_id": "8b934295-04a6-4d40-b8da-7f742a69ed19",
+      "name": "Northwing Barrier 3 Shadow",
+      "enabled": true,
+      "layer": 0,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 16.4,
+          "y": 25.6,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 11.0,
+          "height": 5.0,
+          "radius": null,
+          "fill": [
+            0.0,
+            0.0,
+            0.0,
+            0.35
+          ],
+          "outline": null,
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "decoration"
+      ]
+    },
+    {
+      "entity_id": "e91aa884-a373-4bd2-af0c-b99f98df625a",
+      "name": "Northwing Barrier 3",
+      "enabled": true,
+      "layer": 1,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 16.0,
+          "y": 26.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 11.0,
+          "height": 5.0,
+          "radius": null,
+          "fill": [
+            0.1,
+            0.15,
+            0.21,
+            1.0
+          ],
+          "outline": [
+            0.28,
+            0.52,
+            0.62,
+            1
+          ],
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        },
+        {
+          "type": "collider",
+          "enabled": true,
+          "shape": "rectangle",
+          "width": 11.0,
+          "height": 5.0,
+          "radius": null,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "solid": true,
+          "trigger": false,
+          "layer": 16,
+          "mask": 1
+        }
+      ],
+      "tags": [
+        "obstacle"
+      ]
+    },
+    {
+      "entity_id": "d6e1fb80-6909-4242-a807-0da4ef6b86d6",
+      "name": "Northwing Barrier 3 Stripe",
+      "enabled": true,
+      "layer": 2,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 16.0,
+          "y": 26.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 8.8,
+          "height": 0.6,
+          "radius": null,
+          "fill": [
+            0.85,
+            0.62,
+            0.1,
+            0.9
+          ],
+          "outline": null,
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "decoration"
+      ]
+    },
+    {
+      "entity_id": "85af14c8-ed37-4e8f-8325-ab89e91af4c7",
+      "name": "Northwing Barrier 4 Shadow",
+      "enabled": true,
+      "layer": 0,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 40.4,
+          "y": 26.6,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 7.0,
+          "height": 7.0,
+          "radius": null,
+          "fill": [
+            0.0,
+            0.0,
+            0.0,
+            0.35
+          ],
+          "outline": null,
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "decoration"
+      ]
+    },
+    {
+      "entity_id": "95eec379-878f-4f49-9df3-4bc5a4c9cf91",
+      "name": "Northwing Barrier 4",
+      "enabled": true,
+      "layer": 1,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 40.0,
+          "y": 27.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 7.0,
+          "height": 7.0,
+          "radius": null,
+          "fill": [
+            0.1,
+            0.15,
+            0.21,
+            1.0
+          ],
+          "outline": [
+            0.28,
+            0.52,
+            0.62,
+            1
+          ],
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        },
+        {
+          "type": "collider",
+          "enabled": true,
+          "shape": "rectangle",
+          "width": 7.0,
+          "height": 7.0,
+          "radius": null,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "solid": true,
+          "trigger": false,
+          "layer": 16,
+          "mask": 1
+        }
+      ],
+      "tags": [
+        "obstacle"
+      ]
+    },
+    {
+      "entity_id": "69bf4028-b3b0-4ad5-be72-ef57a0224b4f",
+      "name": "Northwing Barrier 4 Stripe",
+      "enabled": true,
+      "layer": 2,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 40.0,
+          "y": 27.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 5.6000000000000005,
+          "height": 0.6,
+          "radius": null,
+          "fill": [
+            0.85,
+            0.62,
+            0.1,
+            0.9
+          ],
+          "outline": null,
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "decoration"
+      ]
+    },
+    {
+      "entity_id": "07e88fcf-25f8-41a5-b6f5-781bdd78e6cc",
+      "name": "Southwing Barrier 1 Shadow",
+      "enabled": true,
+      "layer": 0,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": -33.6,
+          "y": -26.4,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 9.0,
+          "height": 5.0,
+          "radius": null,
+          "fill": [
+            0.0,
+            0.0,
+            0.0,
+            0.35
+          ],
+          "outline": null,
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "decoration"
+      ]
+    },
+    {
+      "entity_id": "5f62850c-fb9a-4bb9-bf57-b99c36769f8c",
+      "name": "Southwing Barrier 1",
+      "enabled": true,
+      "layer": 1,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": -34.0,
+          "y": -26.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 9.0,
+          "height": 5.0,
+          "radius": null,
+          "fill": [
+            0.1,
+            0.15,
+            0.21,
+            1.0
+          ],
+          "outline": [
+            0.28,
+            0.52,
+            0.62,
+            1
+          ],
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        },
+        {
+          "type": "collider",
+          "enabled": true,
+          "shape": "rectangle",
+          "width": 9.0,
+          "height": 5.0,
+          "radius": null,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "solid": true,
+          "trigger": false,
+          "layer": 16,
+          "mask": 1
+        }
+      ],
+      "tags": [
+        "obstacle"
+      ]
+    },
+    {
+      "entity_id": "5463010e-8c2c-4ce3-a245-469362911dda",
+      "name": "Southwing Barrier 1 Stripe",
+      "enabled": true,
+      "layer": 2,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": -34.0,
+          "y": -26.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 7.2,
+          "height": 0.6,
+          "radius": null,
+          "fill": [
+            0.85,
+            0.62,
+            0.1,
+            0.9
+          ],
+          "outline": null,
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "decoration"
+      ]
+    },
+    {
+      "entity_id": "fb93f7cc-0c22-43aa-93f3-fcde829ab8c9",
+      "name": "Southwing Barrier 2 Shadow",
+      "enabled": true,
+      "layer": 0,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": -3.6,
+          "y": -27.4,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 9.0,
+          "height": 6.0,
+          "radius": null,
+          "fill": [
+            0.0,
+            0.0,
+            0.0,
+            0.35
+          ],
+          "outline": null,
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "decoration"
+      ]
+    },
+    {
+      "entity_id": "7f0bed90-4a87-4b76-b5ed-29288a7e08b6",
+      "name": "Southwing Barrier 2",
+      "enabled": true,
+      "layer": 1,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": -4.0,
+          "y": -27.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 9.0,
+          "height": 6.0,
+          "radius": null,
+          "fill": [
+            0.1,
+            0.15,
+            0.21,
+            1.0
+          ],
+          "outline": [
+            0.28,
+            0.52,
+            0.62,
+            1
+          ],
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        },
+        {
+          "type": "collider",
+          "enabled": true,
+          "shape": "rectangle",
+          "width": 9.0,
+          "height": 6.0,
+          "radius": null,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "solid": true,
+          "trigger": false,
+          "layer": 16,
+          "mask": 1
+        }
+      ],
+      "tags": [
+        "obstacle"
+      ]
+    },
+    {
+      "entity_id": "95606de5-c63c-404e-9c6d-3689bf3aa74b",
+      "name": "Southwing Barrier 2 Stripe",
+      "enabled": true,
+      "layer": 2,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": -4.0,
+          "y": -27.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 7.2,
+          "height": 0.6,
+          "radius": null,
+          "fill": [
+            0.85,
+            0.62,
+            0.1,
+            0.9
+          ],
+          "outline": null,
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "decoration"
+      ]
+    },
+    {
+      "entity_id": "460d919d-de5f-485c-abc4-6ad0accf0d99",
+      "name": "Southwing Barrier 3 Shadow",
+      "enabled": true,
+      "layer": 0,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 22.4,
+          "y": -26.4,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 10.0,
+          "height": 5.0,
+          "radius": null,
+          "fill": [
+            0.0,
+            0.0,
+            0.0,
+            0.35
+          ],
+          "outline": null,
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "decoration"
+      ]
+    },
+    {
+      "entity_id": "bb7d8a83-da9f-4682-8027-322255d258fa",
+      "name": "Southwing Barrier 3",
+      "enabled": true,
+      "layer": 1,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 22.0,
+          "y": -26.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 10.0,
+          "height": 5.0,
+          "radius": null,
+          "fill": [
+            0.1,
+            0.15,
+            0.21,
+            1.0
+          ],
+          "outline": [
+            0.28,
+            0.52,
+            0.62,
+            1
+          ],
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        },
+        {
+          "type": "collider",
+          "enabled": true,
+          "shape": "rectangle",
+          "width": 10.0,
+          "height": 5.0,
+          "radius": null,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "solid": true,
+          "trigger": false,
+          "layer": 16,
+          "mask": 1
+        }
+      ],
+      "tags": [
+        "obstacle"
+      ]
+    },
+    {
+      "entity_id": "993bc790-95cf-4b57-87f1-04f366095de2",
+      "name": "Southwing Barrier 3 Stripe",
+      "enabled": true,
+      "layer": 2,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 22.0,
+          "y": -26.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 8.0,
+          "height": 0.6,
+          "radius": null,
+          "fill": [
+            0.85,
+            0.62,
+            0.1,
+            0.9
+          ],
+          "outline": null,
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "decoration"
+      ]
+    },
+    {
+      "entity_id": "a39f9011-0dde-487f-b713-73c17c90bef1",
+      "name": "Lane Light 6",
+      "enabled": true,
+      "layer": -30,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": -38.0,
+          "y": 8.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 16.0,
+          "height": 0.45,
+          "radius": null,
+          "fill": [
+            0.05,
+            0.42,
+            0.52,
+            0.55
+          ],
+          "outline": null,
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "decoration"
+      ]
+    },
+    {
+      "entity_id": "0ad7e14a-57d3-49c1-95f6-b782fd571540",
+      "name": "Lane Light 7",
+      "enabled": true,
+      "layer": -30,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 38.0,
+          "y": 8.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 16.0,
+          "height": 0.45,
+          "radius": null,
+          "fill": [
+            0.05,
+            0.42,
+            0.52,
+            0.55
+          ],
+          "outline": null,
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "decoration"
+      ]
+    },
+    {
+      "entity_id": "a28e7e83-06ec-47f9-bff5-75c5f27eb3a3",
+      "name": "Lane Light 8",
+      "enabled": true,
+      "layer": -30,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": -38.0,
+          "y": -8.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 16.0,
+          "height": 0.45,
+          "radius": null,
+          "fill": [
+            0.05,
+            0.42,
+            0.52,
+            0.55
+          ],
+          "outline": null,
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "decoration"
+      ]
+    },
+    {
+      "entity_id": "d0f1d863-236e-4828-9d68-40a8a842940e",
+      "name": "Lane Light 9",
+      "enabled": true,
+      "layer": -30,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 38.0,
+          "y": -8.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 16.0,
+          "height": 0.45,
+          "radius": null,
+          "fill": [
+            0.05,
+            0.42,
+            0.52,
+            0.55
+          ],
+          "outline": null,
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "decoration"
+      ]
+    },
+    {
+      "entity_id": "851f2189-5965-41db-aaa9-7153a7176dc0",
+      "name": "Lane Light 10",
+      "enabled": true,
+      "layer": -30,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 0.0,
+          "y": 22.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 26.0,
+          "height": 0.35,
+          "radius": null,
+          "fill": [
+            0.05,
+            0.42,
+            0.52,
+            0.55
+          ],
+          "outline": null,
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "decoration"
+      ]
+    },
+    {
+      "entity_id": "5f06b2ea-5cac-4106-8e15-92af091b7b3f",
+      "name": "Lane Light 11",
+      "enabled": true,
+      "layer": -30,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 0.0,
+          "y": -22.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "primitive",
+          "enabled": true,
+          "kind": "rectangle",
+          "width": 26.0,
+          "height": 0.35,
+          "radius": null,
+          "fill": [
+            0.05,
+            0.42,
+            0.52,
+            0.55
+          ],
+          "outline": null,
+          "outline_width": 0.0,
+          "layer": 0,
+          "visible": true
+        }
+      ],
+      "tags": [
+        "decoration"
+      ]
+    },
+    {
+      "entity_id": "e2d5124f-d3df-4e70-83bd-62a4a9755bb1",
+      "name": "Security Drone 6",
+      "enabled": true,
+      "layer": 9,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": -38.0,
+          "y": 20.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "sprite",
+          "enabled": true,
+          "asset": "assets://kenney/zombie.png",
+          "tint": [
+            1.0,
+            0.58,
+            0.64,
+            1.0
+          ],
+          "width": 3.5,
+          "height": 4.4,
+          "region": null,
+          "centered": true,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "flip_h": false,
+          "flip_v": false,
+          "layer": 0,
+          "visible": true
+        },
+        {
+          "type": "collider",
+          "enabled": true,
+          "shape": "circle",
+          "width": 2.8,
+          "height": 2.8,
+          "radius": 1.4,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "solid": true,
+          "trigger": false,
+          "layer": 2,
+          "mask": 1
+        }
+      ],
+      "tags": [
+        "enemy",
+        "enemy_start"
+      ]
+    },
+    {
+      "entity_id": "2cb9ccb1-db78-4556-a6a1-ad7d0f5e7756",
+      "name": "Security Drone 7",
+      "enabled": true,
+      "layer": 9,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 38.0,
+          "y": -20.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "sprite",
+          "enabled": true,
+          "asset": "assets://kenney/zombie.png",
+          "tint": [
+            1.0,
+            0.58,
+            0.64,
+            1.0
+          ],
+          "width": 3.5,
+          "height": 4.4,
+          "region": null,
+          "centered": true,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "flip_h": false,
+          "flip_v": false,
+          "layer": 0,
+          "visible": true
+        },
+        {
+          "type": "collider",
+          "enabled": true,
+          "shape": "circle",
+          "width": 2.8,
+          "height": 2.8,
+          "radius": 1.4,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "solid": true,
+          "trigger": false,
+          "layer": 2,
+          "mask": 1
+        }
+      ],
+      "tags": [
+        "enemy",
+        "enemy_start"
+      ]
+    },
+    {
+      "entity_id": "c3f42c8e-0937-4d4a-aa07-fc845a0f94d5",
+      "name": "Security Drone 8",
+      "enabled": false,
+      "layer": 9,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": -45.0,
+          "y": 0.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "sprite",
+          "enabled": true,
+          "asset": "assets://kenney/zombie.png",
+          "tint": [
+            1.0,
+            0.58,
+            0.64,
+            1.0
+          ],
+          "width": 3.5,
+          "height": 4.4,
+          "region": null,
+          "centered": true,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "flip_h": false,
+          "flip_v": false,
+          "layer": 0,
+          "visible": true
+        },
+        {
+          "type": "collider",
+          "enabled": true,
+          "shape": "circle",
+          "width": 2.8,
+          "height": 2.8,
+          "radius": 1.4,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "solid": true,
+          "trigger": false,
+          "layer": 2,
+          "mask": 1
+        }
+      ],
+      "tags": [
+        "enemy",
+        "enemy_reserve"
+      ]
+    },
+    {
+      "entity_id": "7993186e-2677-4695-ad10-54f1a8857164",
+      "name": "Security Drone 9",
+      "enabled": false,
+      "layer": 9,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 45.0,
+          "y": 0.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "sprite",
+          "enabled": true,
+          "asset": "assets://kenney/zombie.png",
+          "tint": [
+            1.0,
+            0.58,
+            0.64,
+            1.0
+          ],
+          "width": 3.5,
+          "height": 4.4,
+          "region": null,
+          "centered": true,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "flip_h": false,
+          "flip_v": false,
+          "layer": 0,
+          "visible": true
+        },
+        {
+          "type": "collider",
+          "enabled": true,
+          "shape": "circle",
+          "width": 2.8,
+          "height": 2.8,
+          "radius": 1.4,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "solid": true,
+          "trigger": false,
+          "layer": 2,
+          "mask": 1
+        }
+      ],
+      "tags": [
+        "enemy",
+        "enemy_reserve"
+      ]
+    },
+    {
+      "entity_id": "ec7c1391-65ae-4a26-b189-0e32ff748239",
+      "name": "Security Drone 10",
+      "enabled": false,
+      "layer": 9,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 0.0,
+          "y": 28.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "sprite",
+          "enabled": true,
+          "asset": "assets://kenney/zombie.png",
+          "tint": [
+            1.0,
+            0.58,
+            0.64,
+            1.0
+          ],
+          "width": 3.5,
+          "height": 4.4,
+          "region": null,
+          "centered": true,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "flip_h": false,
+          "flip_v": false,
+          "layer": 0,
+          "visible": true
+        },
+        {
+          "type": "collider",
+          "enabled": true,
+          "shape": "circle",
+          "width": 2.8,
+          "height": 2.8,
+          "radius": 1.4,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "solid": true,
+          "trigger": false,
+          "layer": 2,
+          "mask": 1
+        }
+      ],
+      "tags": [
+        "enemy",
+        "enemy_reserve"
+      ]
+    }
+  ],
+  "camera": {
+    "position": [
+      0.0,
+      0.0
+    ],
+    "width": 124.5
+  }
+}

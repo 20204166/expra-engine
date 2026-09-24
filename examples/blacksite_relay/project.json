@@ -3,7 +3,8 @@
   "name": "Blacksite Relay",
   "game_version": "1.0.0",
   "scenes": [
-    "scenes/main.json"
+    "scenes/main.json",
+    "scenes/level_02_deepcore.json"
   ],
   "start_scene": "scenes/main.json",
   "input": {
