@@ -12,6 +12,7 @@ import unittest
 from typing import Any
 
 from expra_engine.coordinators.ui_coordinator import RenderIntent, UICoordinator
+from expra_engine.observability import ObservabilityWatcher
 
 
 class TestUICoordinatorStaleRejection(unittest.TestCase):
@@ -186,8 +187,6 @@ class TestUICoordinatorObserver(unittest.TestCase):
     """Observer must record commits, coalesced, stale, and rejected events."""
 
     def test_commit_is_recorded_by_shared_observer(self) -> None:
-        from expra_engine.observability import ObservabilityWatcher
-
         observer = ObservabilityWatcher()
         coord = UICoordinator(observer=observer)
         coord.request(RenderIntent("hierarchy"), lambda _: None)
@@ -196,8 +195,6 @@ class TestUICoordinatorObserver(unittest.TestCase):
         self.assertEqual(metric.successes, 1)
 
     def test_coalesced_stale_and_rejected_events_all_observed(self) -> None:
-        from expra_engine.observability import ObservabilityWatcher
-
         observer = ObservabilityWatcher()
         coord = UICoordinator(observer=observer)
         # Coalesced: two requests inside a batch → one commit
@@ -421,7 +418,7 @@ class TestUICoordinatorTransitions(unittest.TestCase):
         self.assertEqual(len(scheduled), 2)
 
     def test_cancel_transition_cancels_the_timer(self) -> None:
-        coord, scheduled, cancelled = self._make()
+        coord, _scheduled, cancelled = self._make()
         coord.schedule_transition("status", 200, lambda: None)
         coord.cancel_transition("status")
         self.assertEqual(len(cancelled), 1)

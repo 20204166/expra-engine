@@ -9,7 +9,6 @@ metric cardinality/token lifetime stay bounded under sustained load.
 from __future__ import annotations
 
 import threading
-import tkinter as tk
 import unittest
 from typing import Any
 
@@ -36,18 +35,9 @@ from expra_engine.runtime.events import Update
 from expra_engine.runtime.physics_world import PhysicsWorld2D
 from expra_engine.runtime.pygame_resource_provider import PygameResourceProvider
 from expra_engine.ui.viewport_render_target import build_editor_render_target
+from tests.support.tk_display import display_available
 
-
-def _display_available() -> bool:
-    try:
-        root = tk.Tk()
-    except tk.TclError:
-        return False
-    root.destroy()
-    return True
-
-
-DISPLAY_AVAILABLE = _display_available()
+DISPLAY_AVAILABLE = display_available()
 
 
 def _frames() -> SpriteFrames2D:

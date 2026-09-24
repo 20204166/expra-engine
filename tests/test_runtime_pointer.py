@@ -89,8 +89,6 @@ class PointerTrackerEdgeTests(unittest.TestCase):
         self.assertEqual(tracker.held, frozenset({"secondary"}))
 
     def test_pointer_exits_while_pressed_does_not_lose_capture(self) -> None:
-        from expra_engine.runtime.pointer import PointerTracker
-
         t = PointerTracker()
         t.move((50.0, 50.0), target="widget", timestamp=0.0)
         t.press(timestamp=0.1)
@@ -101,8 +99,6 @@ class PointerTrackerEdgeTests(unittest.TestCase):
         self.assertTrue(t.held)
 
     def test_drop_event_on_release_after_drag(self) -> None:
-        from expra_engine.runtime.pointer import PointerTracker
-
         t = PointerTracker()
         t.move((0.0, 0.0), target="src", timestamp=0.0)
         t.press(timestamp=0.1)
@@ -113,8 +109,6 @@ class PointerTrackerEdgeTests(unittest.TestCase):
         self.assertIn("drop", kinds)
 
     def test_click_on_different_target_does_not_double_click(self) -> None:
-        from expra_engine.runtime.pointer import PointerTracker
-
         t = PointerTracker(double_click_interval=1.0)
         t.move((0.0, 0.0), target="a", timestamp=0.0)
         t.press(timestamp=0.1)
@@ -126,8 +120,6 @@ class PointerTrackerEdgeTests(unittest.TestCase):
         self.assertNotIn("double_click", kinds2)
 
     def test_focus_lost_clears_all_state(self) -> None:
-        from expra_engine.runtime.pointer import PointerTracker
-
         t = PointerTracker()
         t.move((5.0, 5.0), target="w", timestamp=0.0)
         t.press(timestamp=0.1)
@@ -137,8 +129,6 @@ class PointerTrackerEdgeTests(unittest.TestCase):
         self.assertFalse(t.dragging)
 
     def test_double_click_interval_expired(self) -> None:
-        from expra_engine.runtime.pointer import PointerTracker
-
         t = PointerTracker(double_click_interval=0.3)
         t.move((0.0, 0.0), target="btn", timestamp=0.0)
         t.press(timestamp=0.1)

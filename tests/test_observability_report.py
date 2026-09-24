@@ -8,10 +8,12 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "tools"))
 
-from observability_report import analyze, analyze_snapshot, main  # noqa: E402
+from observability_report import _metric_findings, analyze, analyze_snapshot, main  # noqa: E402
 
 
 def _write_snapshot(path: Path, metrics: list[dict[str, object]]) -> Path:
@@ -78,7 +80,9 @@ def test_slow_stage_over_60fps_budget_is_flagged_info() -> None:
 def test_slow_stage_over_30fps_budget_is_flagged_warning() -> None:
     metric = _metric("editor.pixelbridge.photoimage", p95=0.040, maximum=0.045)
     findings = _findings_for(metric)
-    assert any(f["code"] == "stage_over_30fps_budget" and f["severity"] == "warning" for f in findings)
+    assert any(
+        f["code"] == "stage_over_30fps_budget" and f["severity"] == "warning" for f in findings
+    )
 
 
 def test_outlier_spike_is_flagged() -> None:
@@ -121,8 +125,6 @@ def test_analyze_aggregates_findings_across_files_deterministically(tmp_path: Pa
 
 
 def test_missing_file_raises_value_error(tmp_path: Path) -> None:
-    import pytest
-
     with pytest.raises(ValueError, match="not found"):
         analyze([str(tmp_path / "does-not-exist.json")])
 
@@ -144,6 +146,4 @@ def test_cli_json_output_is_valid_json(tmp_path: Path, capsys) -> None:
 
 
 def _findings_for(metric: dict[str, object]) -> list[dict[str, str]]:
-    from observability_report import _metric_findings
-
     return _metric_findings(metric)

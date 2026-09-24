@@ -1,6 +1,7 @@
 """Tests for editor.persistence — atomic filesystem helpers."""
 
 import contextlib
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -14,16 +15,12 @@ class ReadTextOrNoneTests(unittest.TestCase):
         self.assertIsNone(result)
 
     def test_returns_content_for_existing_file(self, tmp_path: Path | None = None) -> None:
-        import tempfile
-
         with tempfile.TemporaryDirectory() as d:
             p = Path(d) / "test.txt"
             p.write_text("hello world", encoding="utf-8")
             self.assertEqual(read_text_or_none(p), "hello world")
 
     def test_returns_none_for_unreadable_unicode(self) -> None:
-        import tempfile
-
         with tempfile.TemporaryDirectory() as d:
             p = Path(d) / "bad.txt"
             p.write_bytes(b"\xff\xfe invalid utf-8 \x80")
@@ -36,16 +33,12 @@ class ReadTextOrNoneTests(unittest.TestCase):
 
 class AtomicWriteTextTests(unittest.TestCase):
     def test_creates_file_with_correct_content(self) -> None:
-        import tempfile
-
         with tempfile.TemporaryDirectory() as d:
             p = Path(d) / "out.json"
             atomic_write_text(p, '{"key": "value"}')
             self.assertEqual(p.read_text(encoding="utf-8"), '{"key": "value"}')
 
     def test_replaces_existing_file(self) -> None:
-        import tempfile
-
         with tempfile.TemporaryDirectory() as d:
             p = Path(d) / "out.txt"
             p.write_text("old content", encoding="utf-8")
@@ -53,16 +46,12 @@ class AtomicWriteTextTests(unittest.TestCase):
             self.assertEqual(p.read_text(encoding="utf-8"), "new content")
 
     def test_creates_parent_directories(self) -> None:
-        import tempfile
-
         with tempfile.TemporaryDirectory() as d:
             p = Path(d) / "a" / "b" / "c" / "out.txt"
             atomic_write_text(p, "nested")
             self.assertEqual(p.read_text(encoding="utf-8"), "nested")
 
     def test_original_preserved_when_write_fails(self) -> None:
-        import tempfile
-
         with tempfile.TemporaryDirectory() as d:
             p = Path(d) / "out.txt"
             p.write_text("original", encoding="utf-8")
@@ -80,14 +69,11 @@ class AtomicWriteTextTests(unittest.TestCase):
             self.assertIn(content, ("original", "updated"))
 
     def test_raises_oserror_when_directory_creation_fails(self) -> None:
-        with self.assertRaises(OSError):
-            # Write to a path whose parent cannot be created (file exists as parent)
-            import tempfile
-
-            with tempfile.TemporaryDirectory() as d:
-                file_as_dir = Path(d) / "file_not_dir"
-                file_as_dir.write_text("blocking", encoding="utf-8")
-                atomic_write_text(file_as_dir / "sub" / "out.txt", "data")
+        # Write to a path whose parent cannot be created (file exists as parent)
+        with self.assertRaises(OSError), tempfile.TemporaryDirectory() as d:
+            file_as_dir = Path(d) / "file_not_dir"
+            file_as_dir.write_text("blocking", encoding="utf-8")
+            atomic_write_text(file_as_dir / "sub" / "out.txt", "data")
 
 
 if __name__ == "__main__":

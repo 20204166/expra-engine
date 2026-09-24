@@ -58,6 +58,13 @@ class TestAssetManifest(unittest.TestCase):
         self.assertNotIn("art.psd", paths)
         self.assertIn("sprite.png", paths)
 
+    def test_excludes_blend_suffix(self) -> None:
+        self._create_files("model.blend", "sprite.png")
+        manifest = AssetManifest.collect(self._tmp)
+        paths = {e.path for e in manifest.entries}
+        self.assertNotIn("model.blend", paths)
+        self.assertIn("sprite.png", paths)
+
     def test_extra_exclude_patterns(self) -> None:
         self._create_files("keep.txt", "skip.txt")
         manifest = AssetManifest.collect(self._tmp, extra_exclude_patterns=frozenset({"skip.txt"}))

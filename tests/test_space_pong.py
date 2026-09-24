@@ -14,20 +14,14 @@ from expra_engine.export.plan import ExportPlan, ExportTarget, PythonArch, Runti
 from expra_engine.runtime.collider import ColliderComponent
 from expra_engine.runtime.render_extractor import extract_render_frame
 from expra_engine.runtime.script_component import ScriptComponent
-from expra_engine.runtime.script_registry import ScriptRegistry
 from expra_engine.runtime.visual_components import PrimitiveComponent, TextComponent
-
+from tests.support.project_engine import load_project_engine
 
 PROJECT_DIR = Path(__file__).parents[1] / "examples" / "space_pong"
 
 
 def _project_engine() -> tuple[Project, Engine]:
-    project = Project.load(PROJECT_DIR)
-    engine = Engine()
-    engine.set_project(project)
-    engine.set_script_registry(ScriptRegistry(project.path))
-    engine.set_scene(project.load_scene())
-    return project, engine
+    return load_project_engine(PROJECT_DIR)
 
 
 def test_space_pong_project_uses_generic_scene_components_and_project_scripts() -> None:

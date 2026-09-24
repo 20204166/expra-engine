@@ -1,7 +1,7 @@
 """Tests for the injected Pygame runtime adapter."""
 
-import unittest
 import sys
+import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -9,17 +9,17 @@ from typing import Any
 from expra_engine.core.component import TransformComponent
 from expra_engine.core.project import Project
 from expra_engine.core.scene import Scene
-from expra_engine.runtime import project_runner
 from expra_engine.runtime import (
+    OrthographicCamera,
     PygameRenderer,
     PygameRuntime,
     RenderContext,
     RenderContractFrame,
     Viewport,
+    project_runner,
 )
 from expra_engine.runtime.pygame_renderer import PygameRenderFrame
-from expra_engine.runtime.pygame_screen_pipeline import PygameScreenSnapshot
-from expra_engine.runtime.pygame_screen_pipeline import PygameScreenPipeline
+from expra_engine.runtime.pygame_screen_pipeline import PygameScreenPipeline, PygameScreenSnapshot
 from expra_engine.runtime.render_pipeline import RenderPlan, RenderPlanBuilder
 from expra_engine.runtime.screen_texture import (
     BackBufferCopyComponent,
@@ -143,8 +143,6 @@ class _FailingStopRenderer(_RecordingRenderer):
 
 class TestPygameRuntime(unittest.TestCase):
     def test_runtime_updates_camera_following_before_render(self) -> None:
-        from expra_engine.runtime import OrthographicCamera
-
         pygame = _FakePygame([[], [SimpleNamespace(type=_FakePygame.QUIT)]])
         camera = OrthographicCamera()
         camera.position_smoothing_enabled = False
@@ -163,15 +161,11 @@ class TestPygameRuntime(unittest.TestCase):
         self.assertEqual(camera.position[:2], (7.0, -3.0))
 
     def test_runtime_rejects_invalid_camera_delta_without_silent_fallback(self) -> None:
-        from expra_engine.runtime import OrthographicCamera
-
         camera = OrthographicCamera()
         with self.assertRaises(ValueError):
             camera.update(-1.0)
 
     def test_runtime_binds_camera_to_scene_entity_and_converts_input(self) -> None:
-        from expra_engine.runtime import OrthographicCamera
-
         scene = Scene("Follow")
         target = scene.create_entity("Target", entity_id="target")
         target.add_component(TransformComponent(x=7.0, y=-3.0))
@@ -193,8 +187,6 @@ class TestPygameRuntime(unittest.TestCase):
         self.assertEqual(runtime.screen_to_world((400.0, 300.0)), (7.0, -3.0))
 
     def test_runtime_applies_persisted_scene_camera_settings_once(self) -> None:
-        from expra_engine.runtime import OrthographicCamera
-
         scene = Scene("Configured")
         scene.camera = {"position": [4.0, 5.0, 2.0], "zoom": 2.0, "rotation": 0.25}
         engine = _FakeEngine()
@@ -298,8 +290,6 @@ class TestPygameRuntime(unittest.TestCase):
         self.assertNotIn("pygame", type(frames[0].payload).__module__.lower())
 
     def test_resize_preserves_the_active_camera(self) -> None:
-        from expra_engine.runtime import OrthographicCamera
-
         pygame = _FakePygame(
             [[SimpleNamespace(type=4, size=(640, 480))], [SimpleNamespace(type=_FakePygame.QUIT)]]
         )

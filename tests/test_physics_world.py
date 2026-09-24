@@ -2,7 +2,7 @@ import math
 
 import pytest
 
-from expra_engine.core.component import component_from_dict
+from expra_engine.core.component import TransformComponent, component_from_dict
 from expra_engine.core.component_schema import component_type_spec
 from expra_engine.core.scene import Scene
 from expra_engine.runtime.collider import ColliderComponent
@@ -16,8 +16,6 @@ def make_scene() -> Scene:
 
 def add_box(scene: Scene, name: str, x: float, y: float, **kwargs):
     entity = scene.create_entity(name)
-    from expra_engine.core.component import TransformComponent
-
     entity.add_component(TransformComponent(x=x, y=y))
     entity.add_component(ColliderComponent(width=2.0, height=2.0, **kwargs))
     return entity

@@ -9,6 +9,7 @@ from expra_engine.runtime import Behaviour
 from expra_engine.runtime.input import (
     ActionEvent,
     ActionId,
+    GamepadAxis,
     InputMap,
     PhysicalInput,
 )
@@ -232,51 +233,35 @@ class InputMapEdgeTests(unittest.TestCase):
 
 class GamepadAxisTests(unittest.TestCase):
     def test_inside_deadzone_is_zero(self) -> None:
-        from expra_engine.runtime.input import GamepadAxis
-
         axis = GamepadAxis(0.05, deadzone=0.1)
         self.assertEqual(axis.apply_deadzone(), 0.0)
 
     def test_at_deadzone_boundary_is_zero(self) -> None:
-        from expra_engine.runtime.input import GamepadAxis
-
         axis = GamepadAxis(0.1, deadzone=0.1)
         self.assertEqual(axis.apply_deadzone(), 0.0)
 
     def test_just_outside_deadzone_nonzero(self) -> None:
-        from expra_engine.runtime.input import GamepadAxis
-
         axis = GamepadAxis(0.11, deadzone=0.1)
         result = axis.apply_deadzone()
         self.assertGreater(result, 0.0)
         self.assertLessEqual(result, 1.0)
 
     def test_negative_axis(self) -> None:
-        from expra_engine.runtime.input import GamepadAxis
-
         axis = GamepadAxis(-0.5, deadzone=0.1)
         self.assertLess(axis.apply_deadzone(), 0.0)
 
     def test_full_deflection_gives_one(self) -> None:
-        from expra_engine.runtime.input import GamepadAxis
-
         axis = GamepadAxis(1.0, deadzone=0.2)
         self.assertAlmostEqual(axis.apply_deadzone(), 1.0)
 
     def test_out_of_range_value_rejected(self) -> None:
-        from expra_engine.runtime.input import GamepadAxis
-
         with self.assertRaises(ValueError):
             GamepadAxis(1.5)
 
     def test_deadzone_one_rejected(self) -> None:
-        from expra_engine.runtime.input import GamepadAxis
-
         with self.assertRaises(ValueError):
             GamepadAxis(0.5, deadzone=1.0)
 
     def test_zero_deadzone_never_suppresses(self) -> None:
-        from expra_engine.runtime.input import GamepadAxis
-
         axis = GamepadAxis(0.001, deadzone=0.0)
         self.assertGreater(axis.apply_deadzone(), 0.0)

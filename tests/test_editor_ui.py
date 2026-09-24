@@ -23,18 +23,9 @@ from expra_engine.ui.hierarchy import HierarchyPanel
 from expra_engine.ui.inspector import InspectorPanel
 from expra_engine.ui.styles import COLORS, configure_app_styles, editor_entity_kind
 from expra_engine.ui.viewport import ViewportPanel
+from tests.support.tk_display import display_available
 
-
-def _display_available() -> bool:
-    try:
-        root = tk.Tk()
-    except tk.TclError:
-        return False
-    root.destroy()
-    return True
-
-
-DISPLAY_AVAILABLE = _display_available()
+DISPLAY_AVAILABLE = display_available()
 
 
 class RuntimePreviewLoopTests(unittest.TestCase):

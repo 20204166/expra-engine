@@ -13,6 +13,7 @@ import unittest
 from typing import Any
 
 from expra_engine.coordinators.app_coordinator import AppCoordinator, CachePolicy
+from expra_engine.observability import ObservabilityWatcher
 from tests.support.scheduling import DeferredRunner, FakeRunner, RecordingDelivery
 
 
@@ -242,8 +243,6 @@ class TestAppCoordinatorObserver(unittest.TestCase):
     """Observer must record lifecycle, coalescing, staleness, and cache hits."""
 
     def _coord_with_observer(self) -> "tuple[Any, Any, list[Any]]":
-        from expra_engine.observability import ObservabilityWatcher
-
         workers: list[Any] = []
         observer = ObservabilityWatcher()
         coord = AppCoordinator(
@@ -262,15 +261,13 @@ class TestAppCoordinatorObserver(unittest.TestCase):
         self.assertEqual(metric.successes, 1)
 
     def test_coalesced_operation_is_observed(self) -> None:
-        coord, observer, workers = self._coord_with_observer()
+        coord, observer, _workers = self._coord_with_observer()
         coord.run("asset-scan", lambda _cancel, _progress: "first")
         self.assertIsNone(coord.run("asset-scan", lambda _cancel, _progress: "rerun"))
         metric = observer.snapshot().metrics[0]
         self.assertEqual(metric.coalesced, 1)
 
     def test_stale_finish_is_observed(self) -> None:
-        from expra_engine.observability import ObservabilityWatcher
-
         observer = ObservabilityWatcher()
         coord = AppCoordinator(observer=observer)
         gen, started = coord.begin("scan")
@@ -280,8 +277,6 @@ class TestAppCoordinatorObserver(unittest.TestCase):
         self.assertEqual(metric.stale, 1)
 
     def test_cache_hit_recorded_without_mutating_cache(self) -> None:
-        from expra_engine.observability import ObservabilityWatcher
-
         observer = ObservabilityWatcher()
         coord = AppCoordinator(observer=observer)
         coord.store("project", "loaded")
@@ -384,9 +379,9 @@ class TestAppCoordinatorResilience(unittest.TestCase):
             lambda _c, _p: "task-b",
             on_result=lambda _k, v: results.append(("b", v)),
         )
-        runner.run()   # complete the cancelled worker → triggers replay
+        runner.run()  # complete the cancelled worker → triggers replay
         self.assertEqual(runner.pending, 1)
-        runner.run()   # execute the replay
+        runner.run()  # execute the replay
         self.assertEqual(results, [("b", "task-b")])
 
     def test_finish_with_none_result_records_error_without_caching(self) -> None:
