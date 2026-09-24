@@ -155,5 +155,30 @@ class TestSceneSerialization(unittest.TestCase):
         self.assertEqual(len(entity.components), 0)
 
 
+class TestSceneWorldPose(unittest.TestCase):
+    def test_missing_entity_raises(self) -> None:
+        scene = Scene("test")
+        with self.assertRaises(KeyError):
+            scene.world_pose("no-such-id")
+
+    def test_no_transform_is_identity(self) -> None:
+        scene = Scene("test")
+        e = scene.create_entity("e")
+        self.assertEqual(scene.world_pose(e.entity_id), (0.0, 0.0, 0.0))
+
+    def test_disabled_transform_is_identity(self) -> None:
+        scene = Scene("test")
+        e = scene.create_entity("e")
+        e.add_component(TransformComponent(x=5.0, enabled=False))
+        self.assertEqual(scene.world_pose(e.entity_id), (0.0, 0.0, 0.0))
+
+    def test_non_finite_transform_raises(self) -> None:
+        scene = Scene("test")
+        e = scene.create_entity("e")
+        e.add_component(TransformComponent(x=float("inf")))
+        with self.assertRaises(ValueError):
+            scene.world_pose(e.entity_id)
+
+
 if __name__ == "__main__":
     unittest.main()

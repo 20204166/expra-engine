@@ -23,6 +23,7 @@ import unittest
 from math import inf, isclose, nan, pi
 
 from expra_engine.core.camera import Camera2D
+from expra_engine.core.math_utils import lerp_exponential_decay
 from expra_engine.core.scene.camera import Camera2D as SceneCamera2D
 
 
@@ -290,6 +291,16 @@ class TestCamera2DFollowing(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             cam.update(1.0)
+
+    def test_position_smoothing_matches_lerp_exponential_decay(self) -> None:
+        cam = self._cam()
+        cam.position_smoothing_enabled = True
+        cam.position_smoothing_speed = 1.0
+        cam.target_position = (10.0, 0.0)
+
+        position = cam.update(1.0)
+
+        self.assertAlmostEqual(position[0], lerp_exponential_decay(0.0, 10.0, 1.0, 1.0))
 
 
 class TestCamera2DZoomOffsetAndRotation(unittest.TestCase):

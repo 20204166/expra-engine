@@ -32,6 +32,8 @@ from __future__ import annotations
 import math
 from copy import deepcopy
 
+from expra_engine.core.math_utils import lerp_exponential_decay
+
 __all__ = ("Camera2D", "SceneCamera")
 
 Vec2 = tuple[float, float]
@@ -487,9 +489,8 @@ class Camera2D:
 
         if self.position_smoothing_enabled and dt > 0.0:
             speed = max(0.0, self._coerce_finite(self.position_smoothing_speed, "position_smoothing_speed"))
-            alpha = 1.0 - math.exp(-speed * dt)
-            x = self._position[0] + (desired[0] - self._position[0]) * alpha
-            y = self._position[1] + (desired[1] - self._position[1]) * alpha
+            x = lerp_exponential_decay(self._position[0], desired[0], dt, speed)
+            y = lerp_exponential_decay(self._position[1], desired[1], dt, speed)
             self._position = self._clamp_position((x, y))
         else:
             self._position = self._clamp_position(desired)

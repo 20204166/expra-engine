@@ -8,6 +8,7 @@ all entity IDs and component state.
 from __future__ import annotations
 
 import contextlib
+import copy
 import math
 import uuid
 from typing import Any
@@ -15,6 +16,14 @@ from typing import Any
 from expra_engine.core.component import TransformComponent
 from expra_engine.core.entity import Entity
 from expra_engine.core.scene.camera import SceneCamera
+
+
+def _clone_components_and_tags(source: Entity, target: Entity) -> None:
+    """Deep-copy *source*'s components and tags into *target*."""
+    for comp in source.components:
+        target.add_component(copy.deepcopy(comp))
+    for tag in source.tags:
+        target.add_tag(tag)
 
 
 class Scene:
@@ -90,8 +99,6 @@ class Scene:
 
         Returns the new root entity, or None when *entity_id* is not found.
         """
-        import copy as _copy
-
         root = self.find_entity(entity_id)
         if root is None:
             return None
@@ -103,10 +110,7 @@ class Scene:
                 layer=root.layer,
                 parent_id=root.parent_id,
             )
-            for comp in root.components:
-                new_root.add_component(_copy.deepcopy(comp))
-            for tag in root.tags:
-                new_root.add_tag(tag)
+            _clone_components_and_tags(root, new_root)
             self.add_entity(new_root)
             return new_root
 
@@ -127,10 +131,7 @@ class Scene:
                 layer=original.layer,
                 parent_id=new_parent_id,
             )
-            for comp in original.components:
-                cloned.add_component(_copy.deepcopy(comp))
-            for tag in original.tags:
-                cloned.add_tag(tag)
+            _clone_components_and_tags(original, cloned)
             self.add_entity(cloned)
 
         return self.find_entity(id_map[entity_id])
@@ -213,10 +214,11 @@ class Scene:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Scene:
+        camera = data.get("camera")
         scene = cls(
             name=str(data["name"]),
             scene_id=str(data["scene_id"]),
-            camera=data.get("camera") if isinstance(data.get("camera"), dict) else None,
+            camera=camera if isinstance(camera, dict) else None,
         )
         for entity_data in data.get("entities", []):
             with contextlib.suppress(KeyError, TypeError):
@@ -328,11 +330,9 @@ class Scene:
             raise TypeError(
                 "get_entities() requires at least 'tag' or 'component' keyword argument"
             )
-        candidates: set[Entity] | None = None
-        if tag is not None:
-            candidates = {e for e in self._entities if e.has_tag(tag)}
-        if component is not None:
-            by_comp = {e for e in self._entities if e.get_component(component) is not None}
-            candidates = by_comp if candidates is None else candidates & by_comp
-        assert candidates is not None
-        return tuple(e for e in self._entities if e in candidates)
+        return tuple(
+            e
+            for e in self._entities
+            if (tag is None or e.has_tag(tag))
+            and (component is None or e.get_component(component) is not None)
+        )
