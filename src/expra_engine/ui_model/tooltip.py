@@ -6,6 +6,11 @@ import math
 from dataclasses import dataclass, field
 
 
+def _require_finite_non_negative(value: float, name: str) -> None:
+    if not math.isfinite(value) or value < 0.0:
+        raise ValueError(f"{name} must be finite and non-negative")
+
+
 @dataclass
 class TooltipState:
     text: str = ""
@@ -14,16 +19,14 @@ class TooltipState:
     visible: bool = field(default=False, init=False)
 
     def __post_init__(self) -> None:
-        if not math.isfinite(self.delay) or self.delay < 0.0:
-            raise ValueError("delay must be finite and non-negative")
+        _require_finite_non_negative(self.delay, "delay")
 
     def start(self) -> None:
         self._elapsed = 0.0
         self.visible = False
 
     def update(self, dt: float) -> None:
-        if not math.isfinite(dt) or dt < 0.0:
-            raise ValueError("dt must be finite and non-negative")
+        _require_finite_non_negative(dt, "dt")
         if not self.text:
             self.visible = False
             return

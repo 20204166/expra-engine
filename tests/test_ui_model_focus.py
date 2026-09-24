@@ -38,6 +38,32 @@ class TestFocusOrder(unittest.TestCase):
         self.assertEqual(wrapping.next("b"), "a")
         self.assertEqual(wrapping.previous("a"), "b")
 
+    def test_duplicate_keys_raise(self) -> None:
+        with self.assertRaises(ValueError):
+            FocusOrder((FocusEntry("a"), FocusEntry("a")))
+
+    def test_empty_key_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            FocusOrder((FocusEntry(""),))
+
+    def test_empty_entries_returns_none(self) -> None:
+        order = FocusOrder(())
+
+        self.assertIsNone(order.next())
+        self.assertIsNone(order.previous())
+
+    def test_stale_current_key_falls_back_to_an_end(self) -> None:
+        order = FocusOrder((FocusEntry("a"), FocusEntry("b"), FocusEntry("c")))
+
+        self.assertEqual(order.next("removed"), "a")
+        self.assertEqual(order.previous("removed"), "c")
+
+    def test_single_entry_wrapping_order_stays_put(self) -> None:
+        order = FocusOrder((FocusEntry("a"),), wrap=True)
+
+        self.assertEqual(order.next("a"), "a")
+        self.assertEqual(order.previous("a"), "a")
+
     def test_wrapping_order_with_no_focusable_entries_returns_none(self) -> None:
         order = FocusOrder((FocusEntry("disabled", enabled=False),), wrap=True)
         result: list[str | None] = []

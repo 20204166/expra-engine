@@ -34,6 +34,36 @@ class ButtonGroupTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             group.deselect("Z")
 
+    def test_duplicate_options_raise(self) -> None:
+        with self.assertRaises(ValueError):
+            ButtonGroupState(["A", "A"])
+
+    def test_negative_min_or_max_selection_raise(self) -> None:
+        with self.assertRaises(ValueError):
+            ButtonGroupState(["A", "B"], min_selection=-1)
+        with self.assertRaises(ValueError):
+            ButtonGroupState(["A", "B"], max_selection=-1)
+
+    def test_max_selection_below_min_selection_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            ButtonGroupState(["A", "B", "C"], min_selection=2, max_selection=1)
+
+    def test_reselecting_selected_option_is_a_no_op(self) -> None:
+        group = ButtonGroupState(["A", "B", "C"], max_selection=2)
+        group.select("B")
+        before = group.selected
+        group.select("B")
+        self.assertEqual(group.selected, before)
+
+    def test_eviction_follows_declared_option_order_not_selection_order(self) -> None:
+        # Selecting D before A still evicts A first, since A is declared
+        # before D even though it was selected second.
+        group = ButtonGroupState(["A", "B", "C", "D"], min_selection=0, max_selection=2)
+        group.select("D")
+        group.select("A")
+        group.select("B")
+        self.assertEqual(group.selected, frozenset({"D", "B"}))
+
 
 if __name__ == "__main__":
     unittest.main()

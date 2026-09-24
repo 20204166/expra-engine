@@ -107,6 +107,10 @@ def _finite(value: float, name: str) -> float:
     return result
 
 
+def _clamp(value: float, minimum: float, maximum: float) -> float:
+    return min(maximum, max(minimum, value))
+
+
 @dataclass
 class Slider:
     """A stepped numeric value with separate live and committed updates."""
@@ -131,9 +135,9 @@ class Slider:
         self.committed_value = self.value
 
     def _snap(self, value: float) -> float:
-        bounded = min(self.maximum, max(self.minimum, _finite(value, "value")))
+        bounded = _clamp(_finite(value, "value"), self.minimum, self.maximum)
         steps = round((bounded - self.minimum) / self.step)
-        return min(self.maximum, max(self.minimum, self.minimum + steps * self.step))
+        return _clamp(self.minimum + steps * self.step, self.minimum, self.maximum)
 
     def live_change(self, value: float) -> StateChange[float]:
         old = self.value
@@ -177,7 +181,7 @@ class SelectionGroup:
             self.members
         ):
             raise ValueError("selected members must be unique members")
-        if not len(self.selected) >= self.minimum or len(self.selected) > maximum:
+        if len(self.selected) < self.minimum or len(self.selected) > maximum:
             raise ValueError("initial selection violates selection constraints")
         if not set(self.disabled) <= set(self.members):
             raise ValueError("disabled members must be members of the group")
@@ -229,7 +233,7 @@ class Progress:
         self.maximum = _finite(self.maximum, "maximum")
         if self.minimum > self.maximum:
             raise ValueError("minimum must not exceed maximum")
-        self.value = min(self.maximum, max(self.minimum, _finite(self.value, "value")))
+        self.value = _clamp(_finite(self.value, "value"), self.minimum, self.maximum)
         self.segments = tuple(self.segments)
         for segment in self.segments:
             start = _finite(segment.start, "segment start")

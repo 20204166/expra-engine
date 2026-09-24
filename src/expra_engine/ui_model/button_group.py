@@ -34,6 +34,8 @@ class ButtonGroupState:
         if option in self._selected:
             return
         if self.max_selection and len(self._selected) >= self.max_selection:
+            # Eviction follows declared option order, not selection/insertion
+            # order: the first selected member in `options` order is dropped.
             oldest = next(item for item in self.options if item in self._selected)
             self._selected.remove(oldest)
         self._selected.add(option)

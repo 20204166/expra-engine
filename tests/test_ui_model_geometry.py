@@ -6,6 +6,54 @@ from dataclasses import FrozenInstanceError
 from expra_engine.ui_model.geometry import Insets, Rect, RectTransform
 
 
+class TestRectValidation(unittest.TestCase):
+    def test_negative_width_is_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            Rect(0.0, 0.0, -1.0, 5.0)
+
+    def test_negative_height_is_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            Rect(0.0, 0.0, 5.0, -1.0)
+
+    def test_non_finite_values_are_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            Rect(float("nan"), 0.0, 1.0, 1.0)
+        with self.assertRaises(ValueError):
+            Rect(0.0, float("inf"), 1.0, 1.0)
+
+    def test_zero_size_rect_is_allowed(self) -> None:
+        rect = Rect(0.0, 0.0, 0.0, 0.0)
+        self.assertEqual((rect.width, rect.height), (0.0, 0.0))
+
+    def test_rect_is_immutable(self) -> None:
+        rect = Rect(0.0, 0.0, 1.0, 1.0)
+        with self.assertRaises(FrozenInstanceError):
+            rect.x = 5.0  # type: ignore[misc]
+
+
+class TestInsetsValidation(unittest.TestCase):
+    def test_negative_inset_on_any_edge_is_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            Insets(left=-1.0)
+        with self.assertRaises(ValueError):
+            Insets(top=-1.0)
+        with self.assertRaises(ValueError):
+            Insets(right=-1.0)
+        with self.assertRaises(ValueError):
+            Insets(bottom=-1.0)
+
+    def test_default_insets_are_zero(self) -> None:
+        insets = Insets()
+        self.assertEqual(
+            (insets.left, insets.top, insets.right, insets.bottom), (0.0, 0.0, 0.0, 0.0)
+        )
+
+    def test_insets_is_immutable(self) -> None:
+        insets = Insets()
+        with self.assertRaises(FrozenInstanceError):
+            insets.left = 5.0  # type: ignore[misc]
+
+
 class TestRectTransformGeometry(unittest.TestCase):
     def test_center_anchor_and_pivot_resolve_fixed_size(self) -> None:
         transform = RectTransform(

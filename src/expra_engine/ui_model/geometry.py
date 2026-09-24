@@ -24,6 +24,10 @@ def _nonnegative_vec2(value: Vec2, name: str) -> Vec2:
     return result
 
 
+def _scaled(vec: Vec2, scale: Vec2) -> Vec2:
+    return (vec[0] * scale[0], vec[1] * scale[1])
+
+
 @dataclass(frozen=True)
 class Rect:
     """An axis-aligned rectangle in logical coordinates."""
@@ -159,32 +163,25 @@ class RectTransform:
                 raise ValueError("reference_resolution must be positive")
             scale = (available.width / reference[0], available.height / reference[1])
 
-        offset_min = (self.offset_min[0] * scale[0], self.offset_min[1] * scale[1])
-        offset_max = (self.offset_max[0] * scale[0], self.offset_max[1] * scale[1])
-        minimum = (self.min_size[0] * scale[0], self.min_size[1] * scale[1])
-        maximum = (
-            None
-            if self.max_size is None
-            else (self.max_size[0] * scale[0], self.max_size[1] * scale[1])
+        offset_min = _scaled(self.offset_min, scale)
+        offset_max = _scaled(self.offset_max, scale)
+        minimum = _scaled(self.min_size, scale)
+        maximum = None if self.max_size is None else _scaled(self.max_size, scale)
+
+        anchor = (
+            available.x + available.width * self.anchor_min[0] + offset_min[0],
+            available.y + available.height * self.anchor_min[1] + offset_min[1],
         )
         if self.size is None:
-            start = (
-                available.x + available.width * self.anchor_min[0] + offset_min[0],
-                available.y + available.height * self.anchor_min[1] + offset_min[1],
-            )
             end = (
                 available.x + available.width * self.anchor_max[0] - offset_max[0],
                 available.y + available.height * self.anchor_max[1] - offset_max[1],
             )
-            width, height = end[0] - start[0], end[1] - start[1]
-            x, y = start
+            width, height = end[0] - anchor[0], end[1] - anchor[1]
+            x, y = anchor
         else:
             width = self.size[0] * scale[0]
             height = self.size[1] * scale[1]
-            anchor = (
-                available.x + available.width * self.anchor_min[0] + offset_min[0],
-                available.y + available.height * self.anchor_min[1] + offset_min[1],
-            )
 
         width = max(minimum[0], width)
         height = max(minimum[1], height)

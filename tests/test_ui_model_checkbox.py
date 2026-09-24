@@ -19,6 +19,11 @@ class CheckboxTests(unittest.TestCase):
     def test_initial_checked(self) -> None:
         self.assertTrue(CheckboxState(checked=True).checked)
 
+    def test_toggle_from_initially_checked(self) -> None:
+        checkbox = CheckboxState(checked=True)
+        checkbox.toggle()
+        self.assertFalse(checkbox.checked)
+
 
 if __name__ == "__main__":
     unittest.main()
