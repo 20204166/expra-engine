@@ -399,6 +399,28 @@ def _dispatch(command: str, params: dict[str, Any], *, engine: Any, window: Any,
             "verdict": verdict,
         }
 
+    if command == "observability_snapshot":
+        # The real live EditorWindow's single shared ObservabilityWatcher --
+        # the same object injected into AppCoordinator/UICoordinator/Engine/
+        # the viewport's render extraction+plan+pixel bridge -- never a
+        # reimplementation or a fresh watcher.
+        from expra_engine.observability import serialize_observability
+
+        if bool(params.get("reset", False)):
+            window._observer.reset()
+        snapshot = json.loads(serialize_observability(window._observer))
+        metrics = snapshot["metrics"]
+        prefix = params.get("prefix")
+        if prefix:
+            metrics = [m for m in metrics if m["target"].startswith(prefix)]
+        return {
+            "session_started_at": snapshot["session_started_at"],
+            "captured_at": snapshot["captured_at"],
+            "duration_seconds": snapshot["duration_seconds"],
+            "metric_count": len(metrics),
+            "metrics": metrics,
+        }
+
     raise ValueError(f"unknown editor_session command: {command!r}")
 
 

@@ -141,7 +141,7 @@ class Project:
             raise ProjectError("input binding must look like keyboard:left")
         self.input_settings[action.strip()] = physical.strip().lower()
 
-    def resource_service(self) -> ResourceService:
+    def resource_service(self, *, observer: Any | None = None) -> ResourceService:
         """Build a renderer-neutral service for this project's assets."""
         from expra_engine.filesystem import (
             DirectoryMount,
@@ -158,7 +158,7 @@ class Project:
             self.path,
             MountSpec(name="project-files", scheme="project", read_only=True),
         )
-        return ResourceService(ResourceResolver([mount, project_mount]))
+        return ResourceService(ResourceResolver([mount, project_mount]), observer=observer)
 
     @property
     def project_file(self) -> Path:

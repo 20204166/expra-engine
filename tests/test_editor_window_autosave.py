@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 
 from expra_engine.core.engine import EngineRunState
 from expra_engine.core.scene import Scene
+from expra_engine.observability import ObservabilityWatcher
 from expra_engine.runtime.input import ActionId, InputMap, PhysicalInput
 from expra_engine.ui.editor_window import EditorWindow
 
@@ -72,6 +73,7 @@ class EditorWindowAutosaveTests(unittest.TestCase):
 
     def test_runtime_key_events_forward_to_playing_engine_input(self) -> None:
         window = object.__new__(EditorWindow)
+        window._observer = None
         input_map = InputMap()
         input_map.bind(ActionId("left_up"), PhysicalInput("keyboard", "w"))
         signal = MagicMock()
@@ -94,6 +96,7 @@ class EditorWindowAutosaveTests(unittest.TestCase):
 
     def test_runtime_key_events_ignore_unconfigured_keys_and_edit_mode(self) -> None:
         window = object.__new__(EditorWindow)
+        window._observer = None
         input_map = InputMap()
         input_map.bind(ActionId("custom_action"), PhysicalInput("keyboard", "space"))
         signal = MagicMock()
@@ -113,6 +116,28 @@ class EditorWindowAutosaveTests(unittest.TestCase):
 
         self.assertFalse(input_map.is_held("custom_action"))
         signal.assert_not_called()
+
+    def test_runtime_key_events_record_input_dispatch_observability(self) -> None:
+        window = object.__new__(EditorWindow)
+        observer = ObservabilityWatcher()
+        window._observer = observer
+        input_map = InputMap()
+        input_map.bind(ActionId("left_up"), PhysicalInput("keyboard", "w"))
+        window._engine = SimpleNamespace(
+            run_state=EngineRunState.PLAY,
+            input_map=input_map,
+            signal=MagicMock(),
+        )
+
+        window._on_runtime_key_press(SimpleNamespace(keysym="W"))
+        window._on_runtime_key_press(SimpleNamespace(keysym="Q"))  # unbound key
+
+        snapshot = observer.snapshot()
+        metric = next(m for m in snapshot.metrics if m.target == "runtime:input:dispatch")
+        self.assertEqual(metric.count, 2)
+        self.assertEqual(metric.in_flight, 0)
+        self.assertEqual(dict(metric.counters)["physical_inputs"], 2)
+        self.assertEqual(dict(metric.counters)["action_events"], 1)
 
 
 class RecentProjectsMenuTests(unittest.TestCase):

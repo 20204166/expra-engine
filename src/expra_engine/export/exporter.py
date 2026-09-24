@@ -277,7 +277,7 @@ def _stage_pygame_runtime(site_packages: Path) -> None:
     source_root = Path(__file__).resolve().parents[2] / "expra_engine"
     package_root = site_packages / "expra_engine"
     package_root.mkdir(parents=True, exist_ok=True)
-    for relative in ("__init__.py", "_version.py", "py.typed"):
+    for relative in ("__init__.py", "_version.py", "py.typed", "observability.py"):
         shutil.copy2(source_root / relative, package_root / relative)
 
     core_root = package_root / "core"

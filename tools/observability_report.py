@@ -172,7 +172,18 @@ def _projected_metric(metric: dict[str, Any]) -> dict[str, Any]:
         "max_ms": round(float(distribution.get("maximum", 0.0)) * 1000.0, 3)
         if distribution
         else None,
+        "counters": metric.get("counters"),
+        "gauges": metric.get("gauges"),
     }
+
+
+def _family(target: str) -> str:
+    """Group a metric target under its top-level namespace family for the
+    human-readable report -- app/ui/editor/runtime/render/resource, matching
+    the taxonomy in the observability wiring pass. Purely a display grouping;
+    never recomputes or reorders the underlying snapshot data itself."""
+    head = target.split(":", 1)[0].split(".", 1)[0]
+    return head.upper()
 
 
 def analyze_snapshot(path: Path) -> dict[str, Any]:
@@ -234,12 +245,21 @@ def _print_text(report: dict[str, Any]) -> None:
         if file_report["duration_seconds"] is not None:
             print(f"  Session duration: {file_report['duration_seconds']:.3f}s")
         print(f"  Metrics: {file_report['metric_count']}")
+        families: dict[str, list[dict[str, Any]]] = {}
         for metric in file_report["metrics"]:
-            print(
-                f"    {metric['target']:36s} count={metric['count']:<5} "
-                f"p50={metric['p50_ms']}ms p95={metric['p95_ms']}ms max={metric['max_ms']}ms "
-                f"failures={metric['failures']} coalesced={metric['coalesced']} stale={metric['stale']}"
-            )
+            families.setdefault(_family(str(metric["target"])), []).append(metric)
+        for family in sorted(families):
+            print(f"  -- {family} --")
+            for metric in families[family]:
+                print(
+                    f"    {metric['target']:36s} count={metric['count']:<5} "
+                    f"p50={metric['p50_ms']}ms p95={metric['p95_ms']}ms max={metric['max_ms']}ms "
+                    f"failures={metric['failures']} coalesced={metric['coalesced']} stale={metric['stale']}"
+                )
+                if metric.get("counters"):
+                    print(f"        counters: {metric['counters']}")
+                if metric.get("gauges"):
+                    print(f"        gauges: {metric['gauges']}")
         for finding in file_report["findings"]:
             print(f"  [{finding['severity'].upper()}] {finding['code']}: {finding['message']}")
 

@@ -9,6 +9,8 @@ from typing import IO, TYPE_CHECKING
 if TYPE_CHECKING:
     from expra_engine.coordinators.app_coordinator import AppCoordinator
 
+from expra_engine.observability import ObservabilityWatcher
+
 from .cache import CachePolicy, ContentIdentity, ResourceCache
 from .dependencies import DependencyGraph
 from .errors import ResourceCancelledError
@@ -27,11 +29,13 @@ class ResourceService:
         cache: ResourceCache[bytes] | None = None,
         dependencies: DependencyGraph | None = None,
         coordinator: AppCoordinator | None = None,
+        observer: ObservabilityWatcher | None = None,
     ) -> None:
         self.resolver = resolver
         self.cache = cache or ResourceCache[bytes]()
         self.dependencies = dependencies or DependencyGraph()
         self.coordinator = coordinator
+        self._observer = observer
 
     def metadata(self, resource_id: ResourceId | str) -> ResourceMetadata:
         return self.resolver.resolve(_resource_id(resource_id)).metadata
@@ -42,15 +46,28 @@ class ResourceService:
         *,
         cache_policy: CachePolicy | None = None,
     ) -> bytes:
+        observer = self._observer
         logical_id = _resource_id(resource_id)
-        handle = self.resolver.resolve(logical_id)
-        identity = ContentIdentity(handle.metadata.size, handle.metadata.content_hash)
+        resolve_token = observer.begin("resource:resolve") if observer is not None else None
+        try:
+            handle = self.resolver.resolve(logical_id)
+            identity = ContentIdentity(handle.metadata.size, handle.metadata.content_hash)
+        finally:
+            if observer is not None and resolve_token is not None:
+                observer.finish(resolve_token)
         policy = self.cache.policy if cache_policy is None else cache_policy
         if policy is CachePolicy.MEMORY:
             cached = self.cache.get(logical_id, identity)
             if cached is not None:
+                if observer is not None:
+                    observer.record_event("resource:resolve", "cache_hit")
                 return cached
-        value = handle.read_bytes()
+        read_token = observer.begin("resource:read") if observer is not None else None
+        try:
+            value = handle.read_bytes()
+        finally:
+            if observer is not None and read_token is not None:
+                observer.finish(read_token)
         if policy in (CachePolicy.MEMORY, CachePolicy.REFRESH):
             self.cache.put(logical_id, value, mount=handle.mount, identity=identity)
         return value

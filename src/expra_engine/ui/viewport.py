@@ -107,6 +107,7 @@ class ViewportPanel(tk.Frame):
         self._editor_overlays = True
         self._interpolator: Any | None = None
         self._interpolation_fraction = 0.0
+        self._observer = observer
         self._pixel_renderer = EditorPixelRenderer(resource_service, observer=observer)
         self._pixel_image: Any | None = None
         if camera_state:
@@ -212,7 +213,7 @@ class ViewportPanel(tk.Frame):
             camera=self._camera if editor_overlays else None,
             interpolator=interpolator,
             interpolation_fraction=interpolation_fraction,
-            animated_players=animated_players,
+            animated_players=animated_players, observer=self._observer,
         )
         self._target_dirty = False
         self._redraw()
@@ -323,7 +324,7 @@ class ViewportPanel(tk.Frame):
             selected_id=self._selected_id,
             camera=self._camera,
             interpolator=self._interpolator,
-            interpolation_fraction=self._interpolation_fraction,
+            interpolation_fraction=self._interpolation_fraction, observer=self._observer,
             animated_players=getattr(self, "_animated_players", None),
         )
         self._target_dirty = False
@@ -338,7 +339,7 @@ class ViewportPanel(tk.Frame):
             selected_id=self._selected_id,
             camera=self._camera if self._editor_overlays else None,
             interpolator=self._interpolator,
-            interpolation_fraction=self._interpolation_fraction,
+            interpolation_fraction=self._interpolation_fraction, observer=self._observer,
             animated_players=getattr(self, "_animated_players", None),
         )
         self._target_dirty = False

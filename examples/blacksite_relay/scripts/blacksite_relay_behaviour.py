@@ -19,7 +19,7 @@ class BlacksiteRelayBehaviour(Behaviour):
     def __init__(self):
         super().__init__(); self.physics=None; self.health=5; self.shards=0; self.vip=0; self.kills=0; self.elapsed=0.0; self.state='playing'; self.invulnerable=0.0; self.shot_cooldown=0.0; self.beam_timer=0.0; self.last_aim=(1.0,0.0); self.next_reinforcement=0.0; self.reserve_ids=[]; self.reserve_cursor=0; self.message=''; self.message_timer=0.0
     def on_start(self):
-        scene=cast(Any,self.scene); self.physics=PhysicsWorld2D(scene); self.health=5; self.shards=0; self.vip=0; self.kills=0; self.elapsed=0.0; self.state='playing'; self.invulnerable=0.0; self.shot_cooldown=0.0; self.beam_timer=0.0; self.last_aim=(1.0,0.0); self.next_reinforcement=float(self.reinforcement_interval); self.reserve_ids=[e.entity_id for e in scene.get_entities_by_tag('enemy_reserve')]; self.reserve_cursor=0
+        scene=cast(Any,self.scene); self.physics=PhysicsWorld2D(scene, observer=getattr(self.engine, "observer", None)); self.health=5; self.shards=0; self.vip=0; self.kills=0; self.elapsed=0.0; self.state='playing'; self.invulnerable=0.0; self.shot_cooldown=0.0; self.beam_timer=0.0; self.last_aim=(1.0,0.0); self.next_reinforcement=float(self.reinforcement_interval); self.reserve_ids=[e.entity_id for e in scene.get_entities_by_tag('enemy_reserve')]; self.reserve_cursor=0
         for e in scene.get_entities_by_tag('enemy_start'): e.enabled=True
         for e in scene.get_entities_by_tag('enemy_reserve'): e.enabled=False
         for tag in ('shard','vip'):

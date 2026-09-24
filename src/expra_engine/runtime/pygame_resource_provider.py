@@ -6,9 +6,12 @@ import logging
 from io import BytesIO
 from typing import Any, cast
 
+from expra_engine.observability import ObservabilityWatcher
 from expra_engine.runtime.render_diagnostics import RenderDiagnostics
 
 __all__ = ("PygameResourceProvider",)
+
+_TARGET = "resource:decode"
 
 _LOGGER = logging.getLogger("expra_engine.runtime.pygame_renderer")
 
@@ -23,13 +26,20 @@ _RESOURCE_UNAVAILABLE = _ResourceUnavailable()
 class PygameResourceProvider:
     """Decode project-owned resource bytes into cached Pygame textures."""
 
-    def __init__(self, pygame_module: Any, resources: Any) -> None:
+    def __init__(
+        self,
+        pygame_module: Any,
+        resources: Any,
+        *,
+        observer: ObservabilityWatcher | None = None,
+    ) -> None:
         self._pygame = pygame_module
         self._resources = resources
         self._textures: dict[str, Any] = {}
         self._texture_identities: dict[str, tuple[int, str] | None] = {}
         self._last_failure: tuple[str, str] | None = None
         self._diagnostics = RenderDiagnostics(_LOGGER)
+        self._observer = observer
 
     @property
     def last_failure(self) -> tuple[str, str] | None:
@@ -50,6 +60,8 @@ class PygameResourceProvider:
         if texture_id in self._textures and (
             identity is None or self._texture_identities.get(texture_id) == identity
         ):
+            if self._observer is not None:
+                self._observer.record_event(_TARGET, "cache_hit")
             return self._textures[texture_id]
         try:
             data = self._resources.read_bytes(texture_id)
@@ -62,6 +74,8 @@ class PygameResourceProvider:
                 exc,
             )
             return None
+        observer = self._observer
+        token = observer.begin(_TARGET) if observer is not None else None
         try:
             texture = self._pygame.image.load(BytesIO(data))
         except Exception as exc:  # noqa: BLE001 - decoder failures are frame-local
@@ -72,7 +86,11 @@ class PygameResourceProvider:
                 texture_id,
                 exc,
             )
+            if observer is not None and token is not None:
+                observer.finish(token, outcome="failure", detail=type(exc).__name__)
             return None
+        if observer is not None and token is not None:
+            observer.finish(token)
         self._textures[texture_id] = texture
         self._texture_identities[texture_id] = identity
         self._diagnostics.resolve_prefix(("texture", texture_id))

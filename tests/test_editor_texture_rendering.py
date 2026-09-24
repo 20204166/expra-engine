@@ -715,6 +715,7 @@ def test_viewport_refreshes_target_after_camera_moves() -> None:
     panel._interpolator = None
     panel._interpolation_fraction = 0.0
     panel._animated_players = None
+    panel._observer = None
     panel._canvas = cast(Any, SimpleNamespace(winfo_width=lambda: 200, winfo_height=lambda: 100))
     panel._target = build_editor_render_target(scene, viewport=(200, 100), camera=panel._camera)
     panel._target_dirty = True
@@ -795,6 +796,7 @@ def test_open_project_replaces_viewport_resources(tmp_path: Path) -> None:
     window = SimpleNamespace(
         _engine=engine,
         _viewport=viewport,
+        _observer=None,
         _editor_context=EditorContext(engine, None, None),
         _command_stack=SimpleNamespace(clear=lambda: None, can_undo=False),
         _assets=SimpleNamespace(set_root_directory=lambda _path: None),

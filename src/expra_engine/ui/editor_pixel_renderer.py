@@ -564,7 +564,9 @@ class EditorPixelRenderer:
             import pygame  # type: ignore[reportMissingImports]
 
             if self._provider_resources is not self._resource_service:
-                self._provider = PygameResourceProvider(pygame, self._resource_service)
+                self._provider = PygameResourceProvider(
+                    pygame, self._resource_service, observer=self._observer
+                )
                 self._provider_resources = self._resource_service
             if self._photo_image_master is not image_master:
                 self._photo_image = None

@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import inspect
-from typing import Any
+from typing import Any, Literal
 
 from expra_engine.core.entity import Entity
 from expra_engine.filesystem import ResourceId
+from expra_engine.observability import ObservabilityWatcher
 from expra_engine.runtime.behaviour import Behaviour
 from expra_engine.runtime.events import FrameUpdate, SceneStarted, SceneStopped, Update
 from expra_engine.runtime.input import ActionEvent
@@ -24,6 +25,7 @@ class BehaviourSystem(RuntimeSystem):
         self._instances: dict[tuple[str, str], list[tuple[Entity, Behaviour, ScriptComponent]]] = {}
         self._started_scenes: set[str] = set()
         self._errors: list[ScriptLoadError] = []
+        self._observer: ObservabilityWatcher | None = None
 
     @property
     def instances(self) -> tuple[Behaviour, ...]:
@@ -35,6 +37,7 @@ class BehaviourSystem(RuntimeSystem):
 
     def start(self, engine: Any) -> None:
         self.engine = engine
+        self._observer = getattr(engine, "observer", None)
         self._errors.clear()
         self._start_scene(engine.active_scene)
 
@@ -43,6 +46,7 @@ class BehaviourSystem(RuntimeSystem):
             self._stop_entity(*key)
         self._started_scenes.clear()
         self.engine = None
+        self._observer = None
 
     def on_frame_update(self, event: FrameUpdate, signal: Any) -> None:
         for behaviour in self._active_behaviours():
@@ -50,9 +54,29 @@ class BehaviourSystem(RuntimeSystem):
                 behaviour.on_update(event.time_delta)
 
     def on_update(self, event: Update, signal: Any) -> None:
-        for behaviour in self._active_behaviours():
-            if behaviour.enabled and behaviour.entity is not None and behaviour.entity.enabled:
-                behaviour.on_fixed_update(event.time_delta)
+        observer = self._observer
+        token = observer.begin("runtime:behaviour:update") if observer is not None else None
+        invoked = 0
+        outcome: Literal["success", "failure"] = "success"
+        detail = None
+        try:
+            for behaviour in self._active_behaviours():
+                if (
+                    behaviour.enabled
+                    and behaviour.entity is not None
+                    and behaviour.entity.enabled
+                ):
+                    behaviour.on_fixed_update(event.time_delta)
+                    invoked += 1
+        except Exception as exc:
+            outcome = "failure"
+            detail = type(exc).__name__
+            raise
+        finally:
+            if observer is not None:
+                observer.increment("runtime:behaviour:update", "invoked", invoked)
+                if token is not None:
+                    observer.finish(token, outcome=outcome, detail=detail)
 
     def on_action_event(self, event: ActionEvent, signal: Any) -> bool:
         for behaviour in self._active_behaviours():

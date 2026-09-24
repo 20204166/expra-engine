@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from expra_engine.core.scene import Scene
+from expra_engine.observability import ObservabilityWatcher
 from expra_engine.runtime.animated_sprite_2d import (
     AnimatedSprite2DComponent,
     AnimatedSpritePlayer2D,
@@ -18,6 +19,8 @@ if TYPE_CHECKING:
 
 __all__ = ("AnimatedSpriteSystem",)
 
+_TARGET = "runtime:animation:update"
+
 
 class AnimatedSpriteSystem(RuntimeSystem):
     """Maintain one runtime player for each active scene animated sprite."""
@@ -25,6 +28,7 @@ class AnimatedSpriteSystem(RuntimeSystem):
     def __init__(self) -> None:
         self._engine: Engine | None = None
         self._players: dict[tuple[int, int], AnimatedSpritePlayer2D] = {}
+        self._observer: ObservabilityWatcher | None = None
 
     @property
     def players(self) -> dict[AnimatedSprite2DComponent, AnimatedSpritePlayer2D]:
@@ -44,10 +48,12 @@ class AnimatedSpriteSystem(RuntimeSystem):
 
     def start(self, engine: Engine) -> None:
         self._engine = engine
+        self._observer = getattr(engine, "observer", None)
 
     def stop(self) -> None:
         self._players.clear()
         self._engine = None
+        self._observer = None
 
     def on_scene_started(self, _event: SceneStarted, signal: Any) -> None:
         self._reconcile(self._active_scene(), start_autoplay=True, signal=signal)
@@ -61,18 +67,33 @@ class AnimatedSpriteSystem(RuntimeSystem):
             self._remove_scene(scene)
 
     def on_update(self, event: Update, signal: Any) -> None:
-        scene = self._active_scene()
-        self._reconcile(scene, start_autoplay=True, signal=signal)
-        if scene is None:
-            return
-        for entity in scene.entities:
-            if not entity.enabled:
-                continue
-            for component in entity.get_components(AnimatedSprite2DComponent):
-                player = self._players.get((id(scene), id(component)))
-                if player is None or not component.enabled:
+        observer = self._observer
+        token = observer.begin(_TARGET) if observer is not None else None
+        advanced = 0
+        transitions = 0
+        try:
+            scene = self._active_scene()
+            self._reconcile(scene, start_autoplay=True, signal=signal)
+            if scene is None:
+                return
+            for entity in scene.entities:
+                if not entity.enabled:
                     continue
-                self._record(entity, player.advance(event.time_delta), signal)
+                for component in entity.get_components(AnimatedSprite2DComponent):
+                    player = self._players.get((id(scene), id(component)))
+                    if player is None or not component.enabled:
+                        continue
+                    events = player.advance(event.time_delta)
+                    advanced += 1
+                    transitions += len(events)
+                    self._record(entity, events, signal)
+        finally:
+            if observer is not None:
+                observer.set_gauge(_TARGET, "active_players", len(self._players))
+                observer.increment(_TARGET, "players_advanced", advanced)
+                observer.increment(_TARGET, "frame_transitions", transitions)
+                if token is not None:
+                    observer.finish(token)
 
     def on_frame_update(self, _event: Any, signal: Any) -> None:
         """Reconcile live entities even when no fixed update is due."""

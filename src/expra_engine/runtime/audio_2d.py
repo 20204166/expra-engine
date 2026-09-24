@@ -27,9 +27,12 @@ from typing import TYPE_CHECKING, Any, cast
 
 from expra_engine.core.component import Component
 from expra_engine.core.scene import Scene
+from expra_engine.observability import ObservabilityWatcher
 from expra_engine.runtime.audio import AudioClip, AudioMixer
 from expra_engine.runtime.events import SceneContinued, SceneStarted, SceneStopped, Update
 from expra_engine.runtime.system import RuntimeSystem
+
+_AUDIO_TARGET = "runtime:audio:update"
 
 if TYPE_CHECKING:
     from expra_engine.core.engine import Engine
@@ -572,6 +575,7 @@ class Audio2DSystem(RuntimeSystem):
         self._engine: Engine | None = None
         self._world: Audio2DWorld | None = None
         self._states: dict[tuple[int, int], AudioStreamPlayer2DState] = {}
+        self._observer: ObservabilityWatcher | None = None
 
     @property
     def world(self) -> Audio2DWorld | None:
@@ -652,11 +656,13 @@ class Audio2DSystem(RuntimeSystem):
 
     def start(self, engine: Engine) -> None:
         self._engine = engine
+        self._observer = getattr(engine, "observer", None)
 
     def stop(self) -> None:
         self._states.clear()
         self._world = None
         self._engine = None
+        self._observer = None
 
     def on_scene_started(self, _event: SceneStarted, _signal: Any) -> None:
         self._activate_scene(self._active_scene(), start_autoplay=True)
@@ -671,17 +677,28 @@ class Audio2DSystem(RuntimeSystem):
         self._world = None
 
     def on_update(self, event: Update, _signal: Any) -> None:
-        scene = self._active_scene()
-        self._activate_scene(scene, start_autoplay=True)
-        if scene is None:
-            return
-        for entity in scene.entities:
-            if not entity.enabled:
-                continue
-            for component in entity.get_components(AudioStreamPlayer2DComponent):
-                state = self._states.get((id(scene), id(component)))
-                if state is not None and component.enabled:
-                    state.advance(event.time_delta)
+        observer = self._observer
+        token = observer.begin(_AUDIO_TARGET) if observer is not None else None
+        try:
+            scene = self._active_scene()
+            self._activate_scene(scene, start_autoplay=True)
+            if scene is None:
+                return
+            active_voices = 0
+            for entity in scene.entities:
+                if not entity.enabled:
+                    continue
+                for component in entity.get_components(AudioStreamPlayer2DComponent):
+                    state = self._states.get((id(scene), id(component)))
+                    if state is not None and component.enabled:
+                        state.advance(event.time_delta)
+                        if state.is_playing:
+                            active_voices += 1
+            if observer is not None:
+                observer.set_gauge(_AUDIO_TARGET, "active_voices", active_voices)
+        finally:
+            if observer is not None and token is not None:
+                observer.finish(token)
 
     def on_frame_update(self, _event: Any, _signal: Any) -> None:
         """Reconcile source membership even when no fixed update is due."""

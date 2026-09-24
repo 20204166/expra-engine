@@ -8,11 +8,15 @@ from dataclasses import dataclass
 from expra_engine.core.entity import Entity
 from expra_engine.core.scene import Scene
 from expra_engine.core.component import TransformComponent
+from expra_engine.observability import ObservabilityWatcher
 from expra_engine.runtime.area import AreaComponent, SpaceOverride
 from expra_engine.runtime.collider import ColliderComponent
 from expra_engine.runtime.physics import AreaEffect2D, HitResult2D, TriggerEvent
 
 __all__ = ("PhysicsWorld2D",)
+
+_QUERY_TARGET = "runtime:physics:query"
+_STEP_TARGET = "runtime:physics:step"
 
 
 @dataclass(frozen=True)
@@ -25,10 +29,11 @@ class _Collider:
 class PhysicsWorld2D:
     """Answer deterministic queries over the current scene contents."""
 
-    def __init__(self, scene: Scene) -> None:
+    def __init__(self, scene: Scene, *, observer: ObservabilityWatcher | None = None) -> None:
         self.scene = scene
         self._trigger_pairs: set[tuple[str, str]] = set()
         self._entity_order: dict[str, int] = {}
+        self._observer = observer
 
     def _colliders(self, *, include_area_volumes: bool = False) -> tuple[_Collider, ...]:
         result: list[_Collider] = []
@@ -81,6 +86,8 @@ class PhysicsWorld2D:
         return (cx - closest_x) ** 2 + (cy - closest_y) ** 2 <= radius**2
 
     def overlap(self, body_id: str, *, include_triggers: bool = True) -> tuple[str, ...]:
+        if self._observer is not None:
+            self._observer.increment(_QUERY_TARGET, "overlap")
         colliders = self._colliders()
         body = next((item for item in colliders if item.entity.entity_id == body_id), None)
         if body is None:
@@ -206,6 +213,8 @@ class PhysicsWorld2D:
         mask: int = 0xFFFFFFFF,
         include_triggers: bool = True,
     ) -> HitResult2D:
+        if self._observer is not None:
+            self._observer.increment(_QUERY_TARGET, "raycast")
         ox, oy = origin
         dx, dy = direction
         distance = float(distance)
@@ -282,6 +291,15 @@ class PhysicsWorld2D:
         return t_min, normal
 
     def step_triggers(self) -> tuple[TriggerEvent, ...]:
+        observer = self._observer
+        token = observer.begin(_STEP_TARGET) if observer is not None else None
+        try:
+            return self._step_triggers()
+        finally:
+            if observer is not None and token is not None:
+                observer.finish(token)
+
+    def _step_triggers(self) -> tuple[TriggerEvent, ...]:
         colliders = self._colliders()
         current: set[tuple[str, str]] = set()
         for trigger in colliders:

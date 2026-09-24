@@ -40,7 +40,9 @@ class SpacePongBehaviour(Behaviour):
         self.winner = ""
         self.hit_feedback = 0.0
         self.ball_velocity = (float(self.ball_speed), 12.0)
-        self.physics = PhysicsWorld2D(cast(Any, self.scene))
+        self.physics = PhysicsWorld2D(
+            cast(Any, self.scene), observer=getattr(self.engine, "observer", None)
+        )
         self._build_ui()
         self._update_hud()
 

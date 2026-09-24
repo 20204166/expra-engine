@@ -130,14 +130,18 @@ class EditorWindow:
         # Thread-safe delivery queue — worker threads enqueue, Tk drains
         self._delivery_queue = TkDeliveryQueue(self._root)
 
-        # Coordinators
-        self._coordinator = AppCoordinator(deliver=self._delivery_queue)
-        self._actions = ButtonCoordinator()
-        # Shared across UICoordinator and the viewport's pixel bridge so a
-        # single snapshot() reports the whole presentation pipeline together
-        # (ui:render:* commit timing alongside editor.pixelbridge:* stage
-        # timing) -- see performance_probe's use of this for regression data.
+        # Shared across the whole application session -- AppCoordinator,
+        # ButtonCoordinator, UICoordinator, the viewport's render
+        # extraction/plan/pixel bridge, and the Engine (injected below) --
+        # so a single snapshot() reports app/ui/runtime/render/editor
+        # metrics together (see performance_probe's use of this for
+        # regression data).
         self._observer = ObservabilityWatcher()
+        self._engine.observer = self._observer
+
+        # Coordinators
+        self._coordinator = AppCoordinator(deliver=self._delivery_queue, observer=self._observer)
+        self._actions = ButtonCoordinator(observer=self._observer)
         self._ui = UICoordinator(observer=self._observer)
         self._editor_context = EditorContext(
             engine=self._engine,
@@ -172,6 +176,7 @@ class EditorWindow:
             lambda: self._request_render(
                 "viewport", (self._engine.active_scene, None), priority=20
             ),
+            observer=self._observer,
         )
 
         self._register_actions()
@@ -195,9 +200,23 @@ class EditorWindow:
         control = str(key).lower()
         if not control:
             return
-        transitions = getattr(self._engine.input_map, phase)(PhysicalInput("keyboard", control))
-        for action_event in transitions:
-            self._engine.signal(action_event)
+        observer = self._observer
+        token = observer.begin("runtime:input:dispatch") if observer is not None else None
+        transitions: tuple[Any, ...] = ()
+        try:
+            transitions = getattr(self._engine.input_map, phase)(
+                PhysicalInput("keyboard", control)
+            )
+            for action_event in transitions:
+                self._engine.signal(action_event)
+        finally:
+            if observer is not None:
+                observer.increment("runtime:input:dispatch", "physical_inputs")
+                observer.increment(
+                    "runtime:input:dispatch", "action_events", len(transitions)
+                )
+                if token is not None:
+                    observer.finish(token)
 
     def _build_layout(self) -> None:
         self._build_menubar()
@@ -268,7 +287,7 @@ class EditorWindow:
             camera_state=self._preferences.viewport_camera,
             on_camera_change=self._save_viewport_camera,
             resource_service=(
-                self._engine.project.resource_service()
+                self._engine.project.resource_service(observer=self._observer)
                 if self._engine.project is not None
                 else None
             ),

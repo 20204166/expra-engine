@@ -63,6 +63,8 @@ class MetricSnapshot:
     samples: tuple[float, ...]
     distribution: dict[str, float | int]
     last_error: str | None
+    counters: tuple[tuple[str, int], ...]
+    gauges: tuple[tuple[str, float], ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,6 +89,8 @@ class _Metric:
     stale: int = 0
     rejected: int = 0
     events: dict[str, int] = field(default_factory=dict)
+    counters: dict[str, int] = field(default_factory=dict)
+    gauges: dict[str, float] = field(default_factory=dict)
 
 
 def _percentile(values: list[float], fraction: float) -> float:
@@ -220,6 +224,38 @@ class ObservabilityWatcher:
             if event in _COUNTED_EVENT_KINDS:
                 setattr(metric, event, getattr(metric, event) + 1)
 
+    def increment(self, target: str, name: str, amount: int = 1) -> None:
+        """Bump a domain-neutral counter. For aggregate volumes (queries run,
+        frames advanced) that don't fit the fixed EventKind vocabulary and
+        must not become per-entity metric *targets* -- the counter name
+        carries the cardinality instead, under one stable target."""
+        self._validate_target(target)
+        if not name or len(name) > 80:
+            raise ValueError("counter name must be non-empty and at most 80 characters")
+        with self._lock:
+            metric = self._metric(target)
+            metric.counters[name] = metric.counters.get(name, 0) + amount
+
+    def counter_value(self, target: str, name: str) -> int:
+        with self._lock:
+            return self._metrics.get(target, _Metric(deque(maxlen=1))).counters.get(name, 0)
+
+    def set_gauge(self, target: str, name: str, value: float) -> None:
+        """Record the current level of a bounded quantity (active players,
+        collider count) -- overwrites rather than accumulates."""
+        self._validate_target(target)
+        if not name or len(name) > 80:
+            raise ValueError("gauge name must be non-empty and at most 80 characters")
+        if not isfinite(value):
+            raise ValueError("gauge value must be finite")
+        with self._lock:
+            metric = self._metric(target)
+            metric.gauges[name] = float(value)
+
+    def gauge_value(self, target: str, name: str) -> float | None:
+        with self._lock:
+            return self._metrics.get(target, _Metric(deque(maxlen=1))).gauges.get(name)
+
     def event_count(self, target: str, event: str) -> int:
         with self._lock:
             return self._metrics.get(target, _Metric(deque(maxlen=1))).events.get(event, 0)
@@ -278,4 +314,6 @@ class ObservabilityWatcher:
             samples,
             summarize_samples(samples) if samples else {},
             metric.last_error,
+            tuple(sorted(metric.counters.items())),
+            tuple(sorted(metric.gauges.items())),
         )

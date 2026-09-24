@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, Any
 
 from expra_engine.core.scene import Scene
 from expra_engine.core.utils import get_time
+from expra_engine.observability import ObservabilityWatcher
 from expra_engine.runtime.behaviour import Behaviour, BehaviourFactory
 from expra_engine.runtime.input import ActionId, InputMap, PhysicalInput
 from expra_engine.runtime.transform_interpolation import TransformInterpolator
@@ -75,12 +76,13 @@ class Engine:
     all runtime transitions and restored on stop().
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, observer: ObservabilityWatcher | None = None) -> None:
         self._state = EngineRunState.EDIT
         self._project: Project | None = None
         self._edit_scene: Scene | None = None
         self._runtime_scene: Scene | None = None
         self._last_update: float | None = None
+        self._observer = observer
 
         # Runtime scene stack (runtime-only; edit scene never appears here)
         self._scene_stack: list[Scene] = []
@@ -108,6 +110,21 @@ class Engine:
     # ------------------------------------------------------------------
     # Properties
     # ------------------------------------------------------------------
+
+    @property
+    def observer(self) -> ObservabilityWatcher | None:
+        """The shared application ObservabilityWatcher, if one was injected.
+
+        Settable after construction so a host (the editor) that already owns
+        a watcher can hand it to an ``Engine()`` it did not construct with
+        one, keeping a single session-wide watcher rather than each owner
+        minting its own.
+        """
+        return self._observer
+
+    @observer.setter
+    def observer(self, value: ObservabilityWatcher | None) -> None:
+        self._observer = value
 
     @property
     def run_state(self) -> EngineRunState:
@@ -325,14 +342,20 @@ class Engine:
         if self._eq is not None:
             from expra_engine.runtime.events import FrameUpdate, Idle
 
-            self._eq.signal(FrameUpdate(dt))
-            self._eq.signal(Idle(dt))
-            self._eq.drain()
+            token = self._observer.begin("runtime:tick") if self._observer is not None else None
+            try:
+                self._eq.signal(FrameUpdate(dt))
+                self._eq.signal(Idle(dt))
+                self._eq.drain()
 
-            if self._quit_requested:
-                self.stop()
-            else:
-                self._transform_interpolator.prune_scene(self.active_scene)
+                if self._quit_requested:
+                    self.stop()
+                else:
+                    self._transform_interpolator.prune_scene(self.active_scene)
+            finally:
+                if token is not None:
+                    assert self._observer is not None
+                    self._observer.finish(token)
 
         return dt
 

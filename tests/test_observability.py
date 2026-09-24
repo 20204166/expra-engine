@@ -137,6 +137,52 @@ class ObservabilityWatcherTests(unittest.TestCase):
         self.assertEqual(metric.count, 1)
         self.assertEqual(metric.in_flight, 0)
 
+    def test_counters_accumulate_per_name_under_one_stable_target(self) -> None:
+        watcher = ObservabilityWatcher()
+        watcher.increment("runtime:physics:query", "overlap")
+        watcher.increment("runtime:physics:query", "overlap", 4)
+        watcher.increment("runtime:physics:query", "raycast", 2)
+
+        self.assertEqual(watcher.counter_value("runtime:physics:query", "overlap"), 5)
+        self.assertEqual(watcher.counter_value("runtime:physics:query", "raycast"), 2)
+        self.assertEqual(watcher.counter_value("runtime:physics:query", "never_incremented"), 0)
+
+        metric = watcher.snapshot().metrics[0]
+        self.assertEqual(metric.target, "runtime:physics:query")
+        self.assertEqual(dict(metric.counters), {"overlap": 5, "raycast": 2})
+
+    def test_gauges_overwrite_rather_than_accumulate(self) -> None:
+        watcher = ObservabilityWatcher()
+        watcher.set_gauge("runtime:animation:update", "active_players", 3)
+        watcher.set_gauge("runtime:animation:update", "active_players", 7)
+
+        self.assertEqual(watcher.gauge_value("runtime:animation:update", "active_players"), 7)
+        self.assertIsNone(watcher.gauge_value("runtime:animation:update", "missing"))
+
+        metric = watcher.snapshot().metrics[0]
+        self.assertEqual(dict(metric.gauges), {"active_players": 7})
+
+    def test_counters_and_gauges_reject_invalid_names_and_values(self) -> None:
+        watcher = ObservabilityWatcher()
+        with self.assertRaises(ValueError):
+            watcher.increment("runtime:tick", "")
+        with self.assertRaises(ValueError):
+            watcher.set_gauge("runtime:tick", "x", float("nan"))
+        with self.assertRaises(ValueError):
+            watcher.increment("", "x")
+
+    def test_counter_names_do_not_grow_metric_target_cardinality(self) -> None:
+        """A counter's own name carries per-kind cardinality; the metric
+        *target* it lives under must still stay a single stable entry."""
+        watcher = ObservabilityWatcher()
+        for index in range(500):
+            watcher.increment("resource:decode", f"asset-{index}")
+
+        snapshot = watcher.snapshot()
+        self.assertEqual(len(snapshot.metrics), 1)
+        self.assertEqual(snapshot.metrics[0].target, "resource:decode")
+        self.assertEqual(len(snapshot.metrics[0].counters), 500)
+
 
 class SerializeObservabilityTests(unittest.TestCase):
     def test_round_trips_to_the_shape_tools_observability_report_expects(self) -> None:

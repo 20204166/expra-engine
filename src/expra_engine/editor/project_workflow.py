@@ -146,7 +146,9 @@ class ProjectWorkflow:
         scene = project.load_scene()
         window._engine.set_project(project)
         window._engine.set_scene(scene)
-        window._viewport.set_resource_service(project.resource_service())
+        window._viewport.set_resource_service(
+            project.resource_service(observer=window._observer)
+        )
         window._engine.set_script_registry(ScriptRegistry(project.path))
         window._editor_context = replace(window._editor_context, project=project)
         window._command_stack.clear()

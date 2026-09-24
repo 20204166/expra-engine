@@ -202,3 +202,74 @@ async def test_frame_scene_reports_unavailable_honestly(server) -> None:
             assert result.structured_content["data"]["available"] is False
         finally:
             await client.call_tool("editor_session", {"action": "close", "session_id": session_id})
+
+
+async def test_observability_snapshot_reflects_a_real_blacksite_play_session(server) -> None:
+    """Dogfoods the whole observability wiring pass through the real MCP
+    protocol against a real Tk EditorWindow: open Blacksite -> Play ->
+    genuine key-driven movement (input -> behaviour -> physics.overlap) ->
+    Pause -> Resume -> Stop -> one shared snapshot should show app/ui/
+    runtime/render/editor surfaces together, not fragments from separate
+    watchers.
+    """
+    async with Client(server) as client:
+        session_id = await _start_session(client)
+        try:
+            await client.call_tool(
+                "editor_session", {"action": "open_project", "session_id": session_id, "project": BLACKSITE}
+            )
+
+            reset = await client.call_tool(
+                "editor_session",
+                {"action": "observability_snapshot", "session_id": session_id, "reset_observations": True},
+            )
+            assert reset.is_error is not True
+            assert reset.structured_content["data"]["metrics"] == []
+
+            await client.call_tool("editor_session", {"action": "play", "session_id": session_id})
+            await client.call_tool(
+                "editor_session", {"action": "send_key", "session_id": session_id, "key": "w", "phase": "down"}
+            )
+            await client.call_tool(
+                "editor_session", {"action": "wait", "session_id": session_id, "duration_ms": 300}
+            )
+            await client.call_tool(
+                "editor_session", {"action": "send_key", "session_id": session_id, "key": "w", "phase": "up"}
+            )
+            await client.call_tool("editor_session", {"action": "pause", "session_id": session_id})
+            await client.call_tool("editor_session", {"action": "resume", "session_id": session_id})
+            await client.call_tool(
+                "editor_session", {"action": "wait", "session_id": session_id, "duration_ms": 100}
+            )
+            await client.call_tool("editor_session", {"action": "stop", "session_id": session_id})
+
+            full = await client.call_tool(
+                "editor_session", {"action": "observability_snapshot", "session_id": session_id}
+            )
+            assert full.is_error is not True
+            targets = {m["target"] for m in full.structured_content["data"]["metrics"]}
+
+            # One shared watcher end-to-end -- app/ui/runtime/render/editor
+            # surfaces from a single real Play session, all in one snapshot.
+            for expected in (
+                "runtime:tick",
+                "runtime:behaviour:update",
+                "runtime:input:dispatch",
+                "runtime:physics:query",
+                "render:extract",
+                "render:plan",
+                "editor:preview:tick",
+                "editor.pixelbridge.total",
+            ):
+                assert expected in targets, f"{expected} missing from {sorted(targets)}"
+
+            runtime_only = await client.call_tool(
+                "editor_session",
+                {"action": "observability_snapshot", "session_id": session_id, "prefix": "runtime:"},
+            )
+            runtime_targets = {m["target"] for m in runtime_only.structured_content["data"]["metrics"]}
+            assert runtime_targets  # non-empty
+            assert all(t.startswith("runtime:") for t in runtime_targets)
+            assert "editor.pixelbridge.total" not in runtime_targets
+        finally:
+            await client.call_tool("editor_session", {"action": "close", "session_id": session_id})

@@ -7,6 +7,7 @@ from typing import Any
 
 from expra_engine.core.component import TransformComponent
 from expra_engine.core.scene import Scene
+from expra_engine.observability import ObservabilityWatcher
 from expra_engine.runtime.animated_sprite_2d import (
     AnimatedSprite2DComponent,
     AnimatedSpritePlayer2D,
@@ -52,16 +53,25 @@ def build_editor_render_target(
     interpolator: Any | None = None,
     interpolation_fraction: float = 0.0,
     animated_players: dict[AnimatedSprite2DComponent, AnimatedSpritePlayer2D] | None = None,
+    observer: ObservabilityWatcher | None = None,
 ) -> EditorRenderTarget:
     """Extract the runtime frame once and apply editor preview clipping."""
     if scene is None:
         return EditorRenderTarget(RenderFrame(), (), None)
-    frame = extract_render_frame(
-        scene,
-        interpolator=interpolator,
-        interpolation_fraction=interpolation_fraction,
-        animated_players=animated_players,
-    )
+    extract_token = observer.begin("render:extract") if observer is not None else None
+    try:
+        frame = extract_render_frame(
+            scene,
+            interpolator=interpolator,
+            interpolation_fraction=interpolation_fraction,
+            animated_players=animated_players,
+        )
+    finally:
+        if observer is not None and extract_token is not None:
+            observer.finish(extract_token)
+    if observer is not None:
+        observer.increment("render:extract", "entities_considered", len(scene.entities))
+        observer.increment("render:extract", "items_produced", len(frame.items))
     unsupported_effects = tuple(
         effect.request.entity_id for effect in frame.submissions if isinstance(effect, RenderEffect)
     )
@@ -80,7 +90,14 @@ def build_editor_render_target(
         preview_camera.position = camera.position
         preview_camera.rotation = camera._camera.rotation
     context = RenderContext(Viewport(0, 0, width, height), preview_camera)
-    items = frame.visible_items(context)
+    plan_token = observer.begin("render:plan") if observer is not None else None
+    try:
+        items = frame.visible_items(context)
+    finally:
+        if observer is not None and plan_token is not None:
+            observer.finish(plan_token)
+    if observer is not None:
+        observer.increment("render:plan", "items_visible", len(items))
     entity_ids = {entity.entity_id for entity in scene.entities}
     colliders: list[ColliderOutline] = []
     for entity in scene.entities:

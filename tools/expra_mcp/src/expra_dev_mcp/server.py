@@ -857,7 +857,11 @@ def build_server(cfg: ExpraMcpConfig) -> MCPServer:
             "pixel path, structured data instead of an image: "
             "{available: false, pixel_layer_active: false, fallback_active: true, reason: "
             "'unsupported primitive: ...'}; Canvas fallback is never reported as a successful "
-            "pixel render) round out the action set. 'frame_scene' reports available=false: no such method exists in "
+            "pixel render) round out the action set. 'observability_snapshot' returns the live "
+            "session's single shared ObservabilityWatcher (app/ui/runtime/render/editor metrics "
+            "together) as data.metrics -- pass prefix='runtime:' etc. to filter, "
+            "reset_observations=true to clear history before returning (empty snapshot). "
+            "'frame_scene' reports available=false: no such method exists in "
             "this codebase version. Always call 'close' when done -- a worker whose stdin "
             "closes unexpectedly shuts itself down, but that's a safety net, not a substitute."
         ),
@@ -872,7 +876,7 @@ def build_server(cfg: ExpraMcpConfig) -> MCPServer:
         action: Literal[
             "start", "open_project", "state", "play", "pause", "resume", "stop",
             "send_key", "wait", "select_entity", "frame_scene", "capture_viewport",
-            "inspect", "inspect_render", "close",
+            "inspect", "inspect_render", "observability_snapshot", "close",
         ],
         session_id: str | None = None,
         project: str | None = None,
@@ -881,6 +885,8 @@ def build_server(cfg: ExpraMcpConfig) -> MCPServer:
         key: str | None = None,
         phase: Literal["down", "up"] = "down",
         duration_ms: int = 250,
+        prefix: str | None = None,
+        reset_observations: bool = False,
     ) -> EditorSessionResult:
         if action == "start":
             new_id, data = await editor_sessions.start(expra_root=cfg.workspace.expra_root)
@@ -919,6 +925,10 @@ def build_server(cfg: ExpraMcpConfig) -> MCPServer:
             params = {"entity": entity}
         elif action == "inspect" and entity:
             params = {"entity": entity}
+        elif action == "observability_snapshot":
+            params = {"reset": reset_observations}
+            if prefix:
+                params["prefix"] = prefix
 
         try:
             response = await editor_sessions.send(session_id, action, params)
