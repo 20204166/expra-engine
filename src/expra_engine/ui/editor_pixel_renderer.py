@@ -448,6 +448,7 @@ def render_editor_frame_to_tk_image(
                 resource_provider=resource_provider,
                 clear_color=None,
                 diagnostics=diagnostics,
+                observer=observer,
             )
 
         return _render_pillow_bridge(

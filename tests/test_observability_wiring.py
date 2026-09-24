@@ -251,6 +251,74 @@ class RenderExtractPlanObservabilityTests(unittest.TestCase):
         self.assertEqual(watcher.snapshot().metrics, ())
 
 
+class RenderBackendObservabilityTests(unittest.TestCase):
+    """PygameRenderer.render() is the canonical render:backend boundary."""
+
+    @staticmethod
+    def _fake_pygame() -> Any:
+        from types import SimpleNamespace
+
+        class _FakeFont:
+            def render(self, *args: Any, **kwargs: Any) -> Any:
+                return SimpleNamespace(get_size=lambda: (0, 0))
+
+        class _FakeDraw:
+            def __init__(self) -> None:
+                self.rects: list[Any] = []
+
+            def rect(self, surface: Any, color: Any, rect: Any) -> None:
+                self.rects.append((surface, color, rect))
+
+        return SimpleNamespace(draw=_FakeDraw(), font=SimpleNamespace(Font=lambda *a, **k: _FakeFont()))
+
+    @staticmethod
+    def _fake_surface() -> Any:
+        from types import SimpleNamespace
+
+        return SimpleNamespace(fill=lambda color: None, blit=lambda *a, **k: None)
+
+    def test_successful_render_records_render_backend_span(self) -> None:
+        from expra_engine.runtime.pygame_renderer import PygameRenderer
+        from expra_engine.runtime.rendering import RenderContext, Viewport
+        from expra_engine.runtime.rendering import RenderFrame as ContractRenderFrame
+
+        watcher = ObservabilityWatcher()
+        surface = self._fake_surface()
+        renderer = PygameRenderer(self._fake_pygame(), surface, clear_color=None, observer=watcher)
+        renderer.start(RenderContext(Viewport(0, 0, 100, 100)))
+
+        renderer.render(ContractRenderFrame())
+
+        metric = next(m for m in watcher.snapshot().metrics if m.target == "render:backend")
+        self.assertEqual(metric.count, 1)
+        self.assertEqual(metric.successes, 1)
+        self.assertEqual(metric.in_flight, 0)
+
+    def test_render_without_active_context_records_failure_with_stable_detail(self) -> None:
+        from expra_engine.runtime.pygame_renderer import PygameRenderer
+        from expra_engine.runtime.rendering import RenderFrame as ContractRenderFrame
+
+        watcher = ObservabilityWatcher()
+        renderer = PygameRenderer(self._fake_pygame(), None, observer=watcher)
+
+        renderer.render(ContractRenderFrame())
+
+        metric = next(m for m in watcher.snapshot().metrics if m.target == "render:backend")
+        self.assertEqual(metric.failures, 1)
+        self.assertEqual(metric.in_flight, 0)
+        self.assertEqual(metric.last_error, "no-context")
+
+    def test_no_observer_means_no_metrics_and_no_crash(self) -> None:
+        from expra_engine.runtime.pygame_renderer import PygameRenderer
+        from expra_engine.runtime.rendering import RenderContext, Viewport
+        from expra_engine.runtime.rendering import RenderFrame as ContractRenderFrame
+
+        renderer = PygameRenderer(self._fake_pygame(), self._fake_surface(), clear_color=None)
+        renderer.start(RenderContext(Viewport(0, 0, 100, 100)))
+
+        renderer.render(ContractRenderFrame())  # must not raise
+
+
 class ResourcePipelineObservabilityTests(unittest.TestCase):
     def _service(self, tmp_path, watcher: ObservabilityWatcher | None) -> ResourceService:
         (tmp_path / "a.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"0" * 16)
