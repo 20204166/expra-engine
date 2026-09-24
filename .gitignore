@@ -17,3 +17,4 @@ venv/
 .expra-mcp/
 .expra-mcp.toml
 /opencode.json
+/.mcp.json
