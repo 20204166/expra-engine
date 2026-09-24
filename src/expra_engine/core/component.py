@@ -12,6 +12,7 @@ from typing import Any
 from expra_engine.core.component_schema import (
     ComponentTypeSpec,
     PropertyDescriptor,
+    component_type_spec,
     register_component_spec,
 )
 
@@ -117,10 +118,7 @@ register_component_spec(
 
 def component_from_dict(data: dict[str, Any]) -> Component:
     """Deserialize a component from its dict representation."""
-    _register_visual_components()
-    _register_physics_components()
-    _register_audio_components()
-    _register_screen_components()
+    _register_builtin_components()
     component_type = data.get("type", "")
     if component_type == "script":
         from expra_engine.runtime.script_component import (
@@ -142,8 +140,6 @@ def component_from_dict(data: dict[str, Any]) -> Component:
 def register_component_type(name: str, cls: type[Component]) -> None:
     """Register a custom component type for deserialization."""
     _COMPONENT_REGISTRY[name] = cls
-    from expra_engine.core.component_schema import component_type_spec
-
     try:
         component_type_spec(name)
     except KeyError:
@@ -152,11 +148,27 @@ def register_component_type(name: str, cls: type[Component]) -> None:
 
 def registered_component_types() -> tuple[tuple[str, type[Component]], ...]:
     """Return registered component types in registration order for editor tooling."""
+    _register_builtin_components()
+    return tuple(_COMPONENT_REGISTRY.items())
+
+
+def _register_component(
+    component_type: str,
+    cls: type[Component],
+    fields: tuple[PropertyDescriptor, ...] = (),
+    required_types: tuple[type, ...] = (),
+) -> None:
+    """Record ``cls`` in both the serialization registry and the editor spec registry."""
+    _COMPONENT_REGISTRY[component_type] = cls
+    register_component_spec(ComponentTypeSpec(component_type, cls, fields, required_types))
+
+
+def _register_builtin_components() -> None:
+    """Ensure every built-in component category is registered (each is idempotent)."""
     _register_visual_components()
     _register_physics_components()
     _register_audio_components()
     _register_screen_components()
-    return tuple(_COMPONENT_REGISTRY.items())
 
 
 def _register_visual_components() -> None:
@@ -257,8 +269,7 @@ def _register_visual_components() -> None:
         ),
     )
     for component_type, component_cls, fields in registrations:
-        _COMPONENT_REGISTRY[component_type] = component_cls
-        register_component_spec(ComponentTypeSpec(component_type, component_cls, fields))
+        _register_component(component_type, component_cls, fields)
 
 
 def _register_screen_components() -> None:
@@ -338,8 +349,7 @@ def _register_screen_components() -> None:
         ),
     )
     for component_type, component_cls, fields in registrations:
-        _COMPONENT_REGISTRY[component_type] = component_cls
-        register_component_spec(ComponentTypeSpec(component_type, component_cls, fields))
+        _register_component(component_type, component_cls, fields)
 
 
 def _register_physics_components() -> None:
@@ -360,8 +370,7 @@ def _register_physics_components() -> None:
             PropertyDescriptor("layer", "Layer", int, 1, minimum=0),
             PropertyDescriptor("mask", "Mask", int, 0xFFFFFFFF, minimum=0),
         )
-        _COMPONENT_REGISTRY["collider"] = ColliderComponent
-        register_component_spec(ComponentTypeSpec("collider", ColliderComponent, collider_fields))
+        _register_component("collider", ColliderComponent, collider_fields)
 
     if "area" not in _COMPONENT_REGISTRY:
         from expra_engine.runtime.area import AreaComponent, SpaceOverride
@@ -388,10 +397,7 @@ def _register_physics_components() -> None:
             PropertyDescriptor("angular_damp", "Angular Damp", float, 0.0, minimum=0.0),
             PropertyDescriptor("enabled", "Enabled", bool, True),
         )
-        _COMPONENT_REGISTRY["area"] = AreaComponent
-        register_component_spec(
-            ComponentTypeSpec("area", AreaComponent, area_fields, (ColliderComponent,))
-        )
+        _register_component("area", AreaComponent, area_fields, (ColliderComponent,))
 
 
 def _register_audio_components() -> None:
@@ -403,48 +409,42 @@ def _register_audio_components() -> None:
         PlaybackType2D,
     )
 
-    _COMPONENT_REGISTRY["audio_listener_2d"] = AudioListener2DComponent
-    register_component_spec(
-        ComponentTypeSpec(
-            "audio_listener_2d",
-            AudioListener2DComponent,
-            (
-                PropertyDescriptor("current", "Current Listener", bool, False),
-                PropertyDescriptor("enabled", "Enabled", bool, True),
-            ),
-        )
+    _register_component(
+        "audio_listener_2d",
+        AudioListener2DComponent,
+        (
+            PropertyDescriptor("current", "Current Listener", bool, False),
+            PropertyDescriptor("enabled", "Enabled", bool, True),
+        ),
     )
-    _COMPONENT_REGISTRY["audio_stream_player_2d"] = AudioStreamPlayer2DComponent
-    register_component_spec(
-        ComponentTypeSpec(
-            "audio_stream_player_2d",
-            AudioStreamPlayer2DComponent,
-            (
-                PropertyDescriptor("asset_id", "Audio Asset", str, ""),
-                PropertyDescriptor("volume_db", "Volume (dB)", float, 0.0),
-                PropertyDescriptor("pitch_scale", "Pitch Scale", float, 1.0, minimum=0.000001),
-                PropertyDescriptor("autoplay", "Autoplay", bool, False),
-                PropertyDescriptor("stream_paused", "Paused", bool, False),
-                PropertyDescriptor("max_distance", "Max Distance", float, 2000.0, minimum=0.000001),
-                PropertyDescriptor("attenuation", "Attenuation", float, 1.0, minimum=0.0),
-                PropertyDescriptor("max_polyphony", "Max Polyphony", int, 1, minimum=1),
-                PropertyDescriptor("panning_strength", "Panning Strength", float, 1.0, minimum=0.0),
-                PropertyDescriptor(
-                    "bus",
-                    "Bus",
-                    str,
-                    "sfx",
-                    enum_values=("master", "music", "sfx", "ambience", "dialogue", "ui"),
-                ),
-                PropertyDescriptor("area_mask", "Area Mask", int, 0, minimum=0, maximum=0xFFFFFFFF),
-                PropertyDescriptor(
-                    "playback_type",
-                    "Playback Type",
-                    str,
-                    PlaybackType2D.DEFAULT.value,
-                    enum_values=tuple(mode.value for mode in PlaybackType2D),
-                ),
-                PropertyDescriptor("enabled", "Enabled", bool, True),
+    _register_component(
+        "audio_stream_player_2d",
+        AudioStreamPlayer2DComponent,
+        (
+            PropertyDescriptor("asset_id", "Audio Asset", str, ""),
+            PropertyDescriptor("volume_db", "Volume (dB)", float, 0.0),
+            PropertyDescriptor("pitch_scale", "Pitch Scale", float, 1.0, minimum=0.000001),
+            PropertyDescriptor("autoplay", "Autoplay", bool, False),
+            PropertyDescriptor("stream_paused", "Paused", bool, False),
+            PropertyDescriptor("max_distance", "Max Distance", float, 2000.0, minimum=0.000001),
+            PropertyDescriptor("attenuation", "Attenuation", float, 1.0, minimum=0.0),
+            PropertyDescriptor("max_polyphony", "Max Polyphony", int, 1, minimum=1),
+            PropertyDescriptor("panning_strength", "Panning Strength", float, 1.0, minimum=0.0),
+            PropertyDescriptor(
+                "bus",
+                "Bus",
+                str,
+                "sfx",
+                enum_values=("master", "music", "sfx", "ambience", "dialogue", "ui"),
             ),
-        )
+            PropertyDescriptor("area_mask", "Area Mask", int, 0, minimum=0, maximum=0xFFFFFFFF),
+            PropertyDescriptor(
+                "playback_type",
+                "Playback Type",
+                str,
+                PlaybackType2D.DEFAULT.value,
+                enum_values=tuple(mode.value for mode in PlaybackType2D),
+            ),
+            PropertyDescriptor("enabled", "Enabled", bool, True),
+        ),
     )

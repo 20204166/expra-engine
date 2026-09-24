@@ -227,6 +227,27 @@ class ComponentRegistryTests(unittest.TestCase):
         self.assertIsInstance(component, TagComponent)
         self.assertEqual(component.tag, "player")
 
+    def test_component_from_dict_missing_type_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            component_from_dict({})
+
+    def test_component_from_dict_none_type_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            component_from_dict({"type": None})
+
+    def test_registered_component_types_is_repeatable(self) -> None:
+        first = registered_component_types()
+        second = registered_component_types()
+        self.assertEqual(first, second)
+
+    def test_base_component_defaults_and_round_trip(self) -> None:
+        component = Component()
+        self.assertTrue(component.enabled)
+        self.assertEqual(component.component_type, "component")
+        reloaded = Component.from_dict({"enabled": False})
+        self.assertFalse(reloaded.enabled)
+        self.assertEqual(reloaded.to_dict(), {"type": "component", "enabled": False})
+
 
 if __name__ == "__main__":
     unittest.main()
