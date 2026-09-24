@@ -32,3 +32,12 @@ class RenderDiagnostics:
 
     def clear(self) -> None:
         self._active.clear()
+
+    def active_keys(self) -> tuple[FailureKey, ...]:
+        """Return the currently-active failure signatures, most-recent order undefined.
+
+        Read-only introspection for callers (e.g. an MCP tool reporting why a
+        pixel render fell back to Canvas) that need to explain *why* rendering
+        failed without re-parsing log output.
+        """
+        return tuple(self._active)

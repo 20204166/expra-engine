@@ -13,6 +13,7 @@ Background work delivers results through TkDeliveryQueue → AppCoordinator
 """
 
 from __future__ import annotations
+
 import contextlib
 import json
 import logging
@@ -23,7 +24,9 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog
 from tkinter import ttk as tkttk
 from typing import Any
+
 import ttkbootstrap as ttk
+
 from expra_engine.coordinators.app_coordinator import AppCoordinator
 from expra_engine.coordinators.button_coordinator import ButtonCoordinator
 from expra_engine.coordinators.ui_coordinator import RenderIntent, UICoordinator
@@ -34,13 +37,13 @@ from expra_engine.core.scene import Scene
 from expra_engine.editor.builtin_features import build_builtin_features
 from expra_engine.editor.commands import (
     AddComponentCommand,
-    apply_component_change,
     CommandStack,
     DeleteEntityCommand,
-    RenameEntityCommand,
-    SetExposedValueCommand,
-    SetComponentPropertyCommand,
     RemoveComponentCommand,
+    RenameEntityCommand,
+    SetComponentPropertyCommand,
+    SetExposedValueCommand,
+    apply_component_change,
     remove_component,
 )
 from expra_engine.editor.contributions import (
@@ -57,6 +60,7 @@ from expra_engine.editor.project_workflow import ProjectWorkflow
 from expra_engine.editor.runtime_preview import RuntimePreviewLoop
 from expra_engine.editor.script_tools import attach_script, create_behaviour_script
 from expra_engine.editor.window_placement import WindowGeometry
+from expra_engine.observability import ObservabilityWatcher
 from expra_engine.runtime.input import PhysicalInput
 from expra_engine.runtime.script_component import ScriptComponent
 from expra_engine.runtime.script_registry import ScriptRegistry
@@ -73,6 +77,7 @@ from expra_engine.ui.styles import (
 from expra_engine.ui.timer_delivery import TimerDelivery
 from expra_engine.ui.toolbar import build_toolbar
 from expra_engine.ui.viewport import ViewportPanel
+
 LOGGER = logging.getLogger(__name__)
 _WINDOW_WIDTH = 1280
 _WINDOW_HEIGHT = 800
@@ -85,6 +90,7 @@ _INSPECTOR_MIN_WIDTH = 260
 _BOTTOM_HEIGHT = 150
 _BOTTOM_MIN_HEIGHT = 96
 _PREFERENCES_PATH = Path.home() / ".expra" / "preferences.json"
+_VIEWPORT_CAMERA_SAVE_DEBOUNCE_MS = 400
 
 
 class EditorWindow:
@@ -96,6 +102,7 @@ class EditorWindow:
         self._pending_timer_ids: set[str] = set()
         self._sash_after_id: str | None = None
         self._autosave_after_id: str | None = None
+        self._viewport_camera_save_after_id: str | None = None
         self._last_save_path: Path | None = None
         self._preferences_path = _PREFERENCES_PATH
         self._preferences_store = PreferencesStore()
@@ -126,7 +133,12 @@ class EditorWindow:
         # Coordinators
         self._coordinator = AppCoordinator(deliver=self._delivery_queue)
         self._actions = ButtonCoordinator()
-        self._ui = UICoordinator()
+        # Shared across UICoordinator and the viewport's pixel bridge so a
+        # single snapshot() reports the whole presentation pipeline together
+        # (ui:render:* commit timing alongside editor.pixelbridge:* stage
+        # timing) -- see performance_probe's use of this for regression data.
+        self._observer = ObservabilityWatcher()
+        self._ui = UICoordinator(observer=self._observer)
         self._editor_context = EditorContext(
             engine=self._engine,
             actions=self._actions,
@@ -260,6 +272,7 @@ class EditorWindow:
                 if self._engine.project is not None
                 else None
             ),
+            observer=self._observer,
         )
         self._viewport.pack(fill="both", expand=True)
         self._viewport_host = view_frame
@@ -784,8 +797,22 @@ class EditorWindow:
         self._hierarchy.select(entity_id)
 
     def _save_viewport_camera(self, values: dict[str, object]) -> None:
+        # Pan/zoom/rotate fire this on every mouse-motion tick -- update the
+        # in-memory value immediately (cheap) but debounce the actual disk
+        # write (atomic write + fsync, measured ~4-8ms) so a sustained drag
+        # doesn't serialize preferences dozens of times per second on the Tk
+        # main thread. The trailing write always lands: _on_close flushes any
+        # still-pending write before cancel_all() would otherwise drop it.
         self._preferences = replace(self._preferences, viewport_camera=values)
+        self._timer.cancel(self._viewport_camera_save_after_id)
+        self._viewport_camera_save_after_id = self._timer.schedule(
+            _VIEWPORT_CAMERA_SAVE_DEBOUNCE_MS, self._flush_viewport_camera_prefs
+        )
+
+    def _flush_viewport_camera_prefs(self) -> None:
+        self._viewport_camera_save_after_id = None
         self._preferences_store.save(self._preferences_path, self._preferences)
+
     # Refresh helpers
 
     def _refresh_viewport(self) -> None:
@@ -919,6 +946,11 @@ class EditorWindow:
             with contextlib.suppress(tk.TclError):
                 self._root.after_cancel(self._sash_after_id)
             self._sash_after_id = None
+        if self._viewport_camera_save_after_id is not None:
+            self._timer.cancel(self._viewport_camera_save_after_id)
+            self._viewport_camera_save_after_id = None
+            with contextlib.suppress(OSError, TypeError, ValueError):
+                self._preferences_store.save(self._preferences_path, self._preferences)
         self._timer.cancel_all()
         self._contributions.stop_all()
         self._delivery_queue.close()

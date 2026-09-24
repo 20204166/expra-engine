@@ -6,12 +6,13 @@ implementation, no System Analyzer imports.
 
 from __future__ import annotations
 
+import json
 import statistics
 import threading
 import time
 from collections import deque
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from math import isfinite
 from typing import Literal
 
@@ -118,6 +119,19 @@ def summarize_samples(samples: tuple[float, ...]) -> dict[str, float | int]:
         "spread": ordered[-1] - ordered[0],
         "outliers": sum(value > p75 + 1.5 * (p75 - p25) for value in ordered),
     }
+
+
+def serialize_observability(watcher: ObservabilityWatcher) -> str:
+    """Serialize a snapshot for external tooling (bench scripts, capture files).
+
+    Adapted from exp_ui's ``maintenance/diagnostics.py::serialize_diagnostics``:
+    a plain ``asdict()`` + ``json.dumps()`` of the watcher's own snapshot, with
+    no re-derivation of its numbers -- the report tooling that reads this
+    (``tools/observability_report.py``) is expected to project these fields
+    the same way exp_ui's ``application_performance_audit.py`` does, never
+    recompute them.
+    """
+    return json.dumps(asdict(watcher.snapshot()), indent=2, sort_keys=True)
 
 
 class ObservabilityWatcher:

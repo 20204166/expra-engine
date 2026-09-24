@@ -316,7 +316,13 @@ class RenderItem:
             self.sprite_transform if self.primitive.kind == "sprite" else self.world_transform
         )
         center = context.camera.project(transform.position, context.viewport)
-        if self.primitive.radius is None and (transform.rotation or context.camera.rotation):
+        # ``radius`` is overloaded: for circle/point it is the full extent of
+        # the shape, but for rounded_rectangle it is only a corner radius --
+        # the shape's actual extent is still ``size``. Treating a rounded
+        # rectangle's tiny corner radius as its bounding radius would cull it
+        # far too aggressively (or too late) during visibility checks.
+        radius_is_extent = self.primitive.kind in ("circle", "point") and self.primitive.radius is not None
+        if not radius_is_extent and (transform.rotation or context.camera.rotation):
             half_width = abs(self.primitive.size[0] * transform.scale[0]) / 2
             half_height = abs(self.primitive.size[1] * transform.scale[1]) / 2
             angle = math.radians(transform.rotation)
@@ -341,7 +347,8 @@ class RenderItem:
             xs = tuple(point[0] for point in projected)
             ys = tuple(point[1] for point in projected)
             return min(xs), min(ys), max(xs), max(ys)
-        if self.primitive.radius is not None:
+        if radius_is_extent:
+            assert self.primitive.radius is not None
             radius = self.primitive.radius * max(abs(transform.scale[0]), abs(transform.scale[1]))
             rx = radius / context.camera.width * context.viewport.width
             ry = radius / context.camera.height * context.viewport.height

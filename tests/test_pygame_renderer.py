@@ -4,6 +4,8 @@ import unittest
 from math import radians
 from types import SimpleNamespace
 
+import pytest
+
 from expra_engine.core.component import TransformComponent
 from expra_engine.core.scene import Scene
 from expra_engine.runtime import (
@@ -1283,6 +1285,89 @@ class TestPygameRenderer(unittest.TestCase):
         self.assertEqual(len(pygame.draw.circles), 2)
         self.assertEqual(pygame.draw.circles[0][2], (80, 60))
         self.assertEqual(pygame.draw.circles[1][2], (160, 120))
+
+
+def test_rounded_rectangle_renders_real_pixels_fill_corner_and_outline() -> None:
+    """Real Pygame pixels, not fake-draw call metadata: fill, rounded-corner
+    transparency, and outline must all land where the geometry says they should.
+    """
+    pygame = pytest.importorskip("pygame")
+    pygame.init()
+    try:
+        width, height = 200, 200
+        surface = pygame.Surface((width, height), flags=pygame.SRCALPHA)
+        renderer = PygameRenderer(pygame, surface, clear_color=None)
+        camera = OrthographicCamera(width=20.0, height=20.0)
+        renderer.start(RenderContext(Viewport(0, 0, width, height), camera))
+
+        prim = PrimitiveDescriptor("rounded_rectangle", (10.0, 6.0), 1.5)
+        material = MaterialDescriptor(
+            color=Color(1.0, 0.0, 0.0, 1.0),
+            outline=Color(0.0, 1.0, 0.0, 1.0),
+            outline_width=2.0,
+        )
+        item = RenderItem("paddle", prim, Transform(position=(0.0, 0.0, 0.0)), material=material)
+
+        renderer.render(RenderContractFrame((item,)))
+
+        assert not renderer.draw_failed
+        cx, cy = camera.project((0.0, 0.0), Viewport(0, 0, width, height))
+        cx, cy = round(cx), round(cy)
+
+        def px(x: int, y: int) -> tuple[int, int, int, int]:
+            return tuple(surface.get_at((x, y)))
+
+        # bbox: width_px=100, height_px=60, radius_px=15 -> x in [cx-50, cx+50], y in [cy-30, cy+30]
+        assert px(cx, cy) == (255, 0, 0, 255)  # center: fill
+        assert px(cx - 49, cy - 29) == (0, 0, 0, 0)  # bbox corner: rounded away, transparent
+        assert px(cx - 90, cy - 90) == (0, 0, 0, 0)  # far outside bbox: transparent
+        assert px(cx, cy - 29) == (0, 255, 0, 255)  # straight top edge: outline
+        assert px(cx, cy - 25) == (255, 0, 0, 255)  # inside outline band: fill
+    finally:
+        pygame.quit()
+
+
+def test_rounded_rectangle_rotation_preserves_visibility_and_sibling_items() -> None:
+    """A rotated rounded rectangle must still produce real pixels, and must not
+    trigger a whole-frame fallback that blanks an unrelated sibling item.
+    """
+    pygame = pytest.importorskip("pygame")
+    pygame.init()
+    try:
+        width, height = 200, 200
+        surface = pygame.Surface((width, height), flags=pygame.SRCALPHA)
+        renderer = PygameRenderer(pygame, surface, clear_color=None)
+        camera = OrthographicCamera(width=20.0, height=20.0)
+        viewport = Viewport(0, 0, width, height)
+        renderer.start(RenderContext(viewport, camera))
+
+        rounded = RenderItem(
+            "paddle",
+            PrimitiveDescriptor("rounded_rectangle", (10.0, 6.0), 1.5),
+            Transform(position=(0.0, 0.0, 0.0), rotation=45.0),
+            material=MaterialDescriptor(color=Color(1.0, 0.0, 0.0, 1.0)),
+        )
+        sibling = RenderItem(
+            "marker",
+            PrimitiveDescriptor("rectangle", (2.0, 2.0)),
+            Transform(position=(6.0, 6.0, 0.0)),
+            material=MaterialDescriptor(color=Color(0.0, 0.0, 1.0, 1.0)),
+        )
+
+        renderer.render(RenderContractFrame((rounded, sibling)))
+
+        assert not renderer.draw_failed
+
+        def px(x: int, y: int) -> tuple[int, int, int, int]:
+            return tuple(surface.get_at((x, y)))
+
+        rcx, rcy = (round(v) for v in camera.project((0.0, 0.0), viewport))
+        assert px(rcx, rcy) == (255, 0, 0, 255)  # rotated shape still fills its own center
+
+        scx, scy = (round(v) for v in camera.project((6.0, 6.0), viewport))
+        assert px(scx, scy) == (0, 0, 255, 255)  # sibling unaffected by the rotated draw
+    finally:
+        pygame.quit()
 
 
 if __name__ == "__main__":

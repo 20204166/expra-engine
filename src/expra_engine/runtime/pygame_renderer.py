@@ -12,7 +12,7 @@ from typing import Any, cast
 from expra_engine.core.component import TransformComponent
 from expra_engine.core.scene import Scene
 from expra_engine.runtime.canvas_effects import modulate_color
-from expra_engine.runtime.pygame_geometry import projected_rectangle_points
+from expra_engine.runtime.pygame_geometry import draw_rounded_rectangle, projected_rectangle_points
 from expra_engine.runtime.pygame_resource_provider import PygameResourceProvider
 from expra_engine.runtime.pygame_screen_pipeline import PygameScreenPipeline
 from expra_engine.runtime.render_diagnostics import FailureKey, RenderDiagnostics
@@ -428,6 +428,10 @@ class PygameRenderer:
                             rectangle,
                             round(item.material.outline_width),
                         )
+            elif item.primitive.kind == "rounded_rectangle":
+                draw_rounded_rectangle(
+                    self, surface, draw, item, transform, context, position, color, modulation
+                )
             elif item.primitive.kind == "circle":
                 radius = item.primitive.radius or item.primitive.size[0] / 2
                 pixels = round(

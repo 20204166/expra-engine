@@ -85,6 +85,29 @@ def _color_to_list(color: Any) -> list[float] | None:
     return [color.red, color.green, color.blue, color.alpha]
 
 
+def _pixel_fallback_reason(viewport: Any) -> str:
+    """Explain why ``viewport`` has no rendered pixel image right now.
+
+    Reads ``EditorPixelRenderer.diagnostics.active_keys()`` -- the same
+    signatures the real renderer already tracks to avoid re-logging a
+    persistent failure -- rather than re-deriving anything. Falls back to a
+    generic explanation when nothing is active (e.g. no scene loaded yet).
+    """
+    pixel_renderer = getattr(viewport, "_pixel_renderer", None)
+    diagnostics = getattr(pixel_renderer, "diagnostics", None)
+    active_keys = diagnostics.active_keys() if diagnostics is not None else ()
+    if not active_keys:
+        return "no rendered pixel frame available (no scene loaded, or nothing rendered yet)"
+    category, *rest = active_keys[0]
+    if category == "preflight" and len(rest) >= 3 and rest[0] == "primitive":
+        return f"unsupported primitive: {rest[2]}"
+    if category == "preflight" and len(rest) >= 3 and rest[0] == "source-region":
+        return f"invalid source region: entity={rest[1]} resource={rest[2]}"
+    if category == "renderer" and len(rest) >= 3 and rest[0] == "texture":
+        return f"texture unavailable: {rest[1]}"
+    return ": ".join(str(part) for part in active_keys[0])
+
+
 def _find_entity(scene: Any, entity: str) -> Any:
     found = scene.find_entity(entity) or scene.find_entity_by_name(entity)
     if found is None:
@@ -265,7 +288,18 @@ def _dispatch(command: str, params: dict[str, Any], *, engine: Any, window: Any,
         # new dependency.
         image = getattr(window._viewport, "_pixel_image", None)
         if image is None:
-            raise RuntimeError("viewport has no rendered pixel image yet")
+            # Canvas fallback is a legitimate renderer state (e.g. an
+            # unsupported primitive, a missing texture, or simply no scene
+            # loaded yet) -- report it as structured data rather than
+            # raising, so a caller can tell "renderer genuinely can't do
+            # this" apart from "tool usage error". Canvas fallback must never
+            # be reported as a successful pixel render.
+            return {
+                "available": False,
+                "pixel_layer_active": False,
+                "fallback_active": True,
+                "reason": _pixel_fallback_reason(window._viewport),
+            }
         fd, tmp_path_str = tempfile.mkstemp(suffix=".png")
         os.close(fd)
         tmp_path = Path(tmp_path_str)
@@ -276,6 +310,9 @@ def _dispatch(command: str, params: dict[str, Any], *, engine: Any, window: Any,
             with contextlib.suppress(OSError):
                 tmp_path.unlink()
         return {
+            "available": True,
+            "pixel_layer_active": True,
+            "fallback_active": False,
             "width": image.width(),
             "height": image.height(),
             "_png_base64": base64.b64encode(png_bytes).decode("ascii"),

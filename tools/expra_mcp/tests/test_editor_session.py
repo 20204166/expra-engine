@@ -108,6 +108,9 @@ async def test_full_spec_acceptance_workflow(server) -> None:
                 "editor_session", {"action": "capture_viewport", "session_id": session_id}
             )
             assert snapshot.is_error is not True
+            assert snapshot.structured_content["data"]["available"] is True
+            assert snapshot.structured_content["data"]["pixel_layer_active"] is True
+            assert snapshot.structured_content["data"]["fallback_active"] is False
             image = next((c for c in snapshot.content if isinstance(c, ImageContent)), None)
             assert image is not None
             assert image.mime_type == "image/png"
@@ -135,6 +138,55 @@ async def test_send_key_requires_key(server) -> None:
         try:
             result = await client.call_tool("editor_session", {"action": "send_key", "session_id": session_id})
             assert result.is_error is True
+        finally:
+            await client.call_tool("editor_session", {"action": "close", "session_id": session_id})
+
+
+async def test_space_pong_paddles_use_canonical_pixel_path_across_play_stop_cycles(server) -> None:
+    """Space Pong's rounded_rectangle paddles previously fell back to Canvas
+    (frame_textures_available rejected the primitive). This proves, through
+    the real MCP protocol against a real Tk editor, that the pixel path is
+    now genuinely active in Edit AND stays active across repeated Play/Stop
+    cycles -- not just that a static check passes once.
+    """
+    async with Client(server) as client:
+        session_id = await _start_session(client)
+        try:
+            opened = await client.call_tool(
+                "editor_session",
+                {"action": "open_project", "session_id": session_id, "project": "examples/space_pong"},
+            )
+            assert opened.is_error is not True
+
+            for _ in range(3):
+                edit_snapshot = await client.call_tool(
+                    "editor_session", {"action": "capture_viewport", "session_id": session_id}
+                )
+                assert edit_snapshot.is_error is not True
+                assert edit_snapshot.structured_content["data"]["available"] is True
+                assert edit_snapshot.structured_content["data"]["pixel_layer_active"] is True
+                assert edit_snapshot.structured_content["data"]["fallback_active"] is False
+
+                played = await client.call_tool(
+                    "editor_session", {"action": "play", "session_id": session_id}
+                )
+                assert played.structured_content["data"]["run_state"] == "play"
+                await client.call_tool(
+                    "editor_session", {"action": "wait", "session_id": session_id, "duration_ms": 100}
+                )
+
+                play_snapshot = await client.call_tool(
+                    "editor_session", {"action": "capture_viewport", "session_id": session_id}
+                )
+                assert play_snapshot.is_error is not True
+                assert play_snapshot.structured_content["data"]["available"] is True
+                assert play_snapshot.structured_content["data"]["pixel_layer_active"] is True
+                assert play_snapshot.structured_content["data"]["fallback_active"] is False
+
+                stopped = await client.call_tool(
+                    "editor_session", {"action": "stop", "session_id": session_id}
+                )
+                assert stopped.structured_content["data"]["run_state"] == "edit"
         finally:
             await client.call_tool("editor_session", {"action": "close", "session_id": session_id})
 

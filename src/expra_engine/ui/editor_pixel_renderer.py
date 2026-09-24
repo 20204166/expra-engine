@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-import base64
 import logging
+import struct
 import tkinter as tk
+import zlib
 from collections.abc import Callable, Hashable, Mapping
 from io import BytesIO
 from typing import Any, cast
 
+from expra_engine.observability import ObservabilityWatcher
 from expra_engine.runtime.pygame_renderer import PygameRenderer, PygameResourceProvider
 from expra_engine.runtime.render_diagnostics import RenderDiagnostics
 from expra_engine.runtime.rendering import OrthographicCamera, RenderContext, RenderFrame, Viewport
@@ -16,6 +18,7 @@ from expra_engine.runtime.rendering import OrthographicCamera, RenderContext, Re
 __all__ = (
     "EditorPixelRenderer",
     "encode_pygame_surface",
+    "encode_pygame_surface_fast",
     "frame_textures_available",
     "render_editor_frame_to_image",
     "render_editor_frame_to_tk_image",
@@ -34,14 +37,19 @@ def render_editor_frame_to_image(
     image_factory: Callable[[bytes], Any],
     diagnostics: RenderDiagnostics | None = None,
     entity_names: Mapping[str, str] | None = None,
+    observer: ObservabilityWatcher | None = None,
 ) -> Any | None:
     """Render one canonical frame and bridge its pixels into Tk safely."""
     diagnostics = diagnostics or RenderDiagnostics(_LOGGER)
     try:
         surface = surface_factory((context.viewport.width, context.viewport.height))
         renderer = renderer_factory(surface)
+        token = observer.begin("editor.pixelbridge.render") if observer is not None else None
         renderer.start(context)
         renderer.render(frame)
+        if token is not None:
+            assert observer is not None
+            observer.finish(token)
         if getattr(renderer, "draw_failed", False):
             _log_presentation_failure(
                 frame,
@@ -50,7 +58,16 @@ def render_editor_frame_to_image(
                 entity_names=entity_names,
             )
             return None
-        image = image_factory(encode_surface(surface))
+        encode_token = observer.begin("editor.pixelbridge.encode") if observer is not None else None
+        encoded = encode_surface(surface)
+        if encode_token is not None:
+            assert observer is not None
+            observer.finish(encode_token)
+        image_token = observer.begin("editor.pixelbridge.photoimage") if observer is not None else None
+        image = image_factory(encoded)
+        if image_token is not None:
+            assert observer is not None
+            observer.finish(image_token)
         diagnostics.clear()
         return image
     except Exception as exc:  # noqa: BLE001 - editor backend failures use geometry fallback
@@ -65,10 +82,60 @@ def render_editor_frame_to_image(
 
 
 def encode_pygame_surface(pygame_module: Any, surface: Any) -> bytes:
-    """Encode an offscreen surface in a format Tk can decode."""
+    """Encode an offscreen surface in a format Tk can decode.
+
+    Uses the backend's own (SDL_image) PNG encoder -- the general-purpose,
+    always-correct path used by one-shot/offline consumers (the expra-mcp
+    static runner's ``render_snapshot``) where per-frame latency doesn't
+    matter. The live interactive editor viewport uses
+    ``encode_pygame_surface_fast`` instead; see its docstring for why.
+    """
     stream = BytesIO()
     pygame_module.image.save(surface, stream, "PNG")
     return stream.getvalue()
+
+
+def _png_chunk(tag: bytes, data: bytes) -> bytes:
+    return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data))
+
+
+def encode_pygame_surface_fast(pygame_module: Any, surface: Any) -> bytes:
+    """Encode a surface as a real, valid, alpha-preserving PNG -- fast.
+
+    Measured against Blacksite Relay at 1280x720 (60 render items): the
+    backend's own PNG encoder (``encode_pygame_surface``) costs ~40-50ms per
+    frame and decoding it back inside Tk's ``PhotoImage`` costs another
+    ~20-35ms -- ~65-75ms total, capping interactive presentation at roughly
+    13-15fps regardless of how cheap rendering itself is (~2-3ms). Raw
+    RGB/PPM was measured ~4x faster but was rejected: this editor renders
+    onto a surface filled with (0, 0, 0, 0) precisely so the Tk canvas grid
+    shows through empty regions (see ``PygameRenderer._clear_surface`` with
+    ``clear_color=None``); PPM has no alpha channel and would replace that
+    transparency with an opaque black rectangle -- a real visual regression.
+
+    Instead this builds a minimal, spec-valid PNG (8-bit RGBA, filter type 0
+    per scanline) using ``zlib`` level 1 ("fast") rather than SDL_image's
+    default compression level. Measured ~3x faster end-to-end than the
+    default path for typical editor scenes, because these scenes compress
+    well (large flat/transparent regions) -- level 1 both computes and
+    transmits/decodes far fewer bytes than fighting for a marginally smaller
+    file at a higher compression level would save.
+    """
+    width, height = surface.get_size()
+    rgba = pygame_module.image.tostring(surface, "RGBA")
+    stride = width * 4
+    raw = bytearray()
+    for y in range(height):
+        raw.append(0)  # PNG filter type 0 (None) for this scanline
+        raw += rgba[y * stride : (y + 1) * stride]
+    compressed = zlib.compress(bytes(raw), level=1)
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)  # color type 6 = truecolor+alpha
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + _png_chunk(b"IHDR", ihdr)
+        + _png_chunk(b"IDAT", compressed)
+        + _png_chunk(b"IEND", b"")
+    )
 
 
 def frame_textures_available(
@@ -92,7 +159,8 @@ def frame_textures_available(
                 texture_id is None
                 and item.text is None
                 and item.nine_slice is None
-                and item.primitive.kind not in {"rectangle", "rect", "circle", "point"}
+                and item.primitive.kind
+                not in {"rectangle", "rect", "circle", "point", "rounded_rectangle"}
             ):
                 diagnostics.report(
                     ("preflight", "primitive", item.key, item.primitive.kind),
@@ -172,6 +240,8 @@ def render_editor_frame_to_tk_image(
     image_master: Any,
     diagnostics: RenderDiagnostics | None = None,
     entity_names: Mapping[str, str] | None = None,
+    observer: ObservabilityWatcher | None = None,
+    photo_image_reuse: Any | None = None,
 ) -> Any | None:
     """Render a complete editor frame, or return ``None`` for Tk fallback."""
     diagnostics = diagnostics or RenderDiagnostics(_LOGGER)
@@ -222,18 +292,22 @@ def render_editor_frame_to_tk_image(
                 diagnostics=diagnostics,
             )
 
+        def image_factory(data: bytes) -> Any:
+            if photo_image_reuse is not None:
+                photo_image_reuse.configure(data=data, format="png")
+                return photo_image_reuse
+            return tk.PhotoImage(master=image_master, data=data, format="png")
+
         return render_editor_frame_to_image(
             frame,
             context,
             surface_factory=surface_factory,
             renderer_factory=renderer_factory,
-            encode_surface=lambda surface: encode_pygame_surface(pygame_module, surface),
-            image_factory=lambda data: tk.PhotoImage(
-                master=image_master,
-                data=base64.b64encode(data).decode("ascii"),
-            ),
+            encode_surface=lambda surface: encode_pygame_surface_fast(pygame_module, surface),
+            image_factory=image_factory,
             diagnostics=diagnostics,
             entity_names=entity_names,
+            observer=observer,
         )
     except Exception as exc:  # noqa: BLE001 - editor backend failures use geometry fallback
         _log_presentation_failure(
@@ -258,16 +332,39 @@ def editor_render_context(editor_camera: Any, width: int, height: int) -> Render
 class EditorPixelRenderer:
     """Own optional Pygame resources and produce a complete Tk image."""
 
-    def __init__(self, resource_service: Any | None = None) -> None:
+    def __init__(
+        self,
+        resource_service: Any | None = None,
+        *,
+        observer: ObservabilityWatcher | None = None,
+    ) -> None:
         self._resource_service = resource_service
+        self._observer = observer
         self._provider: PygameResourceProvider | None = None
         self._provider_resources: Any | None = None
         self._diagnostics = RenderDiagnostics(_LOGGER)
         self._last_image: Any | None = None
+        # One PhotoImage reused across frames via .configure() instead of
+        # allocating+decoding a brand-new one every render -- Tk resizes a
+        # photo image in place when configured with differently-sized data,
+        # so a fixed viewport size is not required. Rebuilt (not reused)
+        # whenever image_master changes, since a PhotoImage is bound to the
+        # Tk interpreter it was created under.
+        self._photo_image: Any | None = None
+        self._photo_image_master: Any | None = None
 
     @property
     def resource_service(self) -> Any | None:
         return self._resource_service
+
+    @property
+    def diagnostics(self) -> RenderDiagnostics:
+        """Read-only access to the active failure signatures, if any.
+
+        Lets a caller (e.g. an MCP tool) explain why ``render()`` last
+        returned ``None`` -- Canvas fallback -- without re-parsing logs.
+        """
+        return self._diagnostics
 
     def set_resource_service(self, resource_service: Any | None) -> None:
         if resource_service is self._resource_service:
@@ -277,6 +374,8 @@ class EditorPixelRenderer:
         self._provider_resources = None
         self._diagnostics.clear()
         self._last_image = None
+        self._photo_image = None
+        self._photo_image_master = None
 
     def clear(self) -> None:
         """Discard backend state and any image retained for failure recovery."""
@@ -284,6 +383,8 @@ class EditorPixelRenderer:
         self._provider_resources = None
         self._diagnostics.clear()
         self._last_image = None
+        self._photo_image = None
+        self._photo_image_master = None
 
     def render(
         self,
@@ -309,6 +410,9 @@ class EditorPixelRenderer:
             if self._provider_resources is not self._resource_service:
                 self._provider = PygameResourceProvider(pygame, self._resource_service)
                 self._provider_resources = self._resource_service
+            if self._photo_image_master is not image_master:
+                self._photo_image = None
+                self._photo_image_master = image_master
             image = render_editor_frame_to_tk_image(
                 frame,
                 editor_render_context(editor_camera, width, height),
@@ -320,9 +424,12 @@ class EditorPixelRenderer:
                 image_master=image_master,
                 diagnostics=self._diagnostics,
                 entity_names=entity_names,
+                observer=self._observer,
+                photo_image_reuse=self._photo_image,
             )
             if image is not None:
                 self._last_image = image
+                self._photo_image = image
                 return image
             return self._last_image
         except Exception as exc:  # noqa: BLE001 - editor backend failures use geometry fallback

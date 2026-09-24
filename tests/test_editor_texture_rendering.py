@@ -19,6 +19,7 @@ from expra_engine.editor.contributions import EditorContext
 from expra_engine.editor.preferences import EditorPreferences
 from expra_engine.editor.project_workflow import ProjectWorkflow
 from expra_engine.filesystem import ResourceId
+from expra_engine.observability import ObservabilityWatcher
 from expra_engine.runtime.input import PhysicalInput
 from expra_engine.runtime.pygame_renderer import PygameRenderer, PygameResourceProvider
 from expra_engine.runtime.render_diagnostics import RenderDiagnostics
@@ -41,6 +42,9 @@ from expra_engine.ui.editor_pixel_renderer import (
 )
 from expra_engine.ui.editor_pixel_renderer import (
     encode_pygame_surface as _encode_pygame_surface,
+)
+from expra_engine.ui.editor_pixel_renderer import (
+    encode_pygame_surface_fast as _encode_pygame_surface_fast,
 )
 from expra_engine.ui.editor_pixel_renderer import (
     render_editor_frame_to_image as _render_editor_frame_to_image,
@@ -186,8 +190,8 @@ def test_editor_renderer_deduplicates_failures_and_preserves_last_good_image(cap
     unsupported = RenderFrame(
         (
             RenderItem(
-                "rounded",
-                PrimitiveDescriptor("rounded_rectangle", (2.0, 1.0)),
+                "triangle",
+                PrimitiveDescriptor("triangle", (2.0, 1.0)),
                 Transform(),
             ),
         )
@@ -212,7 +216,7 @@ def test_editor_renderer_deduplicates_failures_and_preserves_last_good_image(cap
                         160,
                         90,
                         root,
-                        entity_names={"rounded": "Unsupported Shape"},
+                        entity_names={"triangle": "Unsupported Shape"},
                     )
                     is None
                 )
@@ -226,7 +230,7 @@ def test_editor_renderer_deduplicates_failures_and_preserves_last_good_image(cap
                     160,
                     90,
                     root,
-                    entity_names={"rounded": "Unsupported Shape"},
+                    entity_names={"triangle": "Unsupported Shape"},
                 )
                 is last_good
             )
@@ -562,8 +566,17 @@ def test_editor_preflight_matches_canonical_primitive_capabilities() -> None:
     unsupported = RenderFrame(
         (
             RenderItem(
+                "hexagon",
+                PrimitiveDescriptor("hexagon", (2.0, 1.0)),
+                Transform(),
+            ),
+        )
+    )
+    rounded_rectangle = RenderFrame(
+        (
+            RenderItem(
                 "rounded",
-                PrimitiveDescriptor("rounded_rectangle", (2.0, 1.0)),
+                PrimitiveDescriptor("rounded_rectangle", (2.0, 1.0), 0.3),
                 Transform(),
             ),
         )
@@ -618,6 +631,7 @@ def test_editor_preflight_matches_canonical_primitive_capabilities() -> None:
     context = RenderContext(Viewport(0, 0, 160, 90))
 
     assert not frame_textures_available(unsupported, context, lambda _texture_id: None)
+    assert frame_textures_available(rounded_rectangle, context, lambda _texture_id: None)
     assert frame_textures_available(rotated, context, lambda _texture_id: None)
     assert frame_textures_available(outlined_circle, context, lambda _texture_id: None)
     assert frame_textures_available(outlined_point, context, lambda _texture_id: None)
@@ -799,3 +813,166 @@ def test_open_project_replaces_viewport_resources(tmp_path: Path) -> None:
 
     assert viewport.services[0] is not None
     assert viewport.services[-1] is None
+
+
+def test_encode_pygame_surface_fast_preserves_alpha_and_matches_pixels() -> None:
+    """The fast editor encoder must round-trip real per-pixel alpha exactly.
+
+    Raw RGB/PPM was rejected as a faster alternative specifically because it
+    cannot represent this -- see encode_pygame_surface_fast's docstring.
+    """
+    pygame = pytest.importorskip("pygame")
+    pygame.init()
+    try:
+        surface = pygame.Surface((4, 4), flags=pygame.SRCALPHA)
+        surface.fill((0, 0, 0, 0))  # fully transparent, as the live editor renders
+        surface.set_at((0, 0), (255, 0, 0, 255))  # opaque red
+        surface.set_at((1, 0), (0, 0, 255, 128))  # semi-transparent blue
+        surface.set_at((2, 0), (0, 0, 0, 0))  # explicit transparent
+
+        png_bytes = _encode_pygame_surface_fast(pygame, surface)
+        assert png_bytes.startswith(b"\x89PNG\r\n\x1a\n")
+
+        decoded = pygame.image.load(BytesIO(png_bytes))
+        assert decoded.get_size() == (4, 4)
+        assert tuple(decoded.get_at((0, 0))) == (255, 0, 0, 255)
+        assert tuple(decoded.get_at((1, 0))) == (0, 0, 255, 128)
+        assert tuple(decoded.get_at((2, 0))) == (0, 0, 0, 0)
+        assert tuple(decoded.get_at((3, 3))) == (0, 0, 0, 0)
+    finally:
+        pygame.quit()
+
+
+def test_editor_pixel_renderer_reuses_photoimage_across_frames(tmp_path: Path) -> None:
+    """Section 4/5 fix: the same Tk PhotoImage object is configured in place
+    across frames instead of a fresh one being allocated+decoded every call,
+    but a change of Tk master (a different window) or an explicit clear()
+    still produces a fresh image rather than reusing across an invalid scope.
+    """
+    pytest.importorskip("pygame")
+    try:
+        root_a = tk.Tk()
+        root_b = tk.Tk()
+    except tk.TclError:
+        pytest.skip("no display for real Tk editor presentation")
+
+    try:
+        project, scene, _asset_id = make_texture_project(tmp_path)
+        frame = extract_render_frame(scene)
+        renderer = EditorPixelRenderer(project.resource_service())
+        camera = SimpleNamespace(
+            position=(0.0, 0.0), _camera=SimpleNamespace(width=10.0, rotation=0.0)
+        )
+
+        first = renderer.render(frame, camera, 160, 120, root_a)
+        second = renderer.render(frame, camera, 160, 120, root_a)
+        assert first is not None
+        assert second is first, "expected the same PhotoImage to be reconfigured, not recreated"
+
+        different_master = renderer.render(frame, camera, 160, 120, root_b)
+        assert different_master is not first, "a different Tk master must not reuse the old photo"
+
+        renderer.clear()
+        after_clear = renderer.render(frame, camera, 160, 120, root_b)
+        assert after_clear is not different_master, "clear() must discard the reused photo image"
+    finally:
+        root_a.destroy()
+        root_b.destroy()
+
+
+def test_editor_pixel_renderer_records_pixelbridge_observability_stages(tmp_path: Path) -> None:
+    """Wires the same ObservabilityWatcher UICoordinator already uses (see
+    editor_window.EditorWindow._observer) so pixel-bridge stage timing shows
+    up alongside ui:render:* commit timing in one unified snapshot -- the
+    permanent regression-timing surface this smoothness pass was asked for.
+    """
+    pytest.importorskip("pygame")
+    try:
+        root = tk.Tk()
+    except tk.TclError:
+        pytest.skip("no display for real Tk editor presentation")
+
+    try:
+        project, scene, _asset_id = make_texture_project(tmp_path)
+        frame = extract_render_frame(scene)
+        observer = ObservabilityWatcher()
+        renderer = EditorPixelRenderer(project.resource_service(), observer=observer)
+        camera = SimpleNamespace(
+            position=(0.0, 0.0), _camera=SimpleNamespace(width=10.0, rotation=0.0)
+        )
+
+        image = renderer.render(frame, camera, 160, 120, root)
+        assert image is not None
+
+        snapshot = observer.snapshot()
+        targets = {m.target: m for m in snapshot.metrics}
+        for stage in (
+            "editor.pixelbridge.render",
+            "editor.pixelbridge.encode",
+            "editor.pixelbridge.photoimage",
+        ):
+            assert stage in targets, f"missing observability stage: {stage}"
+            assert targets[stage].count == 1
+            assert targets[stage].successes == 1
+    finally:
+        root.destroy()
+
+
+def test_space_pong_paddles_use_canonical_pixel_path_not_canvas_fallback() -> None:
+    """Space Pong's paddles are PrimitiveComponent(kind="rounded_rectangle").
+
+    Before rounded_rectangle backend support existed, frame_textures_available
+    rejected it and Space Pong silently fell back to Canvas-vector rendering in
+    the editor -- this proves the canonical Pygame pixel path is now genuinely
+    active for it, not merely that the primitive doesn't crash.
+    """
+    pygame = pytest.importorskip("pygame")
+    project = Project.load(Path(__file__).parents[1] / "examples" / "space_pong")
+    scene = project.load_scene()
+
+    paddles = [
+        entity
+        for entity in scene.entities
+        if entity.name in ("Left Paddle", "Right Paddle")
+        and (primitive := entity.get_component(PrimitiveComponent)) is not None
+        and primitive.kind == "rounded_rectangle"
+    ]
+    assert len(paddles) == 2, "expected both paddles to use rounded_rectangle"
+
+    frame = extract_render_frame(scene)
+    paddle_ids = {entity.entity_id for entity in paddles}
+    frame_paddle_items = [item for item in frame.items if item.key in paddle_ids]
+    assert len(frame_paddle_items) == 2
+    assert all(item.primitive.kind == "rounded_rectangle" for item in frame_paddle_items)
+
+    pygame.init()
+    try:
+        service = project.resource_service()
+        provider = PygameResourceProvider(pygame, service)
+        context = RenderContext(Viewport(0, 0, 320, 240), OrthographicCamera(width=100.0, height=75.0))
+
+        # This is the exact preflight the editor calls before choosing pixel
+        # rendering over Canvas fallback -- it must accept rounded_rectangle now.
+        assert frame_textures_available(frame, context, provider)
+
+        encoded = _render_editor_frame_to_image(
+            frame,
+            context,
+            surface_factory=lambda size: pygame.Surface(size, flags=pygame.SRCALPHA),
+            renderer_factory=lambda surface: PygameRenderer(
+                pygame,
+                surface,
+                resource_provider=provider,
+                clear_color=None,
+            ),
+            encode_surface=lambda surface: _save_pygame_png(pygame, surface),
+            image_factory=lambda value: value,
+        )
+
+        # A real pixel image, not the None that signals Canvas fallback.
+        assert encoded is not None
+        decoded = pygame.image.load(BytesIO(encoded))
+        assert decoded.get_bounding_rect().width > 0
+        assert decoded.get_bounding_rect().height > 0
+    finally:
+        pygame.quit()

@@ -89,6 +89,7 @@ class ViewportPanel(tk.Frame):
         camera_state: dict[str, object] | None = None,
         on_camera_change: Any = None,
         resource_service: Any | None = None,
+        observer: Any | None = None,
     ) -> None:
         c = colors or COLORS
         super().__init__(
@@ -106,7 +107,7 @@ class ViewportPanel(tk.Frame):
         self._editor_overlays = True
         self._interpolator: Any | None = None
         self._interpolation_fraction = 0.0
-        self._pixel_renderer = EditorPixelRenderer(resource_service)
+        self._pixel_renderer = EditorPixelRenderer(resource_service, observer=observer)
         self._pixel_image: Any | None = None
         if camera_state:
             self._camera.apply_dict(camera_state)

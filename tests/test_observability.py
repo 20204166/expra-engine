@@ -4,11 +4,12 @@ Adapted from System Analyzer tests/test_observability.py — imports updated
 to expra_engine.observability; all test logic preserved.
 """
 
+import json
 import threading
 import unittest
 from typing import cast
 
-from expra_engine.observability import ObservabilityWatcher, Outcome
+from expra_engine.observability import ObservabilityWatcher, Outcome, serialize_observability
 
 
 class ObservabilityWatcherTests(unittest.TestCase):
@@ -135,6 +136,29 @@ class ObservabilityWatcherTests(unittest.TestCase):
         metric = watcher.snapshot().metrics[0]
         self.assertEqual(metric.count, 1)
         self.assertEqual(metric.in_flight, 0)
+
+
+class SerializeObservabilityTests(unittest.TestCase):
+    def test_round_trips_to_the_shape_tools_observability_report_expects(self) -> None:
+        watcher = ObservabilityWatcher()
+        watcher.record("editor.pixelbridge.encode", 0.015, outcome="success")
+        watcher.record_event("ui:render:viewport", "coalesced")
+
+        payload = json.loads(serialize_observability(watcher))
+
+        self.assertIn("metrics", payload)
+        self.assertIn("captured_at", payload)
+        targets = {m["target"] for m in payload["metrics"]}
+        self.assertIn("editor.pixelbridge.encode", targets)
+        self.assertIn("ui:render:viewport", targets)
+
+    def test_output_keys_are_sorted_for_stable_diffs(self) -> None:
+        watcher = ObservabilityWatcher()
+        watcher.record("app:scan", 0.1)
+        payload = json.loads(serialize_observability(watcher))
+        self.assertEqual(list(payload.keys()), sorted(payload.keys()))
+        metric_keys = list(payload["metrics"][0].keys())
+        self.assertEqual(metric_keys, sorted(metric_keys))
 
 
 if __name__ == "__main__":

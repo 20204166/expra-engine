@@ -87,32 +87,25 @@ async def test_render_snapshot_unknown_mode_is_error(server) -> None:
         assert result.is_error is True
 
 
-async def test_render_snapshot_and_diagnostics_analyze_catch_real_space_pong_bug(server) -> None:
-    """Space Pong's paddles use PrimitiveComponent(kind="rounded_rectangle"),
-    which the real PygameRenderer does not support -- this is a genuine bug
-    in the example project's data, not a synthetic fixture. Confirms the
-    whole capture -> aggregate pipeline on real failure data.
+async def test_render_snapshot_space_pong_paddles_render_without_failures(server) -> None:
+    """Space Pong's paddles use PrimitiveComponent(kind="rounded_rectangle").
+
+    This used to be a genuine renderer bug -- PygameRenderer didn't support
+    rounded_rectangle -- caught here via real failure data (see git history
+    for the prior version of this test). Now that rounded_rectangle is a
+    canonical supported primitive, confirms the whole capture -> aggregate
+    pipeline reports a clean render, not a regression back to the old failure.
     """
     async with Client(server) as client:
         snapshot = await client.call_tool("render_snapshot", {"project": SPACE_PONG, "mode": "runtime"})
         assert snapshot.is_error is not True
         data = snapshot.structured_content
-        assert data["pixel_renderer_success"] is False
-        assert data["diagnostic_count"] >= 2
-        assert any("rounded_rectangle" in f for f in data["failures"])
-        # Even on a failed frame, the surface still holds partially-correct
-        # pixels -- an image must still come back, not nothing.
+        assert data["pixel_renderer_success"] is True
+        assert data["diagnostic_count"] == 0
+        assert data["failures"] == []
         assert any(isinstance(c, ImageContent) for c in snapshot.content)
-
-        run_id = data["run_id"]
-        analysis = await client.call_tool("diagnostics_analyze", {"run_id": run_id})
-        assert analysis.is_error is not True
-        result = analysis.structured_content
-        assert result["raw_record_count"] >= 2
-        assert result["unique_failures"] == 1  # both paddles collapse into one signature
-        failure = result["failures"][0]
-        assert failure["count"] >= 2
-        assert "rounded_rectangle" in failure["message_template"] or "rounded_rectangle" in failure["sample"]
+        # A clean render has nothing to persist -- diagnostics_analyze is only
+        # meaningful for a run_id that actually captured failure records.
 
 
 async def test_diagnostics_analyze_unknown_run_id_is_error(server) -> None:
