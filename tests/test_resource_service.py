@@ -173,6 +173,35 @@ def test_service_no_cache_bypasses_memory_cache(tmp_path) -> None:
     assert service.read_bytes(resource_id, cache_policy=CachePolicy.NO_CACHE) == b"changed"
 
 
+def test_read_bytes_async_without_coordinator_raises(tmp_path) -> None:
+    service = _service(tmp_path)
+
+    with pytest.raises(RuntimeError):
+        service.read_bytes_async(_id("assets://hello.txt"))
+
+
+def test_clear_cache_drops_memory_entries_but_not_disk_content(tmp_path) -> None:
+    service = _service(tmp_path)
+    resource_id = _id("assets://hello.txt")
+    service.read_bytes(resource_id, cache_policy=CachePolicy.MEMORY)
+
+    invalidated = service.clear_cache()
+
+    assert invalidated == {resource_id}
+    assert service.read_bytes(resource_id) == b"hello"
+
+
+def test_remounting_same_name_invalidates_previous_cache_and_closes_it(tmp_path) -> None:
+    service = _service(tmp_path)
+    resource_id = _id("assets://hello.txt")
+    service.read_bytes(resource_id, cache_policy=CachePolicy.MEMORY)
+    (tmp_path / "hello.txt").write_text("replaced")
+
+    service.mount(DirectoryMount(tmp_path, MountSpec(name="project", scheme="assets")))
+
+    assert service.read_bytes(resource_id, cache_policy=CachePolicy.MEMORY) == b"replaced"
+
+
 def test_unmount_invalidates_cache_and_closes_mount(tmp_path) -> None:
     service = _service(tmp_path)
     resource_id = _id("assets://hello.txt")

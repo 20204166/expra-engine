@@ -15,7 +15,7 @@ from .errors import (
     UnsafeArchiveMemberError,
 )
 from .ids import ResourceId
-from .packages import PackageManifest
+from .packages import PackageManifest, extract_archive_resource
 
 
 @dataclass(frozen=True, slots=True)
@@ -300,8 +300,6 @@ class ArchiveMount:
         )
 
     def extract(self, resource_id: ResourceId, cache_dir: Path) -> Path:
-        from .packages import extract_archive_resource
-
         return extract_archive_resource(self, resource_id, cache_dir)
 
     def close(self) -> None:

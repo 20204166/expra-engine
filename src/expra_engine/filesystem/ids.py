@@ -53,15 +53,10 @@ class ResourceId:
             if len(parts) != 2:
                 raise InvalidResourceIdError("parse", logical_id=value)
             namespace, path = parts
-        resource_id = cls.__new__(cls)
-        object.__setattr__(resource_id, "scheme", scheme)
-        object.__setattr__(resource_id, "namespace", namespace)
-        object.__setattr__(resource_id, "path", path)
         try:
-            resource_id.__post_init__()
+            return cls(scheme, namespace, path)
         except InvalidResourceIdError:
             raise InvalidResourceIdError("parse", logical_id=value) from None
-        return resource_id
 
     @classmethod
     def from_project_path(cls, path: str | PathLike[str], *, scheme: str = "assets") -> ResourceId:

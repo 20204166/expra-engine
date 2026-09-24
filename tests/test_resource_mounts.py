@@ -67,6 +67,13 @@ def test_read_only_mount_rejects_writes(tmp_path: Path) -> None:
         resolver.write(ResourceId.parse("assets://new.txt"), b"data")
 
 
+def test_write_with_no_matching_mount_is_typed_not_found(tmp_path: Path) -> None:
+    resolver = ResourceResolver([_mount(tmp_path, "project")])
+
+    with pytest.raises(ResourceNotFoundError):
+        resolver.write(ResourceId.parse("engine://new.txt"), b"data")
+
+
 def test_higher_precedence_mount_wins(tmp_path: Path) -> None:
     low = tmp_path / "low"
     high = tmp_path / "high"

@@ -62,6 +62,14 @@ def test_resource_id_is_immutable() -> None:
         resource_id.path = "fonts/other.ttf"  # type: ignore[misc]
 
 
+def test_direct_construction_requires_namespace_for_package_scheme() -> None:
+    # ResourceId.parse() can never reach this branch (it always supplies a
+    # namespace for "package://"), so it must be exercised via the public
+    # dataclass constructor directly.
+    with pytest.raises(InvalidResourceIdError):
+        ResourceId("package", None, "textures/player.png")
+
+
 def test_typed_errors_keep_safe_context_without_absolute_paths() -> None:
     error = ResourceNotFoundError(
         operation="read",

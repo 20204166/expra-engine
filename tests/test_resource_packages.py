@@ -63,7 +63,13 @@ def test_malformed_manifests_are_rejected(manifest: object) -> None:
 
 
 def test_archive_rejects_unsafe_members_and_duplicate_logical_names(tmp_path: Path) -> None:
-    unsafe_names = ["../secret.txt", "/absolute.txt", "dir/../../secret.txt", "dir\\file.txt"]
+    unsafe_names = [
+        "../secret.txt",
+        "/absolute.txt",
+        "dir/../../secret.txt",
+        "dir\\file.txt",
+        "C:/windows/system.ini",
+    ]
     for index, name in enumerate(unsafe_names):
         archive = tmp_path / f"unsafe-{index}.zip"
         with zipfile.ZipFile(archive, "w") as zf:
@@ -104,3 +110,12 @@ def test_archive_rejects_manifest_resource_mismatch(tmp_path: Path) -> None:
 
     with pytest.raises(MalformedPackageManifestError):
         ArchiveMount(archive, MountSpec(name="bad", scheme="package", namespace="demo"))
+
+
+def test_package_scheme_archive_without_manifest_is_rejected(tmp_path: Path) -> None:
+    archive = tmp_path / "no-manifest.zip"
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr("data/file.txt", b"data")
+
+    with pytest.raises(MalformedPackageManifestError):
+        ArchiveMount(archive, MountSpec(name="no-manifest", scheme="package", namespace="demo"))

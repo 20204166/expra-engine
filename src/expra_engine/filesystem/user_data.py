@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import contextlib
 import os
 import re
-import tempfile
 from pathlib import Path
 from typing import Literal
 
-from expra_engine.core.persistence import atomic_write_text, fsync_directory
+from expra_engine.core.persistence import atomic_write_bytes, atomic_write_text
 
 from .errors import FilesystemError
 
@@ -88,7 +86,7 @@ class UserDataStore:
         relative = _relative_path(relative_path, "write", namespace)
         target = self._confined_path(relative, namespace, create_root=True)
         try:
-            _atomic_write_bytes(target, payload)
+            atomic_write_bytes(target, payload, prefix="expra-user-data-")
         except OSError as error:
             raise UserDataError(
                 "User-data write failed",
@@ -262,21 +260,3 @@ def _reject_symlink_components(base: Path, relative: str, namespace: UserDataNam
                 namespace=namespace,
                 relative_path=relative,
             )
-
-
-def _atomic_write_bytes(path: Path, payload: bytes) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary: str | None = None
-    try:
-        fd, temporary = tempfile.mkstemp(prefix="expra-user-data-", suffix=".tmp", dir=path.parent)
-        with os.fdopen(fd, "wb") as handle:
-            handle.write(payload)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, path)
-        temporary = None
-    finally:
-        if temporary is not None:
-            with contextlib.suppress(OSError):
-                os.unlink(temporary)
-    fsync_directory(path)

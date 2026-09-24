@@ -5,17 +5,35 @@ from __future__ import annotations
 import contextlib
 import os
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
+from typing import IO, Any
 
 
 def atomic_write_text(path: Path, payload: str, *, prefix: str = "expra") -> None:
     """Atomically replace *path* with UTF-8 text and fsync the parent."""
+    _atomic_replace(path, prefix, "w", "utf-8", lambda handle: handle.write(payload))
+
+
+def atomic_write_bytes(path: Path, payload: bytes, *, prefix: str = "expra") -> None:
+    """Atomically replace *path* with raw bytes and fsync the parent."""
+    _atomic_replace(path, prefix, "wb", None, lambda handle: handle.write(payload))
+
+
+def _atomic_replace(
+    path: Path,
+    prefix: str,
+    mode: str,
+    encoding: str | None,
+    write: Callable[[IO[Any]], object],
+) -> None:
+    """Write *path* via a same-directory temp file, then fsync and rename it in."""
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary: str | None = None
     try:
         fd, temporary = tempfile.mkstemp(prefix=prefix, suffix=".tmp", dir=str(path.parent))
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(payload)
+        with os.fdopen(fd, mode, encoding=encoding) as handle:
+            write(handle)
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary, path)

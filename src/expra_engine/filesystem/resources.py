@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import IO
+from typing import IO, TypeVar
 
 from .errors import DuplicateResourceError, ResourceNotFoundError
 from .ids import ResourceId
 from .mounts import ResourceLocation, ResourceMount
+
+_T = TypeVar("_T")
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,17 +70,31 @@ class ResourceResolver:
                 candidates.append((mount, location))
         return candidates
 
+    @staticmethod
+    def _select_unambiguous(
+        candidates: Sequence[_T],
+        *,
+        precedence: Callable[[_T], int],
+        resource_id: ResourceId,
+        operation: str,
+    ) -> _T:
+        """Return the sole highest-precedence candidate, or raise a typed error."""
+        if not candidates:
+            raise ResourceNotFoundError(operation=operation, logical_id=resource_id)
+        highest = max(precedence(candidate) for candidate in candidates)
+        winners = [candidate for candidate in candidates if precedence(candidate) == highest]
+        if len(winners) > 1:
+            raise DuplicateResourceError(operation=operation, logical_id=resource_id)
+        return winners[0]
+
     def resolve(self, resource_id: ResourceId) -> ResourceHandle:
         candidates = self._candidates(resource_id)
-        if not candidates:
-            raise ResourceNotFoundError(operation="resolve", logical_id=resource_id)
-        highest = max(mount.spec.precedence for mount, _ in candidates)
-        winners = [
-            (mount, location) for mount, location in candidates if mount.spec.precedence == highest
-        ]
-        if len(winners) > 1:
-            raise DuplicateResourceError(operation="resolve", logical_id=resource_id)
-        mount, location = winners[0]
+        mount, location = self._select_unambiguous(
+            candidates,
+            precedence=lambda candidate: candidate[0].spec.precedence,
+            resource_id=resource_id,
+            operation="resolve",
+        )
         return ResourceHandle(
             logical_id=resource_id,
             mount=mount.spec.name,
@@ -93,11 +109,10 @@ class ResourceResolver:
 
     def write(self, resource_id: ResourceId, data: bytes) -> None:
         matching = [mount for mount in self._mounts.values() if mount.spec.matches(resource_id)]
-        if not matching:
-            raise ResourceNotFoundError(operation="write", logical_id=resource_id)
-        highest = max(mount.spec.precedence for mount in matching)
-        winners = [mount for mount in matching if mount.spec.precedence == highest]
-        if len(winners) > 1:
-            raise DuplicateResourceError(operation="write", logical_id=resource_id)
-        mount = winners[0]
+        mount = self._select_unambiguous(
+            matching,
+            precedence=lambda candidate: candidate.spec.precedence,
+            resource_id=resource_id,
+            operation="write",
+        )
         mount.write_bytes(resource_id, data)
