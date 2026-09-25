@@ -4,7 +4,10 @@
   "game_version": "1.0.0",
   "scenes": [
     "scenes/main.json",
-    "scenes/level_02_deepcore.json"
+    "scenes/level_02_deepcore.json",
+    "scenes/level_03_test_cell.json",
+    "scenes/security_door.json",
+    "scenes/g1_security_door_demo.json"
   ],
   "start_scene": "scenes/main.json",
   "input": {

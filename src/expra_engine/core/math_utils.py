@@ -42,8 +42,37 @@ def round_to_closest(value: float, step: float) -> float:
     return round(value / step) * step
 
 
+def compose_2d_pose(
+    parent: tuple[float, float, float, float, float],
+    child: tuple[float, float, float, float, float],
+) -> tuple[float, float, float, float, float]:
+    """Compose a child's local 2D pose under its parent's world pose.
+
+    Each pose is ``(x, y, rotation_degrees, scale_x, scale_y)``. The child's
+    local position is scaled and rotated by the parent, then translated by
+    the parent's position; rotation sums and scale multiplies. This is the
+    single canonical parent-child composition formula shared by editor pose
+    queries (``Scene.world_pose``) and render-time transform extraction
+    (``Transform.compose``) -- keep them delegating here rather than
+    reimplementing the trigonometry twice.
+    """
+    px, py, parent_rotation, parent_scale_x, parent_scale_y = parent
+    x, y, rotation, scale_x, scale_y = child
+    angle = math.radians(parent_rotation)
+    scaled_x = x * parent_scale_x
+    scaled_y = y * parent_scale_y
+    return (
+        px + scaled_x * math.cos(angle) - scaled_y * math.sin(angle),
+        py + scaled_x * math.sin(angle) + scaled_y * math.cos(angle),
+        parent_rotation + rotation,
+        parent_scale_x * scale_x,
+        parent_scale_y * scale_y,
+    )
+
+
 __all__ = [
     "clamp",
+    "compose_2d_pose",
     "inverselerp",
     "lerp",
     "lerp_angle",

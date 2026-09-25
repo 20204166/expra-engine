@@ -12,8 +12,15 @@ def draw_collider_overlays(
     colliders: tuple[ColliderOutline, ...],
     camera: Any,
     warning_color: str,
+    area_color: str | None = None,
 ) -> None:
+    """Draw a dashed outline per collider; Area entities use ``area_color``.
+
+    ``area_color`` defaults to ``warning_color`` so existing callers that
+    don't pass it keep the prior single-color behavior.
+    """
     for collider in colliders:
+        color = area_color if collider.is_area and area_color is not None else warning_color
         ex, ey = camera.project(collider.position)
         data = collider.outline
         if data["shape"] == "circle":
@@ -23,7 +30,7 @@ def draw_collider_overlays(
                 ey - radius,
                 ex + radius,
                 ey + radius,
-                outline=warning_color,
+                outline=color,
                 dash=(4, 2),
                 tags="collider",
             )
@@ -35,7 +42,7 @@ def draw_collider_overlays(
                 ey - height,
                 ex + width,
                 ey + height,
-                outline=warning_color,
+                outline=color,
                 dash=(4, 2),
                 tags="collider",
             )

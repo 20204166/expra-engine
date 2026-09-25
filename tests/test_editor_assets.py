@@ -62,6 +62,28 @@ class TestAssetNormalization(unittest.TestCase):
         self.assertEqual(AssetEntry(Path("theme.ogg"), "theme.ogg", False).kind, "Audio")
         self.assertEqual(AssetEntry(Path("theme.wav"), "theme.wav", False).kind, "Audio")
 
+    def test_image_assets_are_registered_as_image_entries(self) -> None:
+        self.assertEqual(AssetEntry(Path("hero.png"), "hero.png", False).kind, "Image")
+        self.assertEqual(AssetEntry(Path("hero.jpg"), "hero.jpg", False).kind, "Image")
+
+    def test_scene_files_under_scenes_are_registered_as_scene_entries(self) -> None:
+        entry = AssetEntry(
+            Path("/proj/scenes/room.json"),
+            "room.json",
+            False,
+            ResourceId.from_project_path("scenes/room.json", scheme="project"),
+        )
+        self.assertEqual(entry.kind, "Scene")
+
+    def test_json_outside_scenes_is_not_a_scene_entry(self) -> None:
+        entry = AssetEntry(
+            Path("/proj/project.json"),
+            "project.json",
+            False,
+            ResourceId.from_project_path("project.json", scheme="project"),
+        )
+        self.assertEqual(entry.kind, "File")
+
 
 class TestAssetBrowserState(unittest.TestCase):
     def test_selection_and_folder_navigation_update_display_path(self) -> None:

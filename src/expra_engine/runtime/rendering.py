@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Protocol, runtime_checkable
 
+from expra_engine.core.math_utils import compose_2d_pose
 from expra_engine.core.scene.camera import Camera2D
 from expra_engine.runtime.animation import SpriteRegion
 from expra_engine.ui_model.geometry import Rect
@@ -156,23 +157,14 @@ class Transform:
         _finite(self.rotation, "rotation")
 
     def compose(self, child: Transform) -> Transform:
-        angle = math.radians(self.rotation)
-        scaled_x = child.position[0] * self.scale[0]
-        scaled_y = child.position[1] * self.scale[1]
-        x = scaled_x * math.cos(angle) - scaled_y * math.sin(angle)
-        y = scaled_x * math.sin(angle) + scaled_y * math.cos(angle)
+        x, y, rotation, scale_x, scale_y = compose_2d_pose(
+            (self.position[0], self.position[1], self.rotation, self.scale[0], self.scale[1]),
+            (child.position[0], child.position[1], child.rotation, child.scale[0], child.scale[1]),
+        )
         return Transform(
-            position=(
-                self.position[0] + x,
-                self.position[1] + y,
-                self.position[2] + child.position[2] * self.scale[2],
-            ),
-            rotation=self.rotation + child.rotation,
-            scale=(
-                self.scale[0] * child.scale[0],
-                self.scale[1] * child.scale[1],
-                self.scale[2] * child.scale[2],
-            ),
+            position=(x, y, self.position[2] + child.position[2] * self.scale[2]),
+            rotation=rotation,
+            scale=(scale_x, scale_y, self.scale[2] * child.scale[2]),
         )
 
 

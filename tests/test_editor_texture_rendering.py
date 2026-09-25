@@ -733,18 +733,20 @@ def test_sprite_offset_is_used_by_viewport_hit_testing() -> None:
         transform=Transform(),
         sprite_offset=(5.0, 0.0),
     )
-    clicked: list[str | None] = []
+    clicked: list[tuple[tuple[str, ...], bool]] = []
     panel = ViewportPanel.__new__(ViewportPanel)
     panel._editor_overlays = True
+    panel._space_held = False
     panel._canvas = cast(Any, SimpleNamespace(gettags=lambda _current: ()))
     panel._camera = ViewportCamera((400, 300))
     panel._target = EditorRenderTarget(RenderFrame((item,)), (item,), None)
-    panel._on_entity_click = clicked.append
+    panel._on_entity_click = lambda ids, extend: clicked.append((ids, extend))
+    panel._spatial_edit = cast(Any, SimpleNamespace(begin_drag_on_entity=lambda *_a, **_k: None))
     x, y = panel._camera.project((5.0, 0.0))
 
-    panel._on_click(SimpleNamespace(x=x, y=y))
+    panel._on_click(SimpleNamespace(x=x, y=y, state=0))
 
-    assert clicked == ["ship"]
+    assert clicked == [(("ship",), False)]
 
 
 def test_inspector_tuple_values_use_parser_friendly_text() -> None:
@@ -1087,7 +1089,9 @@ def test_space_pong_paddles_use_canonical_pixel_path_not_canvas_fallback() -> No
     try:
         service = project.resource_service()
         provider = PygameResourceProvider(pygame, service)
-        context = RenderContext(Viewport(0, 0, 320, 240), OrthographicCamera(width=100.0, height=75.0))
+        context = RenderContext(
+            Viewport(0, 0, 320, 240), OrthographicCamera(width=100.0, height=75.0)
+        )
 
         # This is the exact preflight the editor calls before choosing pixel
         # rendering over Canvas fallback -- it must accept rounded_rectangle now.

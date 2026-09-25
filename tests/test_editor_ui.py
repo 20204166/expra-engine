@@ -10,7 +10,7 @@ from typing import Any, cast
 from expra_engine.core.component import TransformComponent
 from expra_engine.core.component_schema import PropertyDescriptor
 from expra_engine.core.engine import Engine, EngineRunState
-from expra_engine.core.scene import Scene
+from expra_engine.core.scene import Scene, SceneInstanceComponent
 from expra_engine.editor.assets import AssetEntry
 from expra_engine.editor.runtime_preview import RuntimePreviewLoop
 from expra_engine.filesystem import ResourceId
@@ -235,6 +235,20 @@ class EditorPanelTests(unittest.TestCase):
         panel.render(scene)
         self.assertEqual(panel._tree.item(compact_player.entity_id, "text"), "[PLY] Player Marker")
         self.assertEqual(panel._tree.item(compact_player.entity_id, "tags"), ("disabled",))
+
+    def test_hierarchy_marks_scene_instance_roots_and_materialized_children(self) -> None:
+        panel = HierarchyPanel(self.root)
+        panel.pack(fill="both", expand=True)
+        scene = Scene("Instances")
+        root = scene.create_entity("Room Instance")
+        root.add_component(SceneInstanceComponent("scenes/room.json"))
+        child = scene.create_entity("Wall", parent_id=root.entity_id)
+        scene._set_instance_children(root.entity_id, {child.entity_id})
+
+        panel.render(scene)
+
+        self.assertEqual(panel._tree.item(root.entity_id, "text"), "[INST] Room Instance")
+        self.assertEqual(panel._tree.item(child.entity_id, "text"), "[in] Wall")
 
     def test_inspector_has_scrollable_content_and_empty_state(self) -> None:
         panel = InspectorPanel(self.root)
@@ -508,6 +522,170 @@ class EditorWindowLayoutTests(unittest.TestCase):
             window._root.update()
             self.assertGreater(window._viewport_host.winfo_width(), narrow_viewport)
             self.assertGreaterEqual(window._console_host.winfo_height(), 96)
+        finally:
+            window._on_close()
+
+
+@unittest.skipUnless(DISPLAY_AVAILABLE, "no display for real Tk editor tests")
+class MultiSelectionAndCommandTests(unittest.TestCase):
+    def _add_entities(self, window: EditorWindow, count: int) -> list[str]:
+        ids = []
+        for _ in range(count):
+            window._act_add_entity()
+            window._root.update()
+            assert window._selected_id is not None
+            ids.append(window._selected_id)
+        return ids
+
+    def test_hierarchy_multi_select_syncs_to_window_and_viewport(self) -> None:
+        window = EditorWindow(Engine())
+        try:
+            ids = self._add_entities(window, 3)
+            window._hierarchy._tree.selection_set(ids[0], ids[2])
+            window._root.update()
+            self.assertEqual(set(window._selected_ids), {ids[0], ids[2]})
+            self.assertEqual(window._viewport._selected_ids_set, frozenset({ids[0], ids[2]}))
+        finally:
+            window._on_close()
+
+    def test_viewport_click_replaces_extends_and_toggles_selection(self) -> None:
+        window = EditorWindow(Engine())
+        try:
+            ids = self._add_entities(window, 3)
+            window._on_viewport_entity_click((ids[0],), False)
+            self.assertEqual(window._selected_ids, (ids[0],))
+            window._on_viewport_entity_click((ids[1],), True)  # shift-extend
+            self.assertEqual(set(window._selected_ids), {ids[0], ids[1]})
+            window._on_viewport_entity_click((ids[0],), True)  # shift toggles off
+            self.assertEqual(window._selected_ids, (ids[1],))
+            window._on_viewport_entity_click((ids[2],), False)  # plain click collapses
+            self.assertEqual(window._selected_ids, (ids[2],))
+        finally:
+            window._on_close()
+
+    def test_deleting_an_entity_drops_it_from_selection(self) -> None:
+        window = EditorWindow(Engine())
+        try:
+            ids = self._add_entities(window, 2)
+            window._on_viewport_entity_click((ids[0], ids[1]), False)
+            self.assertEqual(set(window._selected_ids), {ids[0], ids[1]})
+            window._on_hierarchy_delete(ids[0])
+            window._root.update()
+            self.assertEqual(window._selected_ids, (ids[1],))
+        finally:
+            window._on_close()
+
+    def test_new_scene_sanitizes_selection(self) -> None:
+        window = EditorWindow(Engine())
+        try:
+            self._add_entities(window, 1)
+            self.assertTrue(window._selected_ids)
+            window._act_new_scene()
+            window._root.update()
+            self.assertEqual(window._selected_ids, ())
+            self.assertFalse(window._actions.is_enabled("duplicate_selection"))
+        finally:
+            window._on_close()
+
+    def test_create_entity_is_undoable(self) -> None:
+        window = EditorWindow(Engine())
+        try:
+            before = len(window._engine.edit_scene.entities)  # type: ignore[union-attr]
+            before_history = len(window._command_stack.history)
+            window._act_add_entity()
+            window._root.update()
+            self.assertEqual(len(window._engine.edit_scene.entities), before + 1)  # type: ignore[union-attr]
+            self.assertEqual(len(window._command_stack.history), before_history + 1)
+            window._act_undo()
+            window._root.update()
+            self.assertEqual(len(window._engine.edit_scene.entities), before)  # type: ignore[union-attr]
+        finally:
+            window._on_close()
+
+    def test_transform_change_is_undoable_and_batches_all_fields(self) -> None:
+        window = EditorWindow(Engine())
+        try:
+            entity_id = self._add_entities(window, 1)[0]
+            entity = window._engine.edit_scene.find_entity(entity_id)  # type: ignore[union-attr]
+            transform = entity.get_component(TransformComponent)
+            history_before = len(window._command_stack.history)
+            window._on_transform_change(entity_id, "x", 42.0)
+            self.assertEqual(transform.x, 42.0)
+            self.assertEqual(len(window._command_stack.history), history_before + 1)
+            window._act_undo()
+            self.assertEqual(transform.x, 0.0)
+            # Same value again must be a no-op (no new history entry).
+            window._on_transform_change(entity_id, "x", transform.x)
+            self.assertEqual(len(window._command_stack.history), history_before)
+        finally:
+            window._on_close()
+
+    def test_toggle_enabled_is_undoable(self) -> None:
+        window = EditorWindow(Engine())
+        try:
+            entity_id = self._add_entities(window, 1)[0]
+            entity = window._engine.edit_scene.find_entity(entity_id)  # type: ignore[union-attr]
+            self.assertTrue(entity.enabled)
+            window._on_entity_toggle(entity_id, False)
+            self.assertFalse(entity.enabled)
+            window._act_undo()
+            self.assertTrue(entity.enabled)
+        finally:
+            window._on_close()
+
+    def test_duplicate_selection_single_and_multi_are_undoable(self) -> None:
+        window = EditorWindow(Engine())
+        try:
+            ids = self._add_entities(window, 2)
+            before = len(window._engine.edit_scene.entities)  # type: ignore[union-attr]
+            window._on_viewport_entity_click((ids[0], ids[1]), False)
+            history_before = len(window._command_stack.history)
+            window._act_duplicate_selection()
+            window._root.update()
+            self.assertEqual(len(window._engine.edit_scene.entities), before + 2)  # type: ignore[union-attr]
+            self.assertEqual(len(window._command_stack.history), history_before + 1)
+            self.assertEqual(len(window._selected_ids), 2)
+            window._act_undo()
+            self.assertEqual(len(window._engine.edit_scene.entities), before)  # type: ignore[union-attr]
+            window._act_redo()
+            self.assertEqual(len(window._engine.edit_scene.entities), before + 2)  # type: ignore[union-attr]
+        finally:
+            window._on_close()
+
+    def test_delete_selection_multi_is_one_undo_step(self) -> None:
+        window = EditorWindow(Engine())
+        try:
+            ids = self._add_entities(window, 3)
+            before = len(window._engine.edit_scene.entities)  # type: ignore[union-attr]
+            window._on_viewport_entity_click((ids[0], ids[1]), False)
+            history_before = len(window._command_stack.history)
+            window._act_delete_entity()
+            window._root.update()
+            self.assertEqual(len(window._engine.edit_scene.entities), before - 2)  # type: ignore[union-attr]
+            self.assertEqual(len(window._command_stack.history), history_before + 1)
+            self.assertEqual(window._selected_ids, ())
+            window._act_undo()
+            self.assertEqual(len(window._engine.edit_scene.entities), before)  # type: ignore[union-attr]
+        finally:
+            window._on_close()
+
+    def test_empty_canvas_click_deselects_through_real_tk_dispatch(self) -> None:
+        """Regression test for the <Button-1>/<ButtonPress-1> binding collision:
+
+        both were bound without add="+", so the second silently replaced the
+        first and _on_click's empty-space deselect never fired in the live
+        app (only entity-tag clicks worked). This exercises real event
+        dispatch, not a direct method call, so it would have caught it.
+        """
+        window = EditorWindow(Engine())
+        try:
+            self._add_entities(window, 1)
+            self.assertTrue(window._selected_ids)
+            canvas = window._viewport._canvas
+            canvas.focus_force()
+            canvas.event_generate("<Button-1>", x=1, y=1, when="now")
+            window._root.update()
+            self.assertEqual(window._selected_ids, ())
         finally:
             window._on_close()
 

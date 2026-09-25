@@ -24,6 +24,8 @@ from expra_engine.ui.styles import (
     STYLE_TREEVIEW,
 )
 
+_DRAG_THRESHOLD_SQ = 16  # 4px, squared -- avoids a sqrt on every motion event
+
 
 class AssetBrowserPanel(tk.Frame):
     """Browse project assets while exposing logical IDs to editor actions."""
@@ -37,18 +39,22 @@ class AssetBrowserPanel(tk.Frame):
         coordinator: AppCoordinator | None = None,
         colors: dict[str, str] | None = None,
         on_open: Callable[[AssetEntry], None] | None = None,
+        on_drop: Callable[[AssetEntry, int, int], None] | None = None,
     ) -> None:
         c = colors or COLORS
         super().__init__(parent, bg=c["panel_bg"])
         self._colors = c
         self._coordinator = coordinator
         self._on_open = on_open
+        self._on_drop = on_drop
         self._root_directory = Path(root_directory).resolve()
         self._resource_root = Path(resource_root or root_directory).resolve()
         self._current_directory = self._root_directory
         self._generation = 0
         self._selected_entry: AssetEntry | None = None
         self._entries: dict[str, AssetEntry] = {}
+        self._drag_start: tuple[int, int] | None = None
+        self._drag_entry: AssetEntry | None = None
 
         header = tk.Frame(self, bg=c["panel_bg"])
         header.pack(fill="x", padx=SPACING["card_pad_x"], pady=(SPACING["card_pad_y"], 4))
@@ -98,6 +104,8 @@ class AssetBrowserPanel(tk.Frame):
         self._tree.bind("<<TreeviewSelect>>", self._on_select)
         self._tree.bind("<Double-1>", self._on_activate)
         self._tree.bind("<Return>", self._on_activate)
+        self._tree.bind("<ButtonPress-1>", self._on_press_for_drag, add="+")
+        self._tree.bind("<ButtonRelease-1>", self._on_release_for_drag, add="+")
         self._path_var.set(str(self._current_directory))
 
     @property
@@ -185,6 +193,23 @@ class AssetBrowserPanel(tk.Frame):
     def _on_select(self, _event: Any = None) -> None:
         selection = self._tree.selection()
         self._selected_entry = self._entries.get(selection[0]) if selection else None
+
+    def _on_press_for_drag(self, event: Any) -> None:
+        self._drag_start = (event.x_root, event.y_root)
+        row = self._tree.identify_row(event.y)
+        self._drag_entry = self._entries.get(row)
+
+    def _on_release_for_drag(self, event: Any) -> None:
+        start = self._drag_start
+        entry = self._drag_entry
+        self._drag_start = None
+        self._drag_entry = None
+        if start is None or entry is None or self._on_drop is None or entry.is_folder:
+            return
+        dx, dy = event.x_root - start[0], event.y_root - start[1]
+        if dx * dx + dy * dy < _DRAG_THRESHOLD_SQ:
+            return  # a plain click/select, not a drag
+        self._on_drop(entry, event.x_root, event.y_root)
 
     def _on_activate(self, _event: Any = None) -> str:
         entry = self._selected_entry

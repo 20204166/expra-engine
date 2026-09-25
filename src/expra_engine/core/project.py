@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from expra_engine.core.persistence import atomic_write_text
-from expra_engine.core.scene import Scene
+from expra_engine.core.scene import Scene, resolve_scene_instances
 
 if TYPE_CHECKING:
     from expra_engine.filesystem import ResourceService
@@ -64,9 +64,11 @@ class Project:
     @property
     def scenes_dir(self) -> Path:
         scene_paths = (self.start_scene, *self._scene_paths)
-        folder = "scene" if any(
-            isinstance(value, str) and value.startswith("scene/") for value in scene_paths
-        ) else "scenes"
+        folder = (
+            "scene"
+            if any(isinstance(value, str) and value.startswith("scene/") for value in scene_paths)
+            else "scenes"
+        )
         return self.path / folder
 
     @property
@@ -188,20 +190,31 @@ class Project:
             raise ProjectError(f"scene escapes project: {value!r}") from exc
         return path
 
-    def load_scene(self, relative_path: str | None = None) -> Scene:
+    def load_scene(
+        self, relative_path: str | None = None, *, _chain: frozenset[str] = frozenset()
+    ) -> Scene:
         try:
             scene = Scene.from_dict(
                 json.loads(self.scene_file(relative_path).read_text(encoding="utf-8"))
             )
         except (OSError, json.JSONDecodeError, TypeError, KeyError) as exc:
             raise ProjectError("could not load project scene") from exc
+
+        current_path = relative_path or self.start_scene
+        current_chain = _chain | ({current_path} if current_path is not None else set())
+        resolve_scene_instances(
+            scene,
+            resolve_source=lambda path: self.load_scene(path, _chain=current_chain),
+            chain=current_chain,
+        )
+
         self.set_active_scene(scene)
         return scene
 
     def save_scene(self, scene: Scene, relative_path: str | None = None) -> Path:
         path = self.scene_file(relative_path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write_text(path, json.dumps(scene.to_dict(), indent=2))
+        atomic_write_text(path, json.dumps(scene.to_dict(include_instance_content=False), indent=2))
         value = relative_path or self.start_scene
         if value is not None:
             self.register_scene_path(value)

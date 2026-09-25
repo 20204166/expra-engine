@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import math
 import tkinter as tk
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from expra_engine.core.camera import Camera2D
@@ -31,13 +31,15 @@ from expra_engine.runtime.rendering import (
 )
 from expra_engine.ui.editor_pixel_renderer import EditorPixelRenderer
 from expra_engine.ui.layout import resize_aware
-from expra_engine.ui.styles import COLORS, editor_entity_kind
+from expra_engine.ui.spatial_edit import SpatialEditController, event_extends_selection
+from expra_engine.ui.styles import COLORS
 from expra_engine.ui.viewport_camera import (
-    _MAX_ZOOM,
-    _MIN_ZOOM,
     VIEWPORT_BASE_PPU,
     ViewportCamera,
+    compute_frame_fit,
 )
+from expra_engine.ui.viewport_camera_overlay import draw_camera_overlay
+from expra_engine.ui.viewport_markers import MarkerEntry, draw_entity_markers
 from expra_engine.ui.viewport_overlays import draw_collider_overlays
 from expra_engine.ui.viewport_render_target import (
     ColliderOutline,
@@ -64,14 +66,6 @@ class _CanvasEntry:
     label: int | None = None  # name label canvas item ID
 
 
-@dataclass
-class _MarkerEntry:
-    """Retained canvas item IDs for one icon-marker entity."""
-
-    kind: str  # "default" | "camera" | "camera_compact" | "player" | "player_compact"
-    ids: list[int] = field(default_factory=list)  # all canvas IDs in draw order
-
-
 class ViewportPanel(tk.Frame):
     """Canvas-based editor viewport.
 
@@ -90,6 +84,7 @@ class ViewportPanel(tk.Frame):
         on_camera_change: Any = None,
         resource_service: Any | None = None,
         observer: Any | None = None,
+        on_transform_commit: Any = None,
     ) -> None:
         c = colors or COLORS
         super().__init__(
@@ -101,6 +96,7 @@ class ViewportPanel(tk.Frame):
         self._colors = c
         self._scene: Scene | None = None
         self._selected_id: str | None = None
+        self._selected_ids_set: frozenset[str] = frozenset()
         self._target = EditorRenderTarget(RenderFrame(), (), None)
         self._target_dirty = False
         self._camera = ViewportCamera()
@@ -120,7 +116,7 @@ class ViewportPanel(tk.Frame):
         self._redraw_pending = False  # after_idle gate to cap redraw rate
         self._grid_dirty = True  # grid/axis needs rebuild (camera moved or canvas resized)
         self._canvas_items: dict[str, _CanvasEntry] = {}  # retained visual-entity items
-        self._marker_entries: dict[str, _MarkerEntry] = {}  # retained icon-marker items
+        self._marker_entries: dict[str, MarkerEntry] = {}  # retained icon-marker items
         self._entity_map: dict[str, Any] = {}  # built once per render() call; O(1) lookup
 
         # Canvas fills the frame
@@ -133,7 +129,20 @@ class ViewportPanel(tk.Frame):
         self._pixel_image_item = self._canvas.create_image(
             0, 0, anchor="nw", state="hidden", tags="runtime_pixels"
         )
-        self._canvas.bind("<Button-1>", self._on_click)
+        self._spatial_edit = SpatialEditController(
+            camera=self._camera,
+            canvas=self._canvas,
+            get_scene=lambda: self._scene,
+            get_selected_ids=lambda: tuple(self._selected_ids_set),
+            push_command=on_transform_commit or (lambda _command: None),
+            request_redraw=self._schedule_redraw,
+        )
+        # <Button-1> and <ButtonPress-1> are the SAME Tk event sequence --
+        # binding both without add="+" silently replaces the first with the
+        # second, which is what made _on_click's empty-space deselect dead
+        # code in the live app (only entity tag clicks worked). Every
+        # Button-1/ButtonPress-1 binding below uses add="+" so they compose.
+        self._canvas.bind("<Button-1>", self._on_click, add="+")
         self._canvas.bind("<ButtonPress-2>", self._on_pan_start)
         self._canvas.bind("<B2-Motion>", self._on_pan_motion)
         # Wheel zoom — covers Windows/macOS (<MouseWheel>) and Linux X11 (<Button-4/5>)
@@ -157,8 +166,13 @@ class ViewportPanel(tk.Frame):
         # Space + left-drag pan
         self._canvas.bind("<KeyPress-space>", self._on_space_down)
         self._canvas.bind("<KeyRelease-space>", self._on_space_up)
-        self._canvas.bind("<ButtonPress-1>", self._on_lmb_press_for_pan)
-        self._canvas.bind("<B1-Motion>", self._on_lmb_motion_for_pan)
+        self._canvas.bind("<ButtonPress-1>", self._on_lmb_press_for_pan, add="+")
+        self._canvas.bind("<B1-Motion>", self._on_lmb_motion_for_pan, add="+")
+        # Spatial editing: box-select-start (empty canvas) / drag continue+commit.
+        self._canvas.bind("<ButtonPress-1>", self._on_button1_press_for_selection, add="+")
+        self._canvas.bind("<B1-Motion>", self._on_b1_motion_for_selection, add="+")
+        self._canvas.bind("<ButtonRelease-1>", self._on_button1_release)
+        self._canvas.bind("<Escape>", lambda _e: self._spatial_edit.cancel_drag())
         resize_aware(self, lambda _w: self._on_resize())
 
     # ------------------------------------------------------------------
@@ -170,6 +184,7 @@ class ViewportPanel(tk.Frame):
         scene: Scene | None,
         selected_id: str | None = None,
         *,
+        selected_ids: frozenset[str] | None = None,
         editor_overlays: bool = True,
         interpolator: Any | None = None,
         interpolation_fraction: float = 0.0,
@@ -182,6 +197,11 @@ class ViewportPanel(tk.Frame):
         overlays_changed = editor_overlays != self._editor_overlays
         self._scene = scene
         self._selected_id = selected_id
+        self._selected_ids_set = (
+            frozenset(selected_ids)
+            if selected_ids is not None
+            else (frozenset({selected_id}) if selected_id else frozenset())
+        )
         self._editor_overlays = editor_overlays
         self._interpolator = interpolator
         self._interpolation_fraction = interpolation_fraction
@@ -213,7 +233,8 @@ class ViewportPanel(tk.Frame):
             camera=self._camera if editor_overlays else None,
             interpolator=interpolator,
             interpolation_fraction=interpolation_fraction,
-            animated_players=animated_players, observer=self._observer,
+            animated_players=animated_players,
+            observer=self._observer,
         )
         self._target_dirty = False
         self._redraw()
@@ -243,17 +264,39 @@ class ViewportPanel(tk.Frame):
         self._redraw()
 
     def frame_selected(self) -> bool:
-        if self._scene is None or self._target.selected_id is None:
+        """Frame the current selection.
+
+        A single selected entity is centered (camera position only, no zoom
+        change -- matches historical behavior). Multiple selected entities
+        are framed with a bounding-box zoom-to-fit, same as ``frame_scene``,
+        since centering alone would not guarantee a spread-out selection is
+        fully visible.
+        """
+        if self._scene is None:
             return False
-        entity = self._scene.find_entity(self._target.selected_id)
-        transform = entity.get_component(TransformComponent) if entity else None
-        framed = self._camera.frame_selected((transform.x, transform.y) if transform else None)
-        if framed:
-            self._target_dirty = True
-            self._grid_dirty = True
-            self._notify_camera_change()
-            self._redraw()
-        return framed
+        ids = self._selected_ids_set or (
+            {self._target.selected_id} if self._target.selected_id else set()
+        )
+        if len(ids) <= 1:
+            selected_id = next(iter(ids), None)
+            if selected_id is None:
+                return False
+            entity = self._scene.find_entity(selected_id)
+            transform = entity.get_component(TransformComponent) if entity else None
+            framed = self._camera.frame_selected((transform.x, transform.y) if transform else None)
+            if framed:
+                self._target_dirty = True
+                self._grid_dirty = True
+                self._notify_camera_change()
+                self._redraw()
+            return framed
+        points = []
+        for entity_id in ids:
+            entity = self._scene.find_entity(entity_id)
+            transform = entity.get_component(TransformComponent) if entity else None
+            if transform is not None:
+                points.append((transform.x, transform.y))
+        return self._apply_frame_fit(points)
 
     def frame_scene(self) -> bool:
         """Centre and zoom the editor camera to fit all enabled entities.
@@ -264,32 +307,23 @@ class ViewportPanel(tk.Frame):
         """
         if self._scene is None:
             return False
-        points = []
-        for entity in self._scene.entities:
-            transform = entity.get_component(TransformComponent)
-            if entity.enabled and transform:
-                points.append((transform.x, transform.y))
-        if not points:
-            return False
-        min_x = min(p[0] for p in points)
-        max_x = max(p[0] for p in points)
-        min_y = min(p[1] for p in points)
-        max_y = max(p[1] for p in points)
-        center_x = (min_x + max_x) / 2.0
-        center_y = (min_y + max_y) / 2.0
-        padding = 4.0
-        world_w = max(padding, max_x - min_x + padding)
-        world_h = max(padding, max_y - min_y + padding)
+        points = [
+            (transform.x, transform.y)
+            for entity in self._scene.entities
+            if entity.enabled and (transform := entity.get_component(TransformComponent))
+        ]
+        return self._apply_frame_fit(points)
+
+    def _apply_frame_fit(self, points: list[tuple[float, float]]) -> bool:
         vw = max(1, self._canvas.winfo_width())
         vh = max(1, self._canvas.winfo_height())
-        fit_ppu_w = vw / world_w
-        fit_ppu_h = vh / world_h
-        new_zoom = max(
-            _MIN_ZOOM, min(_MAX_ZOOM, min(fit_ppu_w, fit_ppu_h) / self._camera._base_ppu * 0.9)
-        )
+        fit = compute_frame_fit(points, (vw, vh), self._camera._base_ppu)
+        if fit is None:
+            return False
+        center, new_zoom = fit
         self._camera.zoom_level = new_zoom
         self._camera._camera = Camera2D(
-            position=(center_x, center_y),
+            position=center,
             viewport=(vw, vh),
             target_width=vw / (self._camera._base_ppu * new_zoom),
         )
@@ -324,7 +358,8 @@ class ViewportPanel(tk.Frame):
             selected_id=self._selected_id,
             camera=self._camera,
             interpolator=self._interpolator,
-            interpolation_fraction=self._interpolation_fraction, observer=self._observer,
+            interpolation_fraction=self._interpolation_fraction,
+            observer=self._observer,
             animated_players=getattr(self, "_animated_players", None),
         )
         self._target_dirty = False
@@ -339,7 +374,8 @@ class ViewportPanel(tk.Frame):
             selected_id=self._selected_id,
             camera=self._camera if self._editor_overlays else None,
             interpolator=self._interpolator,
-            interpolation_fraction=self._interpolation_fraction, observer=self._observer,
+            interpolation_fraction=self._interpolation_fraction,
+            observer=self._observer,
             animated_players=getattr(self, "_animated_players", None),
         )
         self._target_dirty = False
@@ -417,12 +453,37 @@ class ViewportPanel(tk.Frame):
         canvas.delete("collider")
         if self._editor_overlays:
             draw_collider_overlays(
-                canvas, self._target.colliders, self._camera, self._colors["warning"]
+                canvas,
+                self._target.colliders,
+                self._camera,
+                self._colors["warning"],
+                area_color=self._colors["success"],
+            )
+
+        # Scene camera overlay (frame/limits/follow-target) — editor mode only.
+        canvas.delete("camera_overlay")
+        if self._editor_overlays:
+            draw_camera_overlay(
+                canvas,
+                self._scene,
+                self._camera,
+                self._colors["accent"],
+                self._colors["danger"],
+                self._colors["accent_ink"],
             )
 
         # Icon markers — clear when overlays are turned off, draw when on.
         if self._editor_overlays:
-            self._draw_entity_markers(current_keys)
+            draw_entity_markers(
+                self._canvas,
+                self._colors,
+                self._scene,
+                current_keys,
+                self._selected_id,
+                self._camera,
+                self._marker_entries,
+                self._click_entity,
+            )
         else:
             for eid in list(self._marker_entries):
                 canvas.delete(f"entity:{eid}")
@@ -460,6 +521,7 @@ class ViewportPanel(tk.Frame):
         self._marker_entries.clear()
         self._canvas.delete("collider")
         self._canvas.delete("selection")
+        self._canvas.delete("camera_overlay")
 
     def _draw_render_item(
         self,
@@ -519,7 +581,7 @@ class ViewportPanel(tk.Frame):
                 )
                 if editor_overlays:
                     self._canvas.tag_bind(
-                        tag, "<Button-1>", lambda _e, eid=item.key: self._click_entity(eid)
+                        tag, "<Button-1>", lambda e, eid=item.key: self._click_entity(eid, e)
                     )
         elif new_shape == "text":
             text_val = item.text.text if item.text else ""
@@ -535,7 +597,7 @@ class ViewportPanel(tk.Frame):
                 )
                 if editor_overlays:
                     self._canvas.tag_bind(
-                        tag, "<Button-1>", lambda _e, eid=item.key: self._click_entity(eid)
+                        tag, "<Button-1>", lambda e, eid=item.key: self._click_entity(eid, e)
                     )
         elif new_shape == "poly":
             corners = self._projected_corners(item)
@@ -550,7 +612,7 @@ class ViewportPanel(tk.Frame):
                 )
                 if editor_overlays:
                     self._canvas.tag_bind(
-                        tag, "<Button-1>", lambda _e, eid=item.key: self._click_entity(eid)
+                        tag, "<Button-1>", lambda e, eid=item.key: self._click_entity(eid, e)
                     )
         else:  # rect
             if entry is not None:
@@ -564,7 +626,7 @@ class ViewportPanel(tk.Frame):
                 )
                 if editor_overlays:
                     self._canvas.tag_bind(
-                        tag, "<Button-1>", lambda _e, eid=item.key: self._click_entity(eid)
+                        tag, "<Button-1>", lambda e, eid=item.key: self._click_entity(eid, e)
                     )
 
         # Name label — update color/text/position in-place.
@@ -591,7 +653,7 @@ class ViewportPanel(tk.Frame):
                 )
                 if runtime_pixels:
                     self._canvas.tag_bind(
-                        tag, "<Button-1>", lambda _e, eid=item.key: self._click_entity(eid)
+                        tag, "<Button-1>", lambda e, eid=item.key: self._click_entity(eid, e)
                     )
         elif entry is not None and entry.label is not None:
             # Overlays turned off — remove stale label.
@@ -632,269 +694,6 @@ class ViewportPanel(tk.Frame):
             points.extend(projected)
         return tuple(points)
 
-    def _draw_entity_markers(self, visual_ids: set[str]) -> None:
-        """Draw icon markers for non-visual entities; retain bindings across frames."""
-        if self._scene is None:
-            return
-        # Determine which entities need markers this frame.
-        needed: dict[str, str] = {}  # entity_id -> kind
-        for entity in self._scene.entities:
-            if not entity.enabled or entity.entity_id in visual_ids:
-                continue
-            transform = entity.get_component(TransformComponent)
-            has_script = any(
-                getattr(comp, "component_type", None) == "script" for comp in entity.components
-            )
-            if transform is None and has_script:
-                continue
-            needed[entity.entity_id] = editor_entity_kind(entity.name) or "default"
-
-        # Delete stale markers.
-        for stale in set(self._marker_entries) - set(needed):
-            self._canvas.delete(f"entity:{stale}")
-            del self._marker_entries[stale]
-
-        # Update or create each marker.
-        for entity in self._scene.entities:
-            eid = entity.entity_id
-            if eid not in needed:
-                continue
-            kind = needed[eid]
-            transform = entity.get_component(TransformComponent)
-            ex, ey = self._camera.project((transform.x, transform.y) if transform else (0.0, 0.0))
-            is_selected = eid == self._selected_id
-            existing = self._marker_entries.get(eid)
-            if existing is not None and existing.kind == kind:
-                self._update_marker_coords(existing, entity, ex, ey, is_selected)
-            else:
-                if existing is not None:
-                    self._canvas.delete(f"entity:{eid}")
-                self._marker_entries[eid] = self._create_marker(entity, kind, ex, ey, is_selected)
-
-    def _update_marker_coords(
-        self,
-        entry: _MarkerEntry,
-        entity: Any,
-        ex: float,
-        ey: float,
-        is_selected: bool,
-    ) -> None:
-        """Move and recolour all canvas items for an existing marker without rebinding."""
-        r = self._ENTITY_RADIUS
-        c = self._colors
-        fill = c["accent"] if is_selected else c["surface"]
-        outline = c["accent_ink"] if is_selected else c["ink_2"]
-        label_color = c["accent_ink"] if is_selected else c["ink_3"]
-        ids = entry.ids
-
-        if entry.kind == "default":
-            # [rect, label]
-            self._canvas.coords(ids[0], ex - r, ey - r, ex + r, ey + r)
-            self._canvas.itemconfig(ids[0], fill=fill, outline=outline)
-            self._canvas.coords(ids[1], ex, ey + r + 8)
-            self._canvas.itemconfig(ids[1], fill=label_color)
-        elif entry.kind in {"camera", "camera_compact"}:
-            # camera_compact: [rect_body, oval_body, label]
-            # camera:         [rect_body, oval_body, rect_top, oval_lens, label]
-            marker_fill = c["camera_active"] if is_selected else c["camera"]
-            self._canvas.coords(ids[0], ex - r, ey - r // 2, ex + r, ey + r // 2)
-            self._canvas.itemconfig(ids[0], fill=marker_fill, outline=outline)
-            self._canvas.coords(ids[1], ex - r // 2, ey - r // 2, ex + r // 2, ey + r // 2)
-            self._canvas.itemconfig(ids[1], fill=fill, outline=outline)
-            if entry.kind == "camera":
-                self._canvas.coords(ids[2], ex - r // 2, ey - r // 2 - 3, ex - r // 5, ey - r // 2)
-                self._canvas.itemconfig(ids[2], fill=marker_fill, outline=outline)
-                self._canvas.coords(ids[3], ex - r // 4, ey - r // 4, ex + r // 4, ey + r // 4)
-                self._canvas.itemconfig(ids[3], fill=marker_fill, outline=outline)
-                self._canvas.coords(ids[4], ex, ey + r + 8)
-                self._canvas.itemconfig(ids[4], fill=label_color)
-            else:
-                self._canvas.coords(ids[2], ex, ey + r + 8)
-                self._canvas.itemconfig(ids[2], fill=label_color)
-        elif entry.kind == "player":
-            # [head_oval, body_poly, left_arm, right_arm, left_leg, right_leg, label]
-            marker_fill = c["player_active"] if is_selected else c["player"]
-            self._canvas.coords(ids[0], ex - 3, ey - r - 5, ex + 3, ey - r + 1)
-            self._canvas.itemconfig(ids[0], fill=marker_fill, outline=outline)
-            self._canvas.coords(ids[1], ex, ey - r + 1, ex + 6, ey + 3, ex, ey + r, ex - 6, ey + 3)
-            self._canvas.itemconfig(ids[1], fill=marker_fill, outline=outline)
-            self._canvas.coords(ids[2], ex - 6, ey - 1, ex - r, ey + 6)
-            self._canvas.itemconfig(ids[2], fill=outline)
-            self._canvas.coords(ids[3], ex + 6, ey - 1, ex + r, ey + 6)
-            self._canvas.itemconfig(ids[3], fill=outline)
-            self._canvas.coords(ids[4], ex - 3, ey + 8, ex - 5, ey + r + 4)
-            self._canvas.itemconfig(ids[4], fill=outline)
-            self._canvas.coords(ids[5], ex + 3, ey + 8, ex + 5, ey + r + 4)
-            self._canvas.itemconfig(ids[5], fill=outline)
-            self._canvas.coords(ids[6], ex, ey + r + 8)
-            self._canvas.itemconfig(ids[6], fill=label_color)
-        elif entry.kind == "player_compact":
-            # [diamond_poly, label]
-            marker_fill = c["player_active"] if is_selected else c["player"]
-            self._canvas.coords(ids[0], ex, ey - r, ex + r, ey, ex, ey + r, ex - r, ey)
-            self._canvas.itemconfig(ids[0], fill=marker_fill, outline=outline)
-            self._canvas.coords(ids[1], ex, ey + r + 8)
-            self._canvas.itemconfig(ids[1], fill=label_color)
-
-    def _create_marker(
-        self, entity: Any, kind: str, ex: float, ey: float, is_selected: bool
-    ) -> _MarkerEntry:
-        """Create fresh canvas items for an entity marker; bind click handler once."""
-        r = self._ENTITY_RADIUS
-        c = self._colors
-        fill = c["accent"] if is_selected else c["surface"]
-        outline = c["accent_ink"] if is_selected else c["ink_2"]
-        label_color = c["accent_ink"] if is_selected else c["ink_3"]
-        tag = f"entity:{entity.entity_id}"
-        canvas = self._canvas
-        ids: list[int] = []
-
-        if kind in {"camera", "camera_compact"}:
-            marker_fill = c["camera_active"] if is_selected else c["camera"]
-            ids.append(
-                canvas.create_rectangle(
-                    ex - r,
-                    ey - r // 2,
-                    ex + r,
-                    ey + r // 2,
-                    fill=marker_fill,
-                    outline=outline,
-                    width=2,
-                    tags=tag,
-                )
-            )
-            ids.append(
-                canvas.create_oval(
-                    ex - r // 2,
-                    ey - r // 2,
-                    ex + r // 2,
-                    ey + r // 2,
-                    fill=fill,
-                    outline=outline,
-                    width=1,
-                    tags=tag,
-                )
-            )
-            if kind == "camera":
-                ids.append(
-                    canvas.create_rectangle(
-                        ex - r // 2,
-                        ey - r // 2 - 3,
-                        ex - r // 5,
-                        ey - r // 2,
-                        fill=marker_fill,
-                        outline=outline,
-                        width=1,
-                        tags=tag,
-                    )
-                )
-                ids.append(
-                    canvas.create_oval(
-                        ex - r // 4,
-                        ey - r // 4,
-                        ex + r // 4,
-                        ey + r // 4,
-                        fill=marker_fill,
-                        outline=outline,
-                        width=1,
-                        tags=tag,
-                    )
-                )
-        elif kind == "player":
-            marker_fill = c["player_active"] if is_selected else c["player"]
-            ids.append(
-                canvas.create_oval(
-                    ex - 3,
-                    ey - r - 5,
-                    ex + 3,
-                    ey - r + 1,
-                    fill=marker_fill,
-                    outline=outline,
-                    width=1,
-                    tags=tag,
-                )
-            )
-            ids.append(
-                canvas.create_polygon(
-                    ex,
-                    ey - r + 1,
-                    ex + 6,
-                    ey + 3,
-                    ex,
-                    ey + r,
-                    ex - 6,
-                    ey + 3,
-                    fill=marker_fill,
-                    outline=outline,
-                    width=2,
-                    tags=tag,
-                )
-            )
-            ids.append(
-                canvas.create_line(ex - 6, ey - 1, ex - r, ey + 6, fill=outline, width=2, tags=tag)
-            )
-            ids.append(
-                canvas.create_line(ex + 6, ey - 1, ex + r, ey + 6, fill=outline, width=2, tags=tag)
-            )
-            ids.append(
-                canvas.create_line(
-                    ex - 3, ey + 8, ex - 5, ey + r + 4, fill=outline, width=2, tags=tag
-                )
-            )
-            ids.append(
-                canvas.create_line(
-                    ex + 3, ey + 8, ex + 5, ey + r + 4, fill=outline, width=2, tags=tag
-                )
-            )
-        elif kind == "player_compact":
-            marker_fill = c["player_active"] if is_selected else c["player"]
-            ids.append(
-                canvas.create_polygon(
-                    ex,
-                    ey - r,
-                    ex + r,
-                    ey,
-                    ex,
-                    ey + r,
-                    ex - r,
-                    ey,
-                    fill=marker_fill,
-                    outline=outline,
-                    width=2,
-                    tags=tag,
-                )
-            )
-        else:  # default
-            ids.append(
-                canvas.create_rectangle(
-                    ex - r,
-                    ey - r,
-                    ex + r,
-                    ey + r,
-                    fill=fill,
-                    outline=outline,
-                    width=2,
-                    tags=tag,
-                )
-            )
-
-        ids.append(
-            canvas.create_text(
-                ex,
-                ey + r + 8,
-                text=entity.name,
-                fill=label_color,
-                font=("Helvetica", 9),
-                tags=tag,
-            )
-        )
-        canvas.tag_bind(
-            tag,
-            "<Button-1>",
-            lambda _e, eid=entity.entity_id: self._click_entity(eid),  # type: ignore[misc]
-        )
-        return _MarkerEntry(kind=kind, ids=ids)
-
     @staticmethod
     def _tk_color(color: Any) -> str:
         return (
@@ -923,10 +722,10 @@ class ViewportPanel(tk.Frame):
                 abs(world[0] - transform.position[0]) <= half_width
                 and abs(world[1] - transform.position[1]) <= half_height
             ):
-                self._click_entity(item.key)
+                self._click_entity(item.key, event)
                 return
         if self._on_entity_click is not None:
-            self._on_entity_click(None)
+            self._on_entity_click((), False)
 
     def _on_pan_start(self, event: Any) -> None:
         self._pan_anchor = (float(event.x), float(event.y))
@@ -1018,6 +817,43 @@ class ViewportPanel(tk.Frame):
         if self._on_camera_change is not None:
             self._on_camera_change(self._camera.to_dict())
 
-    def _click_entity(self, entity_id: str) -> None:
+    def _click_entity(self, entity_id: str, event: Any) -> None:
         if self._on_entity_click:
-            self._on_entity_click(entity_id)
+            self._on_entity_click((entity_id,), event_extends_selection(event))
+        if not self._space_held:
+            self._spatial_edit.begin_drag_on_entity(entity_id, event)
+
+    def _on_button1_press_for_selection(self, event: Any) -> None:
+        """Start a box-select when the press missed every entity tag."""
+        if not self._editor_overlays or self._space_held or self._spatial_edit.is_active:
+            return
+        current_tags = self._canvas.gettags("current")
+        if any(tag.startswith("entity:") for tag in current_tags):
+            return
+        self._spatial_edit.begin_box_select(event)
+
+    def _on_b1_motion_for_selection(self, event: Any) -> None:
+        if self._space_held:
+            return
+        if self._spatial_edit.is_dragging_transform:
+            self._spatial_edit.continue_drag(event)
+        else:
+            self._spatial_edit.continue_box_select(event)
+
+    def _on_button1_release(self, event: Any) -> None:
+        if self._spatial_edit.is_dragging_transform:
+            self._spatial_edit.end_drag()
+            return
+        rect = self._spatial_edit.end_box_select()
+        if rect is None or self._scene is None or self._on_entity_click is None:
+            return
+        x0, y0, x1, y1 = rect
+        hits: list[str] = []
+        for entity in self._scene.entities:
+            transform = entity.get_component(TransformComponent)
+            if transform is None:
+                continue
+            sx, sy = self._camera.project((transform.x, transform.y))
+            if x0 <= sx <= x1 and y0 <= sy <= y1:
+                hits.append(entity.entity_id)
+        self._on_entity_click(tuple(hits), event_extends_selection(event))

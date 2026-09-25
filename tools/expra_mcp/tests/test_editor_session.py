@@ -65,6 +65,43 @@ async def test_open_project_rejects_untrusted_project(server) -> None:
             await client.call_tool("editor_session", {"action": "close", "session_id": session_id})
 
 
+async def test_open_scene_switches_between_a_project_s_registered_scenes(server) -> None:
+    """Blacksite Relay has two registered scenes (main.json, 66 entities;
+    level_02_deepcore.json, 100 entities) -- exactly the multi-level project
+    this action exists for. Read-only: switches back to the start scene
+    afterward, writes nothing to disk.
+    """
+    async with Client(server) as client:
+        session_id = await _start_session(client)
+        try:
+            await client.call_tool(
+                "editor_session", {"action": "open_project", "session_id": session_id, "project": BLACKSITE}
+            )
+            switched = await client.call_tool(
+                "editor_session",
+                {
+                    "action": "open_scene",
+                    "session_id": session_id,
+                    "scene": "scenes/level_02_deepcore.json",
+                },
+            )
+            assert switched.is_error is not True
+            assert switched.structured_content["data"]["entity_count"] == 100
+
+            state = await client.call_tool(
+                "editor_session", {"action": "state", "session_id": session_id}
+            )
+            assert state.structured_content["data"]["entity_count"] == 100
+
+            back = await client.call_tool(
+                "editor_session",
+                {"action": "open_scene", "session_id": session_id, "scene": "scenes/main.json"},
+            )
+            assert back.structured_content["data"]["entity_count"] == 66
+        finally:
+            await client.call_tool("editor_session", {"action": "close", "session_id": session_id})
+
+
 async def test_full_spec_acceptance_workflow(server) -> None:
     """start -> open Blacksite -> capture -> Play -> press W -> wait ->
     inspect -> capture -> select -> Stop (edit scene restored) -> close --
@@ -191,7 +228,13 @@ async def test_space_pong_paddles_use_canonical_pixel_path_across_play_stop_cycl
             await client.call_tool("editor_session", {"action": "close", "session_id": session_id})
 
 
-async def test_frame_scene_reports_unavailable_honestly(server) -> None:
+async def test_frame_scene_frames_the_real_viewport(server) -> None:
+    """ViewportPanel.frame_scene()/frame_selected() exist and are wired now
+    (a prior source search found no passthrough on EditorWindow -- fixed).
+    A freshly started editor window already shows its own default sample
+    scene (confirmed by reading EditorWindow's construction), so framing it
+    succeeds immediately without needing 'open_project' first.
+    """
     async with Client(server) as client:
         session_id = await _start_session(client)
         try:
@@ -199,7 +242,8 @@ async def test_frame_scene_reports_unavailable_honestly(server) -> None:
                 "editor_session", {"action": "frame_scene", "session_id": session_id}
             )
             assert result.is_error is not True
-            assert result.structured_content["data"]["available"] is False
+            assert result.structured_content["data"]["available"] is True
+            assert result.structured_content["data"]["framed"] is True
         finally:
             await client.call_tool("editor_session", {"action": "close", "session_id": session_id})
 

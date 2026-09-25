@@ -25,7 +25,7 @@ class EditorWindowAutosaveTests(unittest.TestCase):
         )
         window._last_save_path = None
         window._autosave_after_id = None
-        window._engine = SimpleNamespace(edit_scene=Scene("Test"))
+        window._engine = SimpleNamespace(edit_scene=Scene("Test"), project=None)
         window._console = MagicMock()
         return window
 

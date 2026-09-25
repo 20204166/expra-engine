@@ -15,6 +15,7 @@ from typing import Any
 
 from expra_engine.core.component import TransformComponent
 from expra_engine.core.entity import Entity
+from expra_engine.core.math_utils import compose_2d_pose
 from expra_engine.core.scene.camera import SceneCamera
 
 
@@ -45,6 +46,27 @@ class Scene:
         self.name = name
         self._camera = camera if isinstance(camera, SceneCamera) else SceneCamera(camera)
         self._entities: list[Entity] = []
+        # Instance-root entity_id -> materialized descendant entity_ids. Purely
+        # runtime bookkeeping (never serialized): lets Project.save_scene omit
+        # resolve-from-source content and lets the editor mark it read-only-ish.
+        self._instance_children: dict[str, set[str]] = {}
+        # Lazy parent_id -> children derived index (never serialized). Measured
+        # (Phase H): children_of()'s naive O(n) scan dominates walk_hierarchy()
+        # (76% of its cost at 1000 entities, cProfile-confirmed) and made
+        # HierarchyPanel.render() scale super-linearly (~61ms/~73ms at 1000
+        # entities, from ~3ms/~2ms at 100) -- genuine, measured pain at the
+        # spec's own test ceiling, not merely theoretical. Invalidated (set to
+        # None) by every structural mutation; rebuilt in one O(n) pass on next
+        # read. children_of() keeps returning a fresh list per call (copies
+        # out of the index) so callers can never mutate cached state.
+        self._children_index: dict[str | None, list[Entity]] | None = None
+        # Lazy entity_id -> Entity index (never serialized). find_entity() was a
+        # linear scan, so add_entity()'s duplicate check made building or
+        # materializing N entities O(N^2) -- measured (Phase H) at ~12x cost per
+        # 4x reusable scene instances, and it also made HierarchyPanel.render()
+        # O(N^2) via its per-entity find_entity() calls. Kept incrementally in
+        # sync by add_entity/remove_entity so it never rebuilds in a hot loop.
+        self._entity_index: dict[str, Entity] | None = None
 
     @property
     def entities(self) -> tuple[Entity, ...]:
@@ -66,9 +88,18 @@ class Scene:
 
     def add_entity(self, entity: Entity) -> None:
         """Register an already-constructed entity."""
-        if self.find_entity(entity.entity_id) is not None:
+        index = self._ensure_entity_index()
+        if entity.entity_id in index:
             raise ValueError(f"Entity ID already exists in scene: {entity.entity_id!r}")
         self._entities.append(entity)
+        index[entity.entity_id] = entity
+        if self._children_index is not None:
+            # Keep an already-built children index in sync incrementally rather
+            # than discarding it and forcing an O(n) rebuild on the next
+            # children_of() -- that rebuild-on-every-add made resolving many
+            # scene instances O(n^2) (a full index rebuild per materialized
+            # entity's following walk_hierarchy()).
+            self._children_index.setdefault(entity.parent_id, []).append(entity)
 
     def remove_entity(self, entity_id: str, *, recursive: bool = False) -> bool:
         """Remove entity by ID. Returns True if found and removed.
@@ -82,12 +113,28 @@ class Scene:
                 return False
             ids_to_remove = {e.entity_id for e in subtree}
             self._entities = [e for e in self._entities if e.entity_id not in ids_to_remove]
+            if self._entity_index is not None:
+                for removed_id in ids_to_remove:
+                    self._entity_index.pop(removed_id, None)
+            self._forget_instance_bookkeeping(ids_to_remove)
+            self._children_index = None
             return True
         for i, entity in enumerate(self._entities):
             if entity.entity_id == entity_id:
                 self._entities.pop(i)
+                if self._entity_index is not None:
+                    self._entity_index.pop(entity_id, None)
+                self._forget_instance_bookkeeping({entity_id})
+                self._children_index = None
                 return True
         return False
+
+    def _forget_instance_bookkeeping(self, removed_ids: set[str]) -> None:
+        """Drop any scene-instance tracking that referenced a removed entity."""
+        for root_id in removed_ids:
+            self._instance_children.pop(root_id, None)
+        for children in self._instance_children.values():
+            children -= removed_ids
 
     def clone_entity(self, entity_id: str, *, recursive: bool = True) -> Entity | None:
         """Clone an entity (and optionally its descendants) into this scene.
@@ -137,11 +184,14 @@ class Scene:
         return self.find_entity(id_map[entity_id])
 
     def find_entity(self, entity_id: str) -> Entity | None:
-        """Return entity by ID, or None."""
-        for entity in self._entities:
-            if entity.entity_id == entity_id:
-                return entity
-        return None
+        """Return entity by ID, or None (O(1) via the lazy entity index)."""
+        return self._ensure_entity_index().get(entity_id)
+
+    def _ensure_entity_index(self) -> dict[str, Entity]:
+        """Build the lazy entity_id -> Entity index if it does not exist yet."""
+        if self._entity_index is None:
+            self._entity_index = {entity.entity_id: entity for entity in self._entities}
+        return self._entity_index
 
     def world_pose(self, entity_id: str) -> tuple[float, float, float]:
         """Return an entity's authoritative parent-composed 2D pose.
@@ -150,7 +200,7 @@ class Scene:
         extraction. Missing parents are treated as roots; malformed cycles are
         rejected rather than recursing indefinitely.
         """
-        entities = {entity.entity_id: entity for entity in self._entities}
+        entities = self._ensure_entity_index()
         active: set[str] = set()
 
         def resolve(current_id: str) -> tuple[float, float, float, float, float]:
@@ -174,20 +224,12 @@ class Scene:
                 if not all(math.isfinite(value) for value in values):
                     raise ValueError("transform values must be finite")
                 local = values
-            x, y, rotation, scale_x, scale_y = local
             parent = entities.get(entity.parent_id) if entity.parent_id is not None else None
+            pose = local
             if parent is not None:
-                px, py, protation, pscale_x, pscale_y = resolve(parent.entity_id)
-                angle = math.radians(protation)
-                x, y = (
-                    px + (x * pscale_x) * math.cos(angle) - (y * pscale_y) * math.sin(angle),
-                    py + (x * pscale_x) * math.sin(angle) + (y * pscale_y) * math.cos(angle),
-                )
-                rotation += protation
-                scale_x *= pscale_x
-                scale_y *= pscale_y
+                pose = compose_2d_pose(resolve(parent.entity_id), local)
             active.remove(current_id)
-            return x, y, rotation, scale_x, scale_y
+            return pose
 
         x, y, rotation, _scale_x, _scale_y = resolve(entity_id)
         return x, y, rotation
@@ -202,15 +244,76 @@ class Scene:
                 return entity
         return None
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self, *, include_instance_content: bool = True) -> dict[str, Any]:
+        """Serialize this scene.
+
+        ``include_instance_content=False`` omits entities materialized by
+        scene-instance resolution (see ``is_instance_materialized``) -- used
+        by ``Project.save_scene`` so resolve-from-source content is never
+        persisted. Every other caller (runtime scene copies, export, tests)
+        keeps the default, full snapshot.
+        """
+        entities = self._entities
+        if not include_instance_content:
+            # One union instead of calling is_instance_materialized() per entity
+            # (that is O(instance-roots) each, making compact serialization
+            # O(entities * instances) -- measured 3.2ms->53ms from 100->400
+            # instances before this).
+            materialized = {
+                entity_id for children in self._instance_children.values() for entity_id in children
+            }
+            entities = [e for e in entities if e.entity_id not in materialized]
         data: dict[str, Any] = {
             "scene_id": self.scene_id,
             "name": self.name,
-            "entities": [e.to_dict() for e in self._entities],
+            "entities": [e.to_dict() for e in entities],
         }
         if self.camera:
             data["camera"] = self.camera.to_dict()
         return data
+
+    # ------------------------------------------------------------------
+    # Scene-instance bookkeeping (see core/scene/scene_instance.py)
+    # ------------------------------------------------------------------
+
+    def is_instance_materialized(self, entity_id: str) -> bool:
+        """Return True if ``entity_id`` was materialized by scene-instance resolution."""
+        return any(entity_id in children for children in self._instance_children.values())
+
+    def _set_instance_children(self, root_id: str, entity_ids: set[str]) -> None:
+        """Record which entity ids were materialized under instance root ``root_id``."""
+        self._instance_children[root_id] = set(entity_ids)
+
+    def _clear_instance_subtree(self, root_id: str) -> None:
+        """Remove every current descendant of ``root_id`` before re-resolving it.
+
+        Removes the *entire* current subtree, not just previously-tracked
+        materialized ids -- resolving a scene instance always fully replaces
+        whatever is under its root (matching Godot's instantiate()
+        semantics), so a root cloned via ``Scene.clone_entity`` (whose
+        snapshot children are not yet tracked) still re-links cleanly on the
+        next resolve instead of accumulating duplicates.
+        """
+        stale_entities = [e for e in self.walk_hierarchy(root_id) if e.entity_id != root_id]
+        if not stale_entities:
+            self._instance_children.pop(root_id, None)
+            return
+        stale = {e.entity_id for e in stale_entities}
+        self._entities = [e for e in self._entities if e.entity_id not in stale]
+        if self._entity_index is not None:
+            for removed in stale_entities:
+                self._entity_index.pop(removed.entity_id, None)
+        if self._children_index is not None:
+            # Prune surgically instead of dropping the whole index: this runs
+            # once per instance during re-resolve, so a wholesale rebuild here
+            # would make re-resolving many instances O(n^2).
+            for removed in stale_entities:
+                bucket = self._children_index.get(removed.parent_id)
+                if bucket is not None:
+                    bucket[:] = [child for child in bucket if child.entity_id != removed.entity_id]
+                self._children_index.pop(removed.entity_id, None)
+        self._forget_instance_bookkeeping(stale)
+        self._instance_children.pop(root_id, None)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Scene:
@@ -233,8 +336,20 @@ class Scene:
     # ------------------------------------------------------------------
 
     def children_of(self, parent_id: str) -> list[Entity]:
-        """Return direct children of the entity with ``parent_id``."""
-        return [e for e in self._entities if e.parent_id == parent_id]
+        """Return direct children of the entity with ``parent_id``.
+
+        Served from a lazy derived index (parent_id -> children), rebuilt in
+        one O(n) pass whenever stale -- see the ``_children_index`` comment
+        in ``__init__`` for the measurement that motivated this. Always
+        returns a fresh list, never the cached list itself, so callers can
+        never mutate cached state.
+        """
+        if self._children_index is None:
+            index: dict[str | None, list[Entity]] = {}
+            for entity in self._entities:
+                index.setdefault(entity.parent_id, []).append(entity)
+            self._children_index = index
+        return list(self._children_index.get(parent_id, ()))
 
     def roots(self) -> list[Entity]:
         """Return top-level entities (those with no parent)."""
@@ -261,6 +376,7 @@ class Scene:
                     f"Setting parent {parent_id!r} on {entity_id!r} would create a cycle"
                 )
         child.parent_id = parent_id
+        self._children_index = None
 
     def _would_create_cycle(self, entity_id: str, proposed_parent_id: str) -> bool:
         """Return True if making proposed_parent_id a parent of entity_id creates a cycle."""

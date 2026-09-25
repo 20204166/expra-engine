@@ -267,6 +267,7 @@ _RUNTIME_CORE_MODULES = (
     "scene/__init__.py",
     "scene/camera.py",
     "scene/scene.py",
+    "scene/scene_instance.py",
     "string_utils.py",
     "utils.py",
 )

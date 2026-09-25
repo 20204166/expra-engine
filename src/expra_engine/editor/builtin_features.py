@@ -22,11 +22,16 @@ def build_builtin_features(window: Any) -> tuple[EditorFeatureSpec, ...]:
                 EditorActionSpec("play", window._act_play),
                 EditorActionSpec("pause", window._act_pause),
                 EditorActionSpec("stop", window._act_stop),
+                EditorActionSpec("run_project", window._project_workflow.run_project),
+            ),
+            menus=(
+                MenuContribution("File", "Run Project", "run_project", group="build", order=-1),
             ),
             toolbars=(
                 ToolbarContribution("play", "▶  Play", group="runtime", style_role="play"),
                 ToolbarContribution("pause", "⏸  Pause", group="runtime"),
                 ToolbarContribution("stop", "⏹  Stop", group="runtime", style_role="stop"),
+                ToolbarContribution("run_project", "▶▶  Run Project", group="runtime"),
             ),
         ),
         EditorFeatureSpec(
@@ -39,7 +44,10 @@ def build_builtin_features(window: Any) -> tuple[EditorFeatureSpec, ...]:
                 EditorActionSpec("import_asset", window._act_import_asset, enabled=False),
                 EditorActionSpec("configure_input", window._act_configure_input, enabled=False),
                 EditorActionSpec("new_scene", window._act_new_scene),
+                EditorActionSpec("open_scene", window._project_workflow.open_scene),
                 EditorActionSpec("save_scene", window._act_save_scene, enabled=False),
+                EditorActionSpec("save_scene_as", window._project_workflow.save_scene_as),
+                EditorActionSpec("duplicate_scene", window._project_workflow.duplicate_scene),
             ),
             menus=(
                 MenuContribution(
@@ -55,7 +63,14 @@ def build_builtin_features(window: Any) -> tuple[EditorFeatureSpec, ...]:
                 MenuContribution("File", "Import Asset...", "import_asset", group="project"),
                 MenuContribution("File", "Input Settings...", "configure_input", group="project"),
                 MenuContribution("File", "New Scene", "new_scene", group="scene", order=0),
-                MenuContribution("File", "Save Scene...", "save_scene", group="scene", order=1),
+                MenuContribution("File", "Open Scene...", "open_scene", group="scene", order=1),
+                MenuContribution("File", "Save Scene...", "save_scene", group="scene", order=2),
+                MenuContribution(
+                    "File", "Save Scene As...", "save_scene_as", group="scene", order=3
+                ),
+                MenuContribution(
+                    "File", "Duplicate Scene...", "duplicate_scene", group="scene", order=4
+                ),
             ),
             toolbars=(
                 ToolbarContribution("new_scene", "New Scene", group="scene"),
@@ -67,7 +82,20 @@ def build_builtin_features(window: Any) -> tuple[EditorFeatureSpec, ...]:
             actions=(
                 EditorActionSpec("add_entity", window._act_add_entity),
                 EditorActionSpec("delete_entity", window._act_delete_entity, enabled=False),
+                EditorActionSpec(
+                    "duplicate_selection", window._act_duplicate_selection, enabled=False
+                ),
             ),
+            menus=(
+                MenuContribution(
+                    "Edit",
+                    "Duplicate",
+                    "duplicate_selection",
+                    group="entity",
+                    accelerator="Ctrl+D",
+                ),
+            ),
+            shortcuts=(ShortcutContribution("<Control-d>", "duplicate_selection"),),
         ),
         EditorFeatureSpec(
             "scripting",

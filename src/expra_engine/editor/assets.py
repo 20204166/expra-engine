@@ -52,6 +52,12 @@ class AssetEntry:
             return "Folder"
         if self.path.suffix.casefold() in {".wav", ".ogg", ".mp3", ".flac", ".m4a"}:
             return "Audio"
+        if self.path.suffix.casefold() in {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"}:
+            return "Image"
+        if self.path.suffix.casefold() == ".json" and self.logical_id is not None:
+            parts = self.logical_id.path.split("/", 1)
+            if parts and parts[0] in ("scenes", "scene"):
+                return "Scene"
         return "File"
 
 

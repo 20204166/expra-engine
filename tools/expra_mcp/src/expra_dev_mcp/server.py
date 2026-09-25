@@ -861,9 +861,18 @@ def build_server(cfg: ExpraMcpConfig) -> MCPServer:
             "session's single shared ObservabilityWatcher (app/ui/runtime/render/editor metrics "
             "together) as data.metrics -- pass prefix='runtime:' etc. to filter, "
             "reset_observations=true to clear history before returning (empty snapshot). "
-            "'frame_scene' reports available=false: no such method exists in "
-            "this codebase version. Always call 'close' when done -- a worker whose stdin "
-            "closes unexpectedly shuts itself down, but that's a safety net, not a substitute."
+            "'frame_scene' calls the real ViewportPanel.frame_scene() (or frame_selected() with "
+            "selection_only=true) -- reports framed=false rather than an error when there's "
+            "nothing to frame yet (no scene loaded, or nothing selected). 'open_scene' (needs "
+            "'scene', a project-relative path) switches the edit scene within the current "
+            "project, exactly like File > Open Scene. 'new_scene'/'duplicate_scene' (need "
+            "'name') create a scene the same way File > New/Duplicate Scene does. 'save_scene' "
+            "saves through the canonical Project.save_scene() path (never leaks resolved "
+            "scene-instance content into the file). 'run_project' plays from the project's "
+            "start scene regardless of what's currently open, restoring the prior scene on the "
+            "next 'stop' -- exactly like the Run Project toolbar button. Always call 'close' "
+            "when done -- a worker whose stdin closes unexpectedly shuts itself down, but "
+            "that's a safety net, not a substitute."
         ),
         annotations=ToolAnnotations(
             title="Editor Session",
@@ -877,6 +886,7 @@ def build_server(cfg: ExpraMcpConfig) -> MCPServer:
             "start", "open_project", "state", "play", "pause", "resume", "stop",
             "send_key", "wait", "select_entity", "frame_scene", "capture_viewport",
             "inspect", "inspect_render", "observability_snapshot", "close",
+            "open_scene", "new_scene", "save_scene", "duplicate_scene", "run_project",
         ],
         session_id: str | None = None,
         project: str | None = None,
@@ -887,6 +897,8 @@ def build_server(cfg: ExpraMcpConfig) -> MCPServer:
         duration_ms: int = 250,
         prefix: str | None = None,
         reset_observations: bool = False,
+        name: str | None = None,
+        selection_only: bool = False,
     ) -> EditorSessionResult:
         if action == "start":
             new_id, data = await editor_sessions.start(expra_root=cfg.workspace.expra_root)
@@ -923,6 +935,16 @@ def build_server(cfg: ExpraMcpConfig) -> MCPServer:
             if not entity:
                 raise ValueError("action='inspect_render' requires 'entity'")
             params = {"entity": entity}
+        elif action == "frame_scene":
+            params = {"selection_only": selection_only}
+        elif action == "open_scene":
+            if not scene:
+                raise ValueError("action='open_scene' requires 'scene' (project-relative path)")
+            params = {"relative_path": scene}
+        elif action in ("new_scene", "duplicate_scene"):
+            if not name:
+                raise ValueError(f"action={action!r} requires 'name'")
+            params = {"name": name}
         elif action == "inspect" and entity:
             params = {"entity": entity}
         elif action == "observability_snapshot":

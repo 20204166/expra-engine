@@ -1,0 +1,60 @@
+{
+  "scene_id": "8f91a4e5-f90e-49c0-8569-71f5238eba1f",
+  "name": "Security Door Demo",
+  "entities": [
+    {
+      "entity_id": "36418b22-1931-4246-9494-df8801ad95f5",
+      "name": "Door Instance A",
+      "enabled": true,
+      "layer": 0,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 10.0,
+          "y": 0.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "scene_instance",
+          "enabled": true,
+          "source_path": "scenes/security_door.json",
+          "overrides": {}
+        }
+      ],
+      "tags": []
+    },
+    {
+      "entity_id": "f266a0b5-5b80-43f5-8a63-d920a63efce8",
+      "name": "Door Instance B",
+      "enabled": true,
+      "layer": 0,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": -10.0,
+          "y": 0.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "scene_instance",
+          "enabled": true,
+          "source_path": "scenes/security_door.json",
+          "overrides": {
+            "Door Body": {
+              "open_speed": 9.0
+            }
+          }
+        }
+      ],
+      "tags": []
+    }
+  ]
+}

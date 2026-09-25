@@ -1,0 +1,36 @@
+{
+  "scene_id": "1c7d1bfe-6768-4275-9ccc-eb9aea2388e3",
+  "name": "Security Door",
+  "entities": [
+    {
+      "entity_id": "f87ce20b-bc99-4474-9710-0294e39f2f9a",
+      "name": "Door Body",
+      "enabled": true,
+      "layer": 0,
+      "parent_id": null,
+      "components": [
+        {
+          "type": "transform",
+          "enabled": true,
+          "x": 0.0,
+          "y": 0.0,
+          "rotation": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0
+        },
+        {
+          "type": "script",
+          "enabled": true,
+          "script_id": "project://scripts/security_door_behaviour.py",
+          "behaviour_class": "SecurityDoorBehaviour",
+          "exposed_values": {
+            "open_speed": 2.0,
+            "locked": true
+          },
+          "order": 0
+        }
+      ],
+      "tags": []
+    }
+  ]
+}

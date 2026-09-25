@@ -12,6 +12,7 @@ from expra_engine.runtime.animated_sprite_2d import (
     AnimatedSprite2DComponent,
     AnimatedSpritePlayer2D,
 )
+from expra_engine.runtime.area import AreaComponent
 from expra_engine.runtime.collider import ColliderComponent
 from expra_engine.runtime.render_extractor import extract_render_frame
 from expra_engine.runtime.rendering import (
@@ -31,6 +32,7 @@ class ColliderOutline:
     entity_id: str
     outline: dict[str, Any]
     position: tuple[float, float]
+    is_area: bool = False
 
 
 @dataclass(frozen=True)
@@ -109,6 +111,7 @@ def build_editor_render_target(
                     entity.entity_id,
                     collider.editor_outline,
                     (transform.x + collider.offset[0], transform.y + collider.offset[1]),
+                    is_area=entity.get_component(AreaComponent) is not None,
                 )
             )
     return EditorRenderTarget(

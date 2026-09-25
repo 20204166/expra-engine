@@ -51,7 +51,9 @@ def _send(obj: dict[str, Any]) -> None:
     sys.stdout.flush()
 
 
-def _respond(request_id: int, ok: bool, data: dict[str, Any] | None = None, error: str | None = None) -> None:
+def _respond(
+    request_id: int, ok: bool, data: dict[str, Any] | None = None, error: str | None = None
+) -> None:
     payload: dict[str, Any] = {"id": request_id, "ok": ok}
     if ok:
         payload["data"] = data or {}
@@ -177,7 +179,15 @@ class _RecordCapture(logging.Handler):
 # ---------------------------------------------------------------------------
 
 
-def _dispatch(command: str, params: dict[str, Any], *, engine: Any, window: Any, root: Any, state: dict[str, Any]) -> dict:
+def _dispatch(
+    command: str,
+    params: dict[str, Any],
+    *,
+    engine: Any,
+    window: Any,
+    root: Any,
+    state: dict[str, Any],
+) -> dict:
     if command == "open_project":
         from expra_engine.core.project import Project
         from expra_engine.runtime.script_registry import ScriptRegistry
@@ -192,7 +202,7 @@ def _dispatch(command: str, params: dict[str, Any], *, engine: Any, window: Any,
         window._engine.set_scene(scene)
         window._viewport.set_resource_service(project.resource_service())
         window._engine.set_script_registry(ScriptRegistry(project.path))
-        window._selected_id = None
+        window._selected_ids = ()
         window._root.title(f"{project.name} — Expra Editor")
         window._present_all()
         # Real Tk key bindings only fire for events routed to a widget that
@@ -264,17 +274,75 @@ def _dispatch(command: str, params: dict[str, Any], *, engine: Any, window: Any,
         if scene is None:
             raise RuntimeError("no scene loaded")
         entity = _find_entity(scene, params["entity"])
-        window._on_hierarchy_select(entity.entity_id)
+        window._on_hierarchy_select((entity.entity_id,))
         return {"selected_id": window._selected_id, "entity_name": entity.name}
 
     if command == "frame_scene":
+        # ViewportPanel.frame_scene()/frame_selected() exist (bound to
+        # Home/F for a human) -- EditorWindow just never exposed a
+        # passthrough. Fixed here rather than left as the stale "not
+        # available" stub a prior source search reported.
+        selection_only = bool(params.get("selection_only", False))
+        framed = (
+            window._viewport.frame_selected() if selection_only else window._viewport.frame_scene()
+        )
+        return {"available": True, "framed": framed, "selection_only": selection_only}
+
+    if command == "open_scene":
+        # Mirrors editor/project_workflow.py's ProjectWorkflow.open_scene()
+        # for an already-known relative path (confirmed by reading it) --
+        # bypasses the file-picker dialog branch, which has no headless
+        # equivalent, but otherwise identical: same load_scene()/set_scene()
+        # canonical path a human's "File > Open Scene..." choice uses.
+        project = engine.project
+        if project is None:
+            raise RuntimeError("no project open")
+        relative_path = params["relative_path"]
+        scene = project.load_scene(relative_path)
+        window._engine.set_scene(scene)
+        window._last_save_path = project.scene_file(relative_path)
+        window._selected_ids = ()
+        window._root.title(window._project_workflow.window_title())
+        window._present_all()
+        return {"relative_path": relative_path, "entity_count": len(scene.entities)}
+
+    if command == "new_scene":
+        project = engine.project
+        name = params["name"]
+        if project is not None:
+            from expra_engine.core.scene import Scene as _Scene
+
+            relative = f"scenes/{name}.json"
+            scene = _Scene(name)
+            project.register_scene_path(relative)
+            window._last_save_path = project.path / relative
+        else:
+            from expra_engine.core.scene import Scene as _Scene
+
+            scene = _Scene(name)
+        window._engine.set_scene(scene)
+        window._selected_ids = ()
+        window._present_all()
+        return {"name": name, "entity_count": len(scene.entities)}
+
+    if command == "save_scene":
+        # Same canonical path as a human's "File > Save Scene": routes
+        # through Project.save_scene() (which omits resolve-from-source
+        # scene-instance content), never the raw-write fallback.
+        window._act_save_scene()
+        return {"last_save_path": str(window._last_save_path) if window._last_save_path else None}
+
+    if command == "duplicate_scene":
+        name = params["name"]
+        window._project_workflow.duplicate_scene(name)
         return {
-            "available": False,
-            "note": (
-                "no frame/fit-view method exists on EditorWindow in this codebase "
-                "version (confirmed by source search) -- nothing to call"
-            ),
+            "name": name,
+            "last_save_path": str(window._last_save_path) if window._last_save_path else None,
         }
+
+    if command == "run_project":
+        window._project_workflow.run_project()
+        return {"run_state": engine.run_state.value}
 
     if command == "capture_viewport":
         # ViewportPanel._pixel_image is a real tk.PhotoImage; .write() with
@@ -330,7 +398,10 @@ def _dispatch(command: str, params: dict[str, Any], *, engine: Any, window: Any,
         if entity_param:
             entity = _find_entity(scene, entity_param)
             return _entity_snapshot(scene, entity)
-        return {"entity_count": len(scene.entities), "entity_names": [e.name for e in scene.entities]}
+        return {
+            "entity_count": len(scene.entities),
+            "entity_names": [e.name for e in scene.entities],
+        }
 
     if command == "inspect_render":
         scene = engine.active_scene
@@ -341,7 +412,10 @@ def _dispatch(command: str, params: dict[str, Any], *, engine: Any, window: Any,
 
         frame = extract_render_frame(scene)
         items = [_render_item_to_dict(item) for item in frame.items if item.key == entity.entity_id]
-        return {"entity": {"entity_id": entity.entity_id, "name": entity.name}, "render_items": items}
+        return {
+            "entity": {"entity_id": entity.entity_id, "name": entity.name},
+            "render_items": items,
+        }
 
     if command == "performance_probe":
         # The only performance_probe action that needs a LIVE Tk widget --
@@ -464,7 +538,11 @@ def main() -> None:
             duration_ms = int(params.get("duration_ms", 250))
 
             def _respond_after() -> None:
-                _respond(request_id, True, {"waited_ms": duration_ms, "run_state": window._engine.run_state.value})
+                _respond(
+                    request_id,
+                    True,
+                    {"waited_ms": duration_ms, "run_state": window._engine.run_state.value},
+                )
 
             root.after(max(0, duration_ms), _respond_after)
             return
@@ -481,7 +559,11 @@ def main() -> None:
                 request_id = item.get("id", -1)
                 command = item.get("command")
                 if command == "__bad_json__":
-                    _respond(request_id, False, error=f"could not parse request JSON: {item.get('raw')!r}")
+                    _respond(
+                        request_id,
+                        False,
+                        error=f"could not parse request JSON: {item.get('raw')!r}",
+                    )
                     continue
                 if command in ("close", "__stdin_closed__"):
                     with contextlib.suppress(Exception):
@@ -491,7 +573,11 @@ def main() -> None:
                     root.quit()
                     return
                 if not isinstance(command, str):
-                    _respond(request_id, False, error=f"request is missing a valid 'command' field: {item!r}")
+                    _respond(
+                        request_id,
+                        False,
+                        error=f"request is missing a valid 'command' field: {item!r}",
+                    )
                     continue
                 handle(request_id, command, item)
         except queue.Empty:

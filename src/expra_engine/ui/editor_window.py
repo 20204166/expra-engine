@@ -18,7 +18,7 @@ import contextlib
 import json
 import logging
 import tkinter as tk
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import replace
 from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog
@@ -37,14 +37,20 @@ from expra_engine.core.scene import Scene
 from expra_engine.editor.builtin_features import build_builtin_features
 from expra_engine.editor.commands import (
     AddComponentCommand,
+    Command,
     CommandStack,
+    CreateEntityCommand,
     DeleteEntityCommand,
-    RemoveComponentCommand,
     RenameEntityCommand,
-    SetComponentPropertyCommand,
     SetExposedValueCommand,
+    ToggleEnabledCommand,
+    TransformEntityCommand,
     apply_component_change,
+    delete_selection,
+    drop_asset_on_viewport,
+    duplicate_selection,
     remove_component,
+    reparent_selection_to,
 )
 from expra_engine.editor.contributions import (
     ContributionRegistry,
@@ -165,7 +171,7 @@ class EditorWindow:
             pending_ids=self._pending_timer_ids,
             logger=LOGGER,
         )
-        self._selected_id: str | None = None
+        self._selected_ids: tuple[str, ...] = ()
         self._render_generations: dict[str, int] = {"inspector": 0}
         self._render_owners: dict[str, str | None] = {"inspector": None}
         self._command_stack: CommandStack = CommandStack()
@@ -204,17 +210,13 @@ class EditorWindow:
         token = observer.begin("runtime:input:dispatch") if observer is not None else None
         transitions: tuple[Any, ...] = ()
         try:
-            transitions = getattr(self._engine.input_map, phase)(
-                PhysicalInput("keyboard", control)
-            )
+            transitions = getattr(self._engine.input_map, phase)(PhysicalInput("keyboard", control))
             for action_event in transitions:
                 self._engine.signal(action_event)
         finally:
             if observer is not None:
                 observer.increment("runtime:input:dispatch", "physical_inputs")
-                observer.increment(
-                    "runtime:input:dispatch", "action_events", len(transitions)
-                )
+                observer.increment("runtime:input:dispatch", "action_events", len(transitions))
                 if token is not None:
                     observer.finish(token)
 
@@ -258,12 +260,13 @@ class EditorWindow:
             on_select=self._on_hierarchy_select,
             on_create=self._on_hierarchy_create,
             on_delete=self._on_hierarchy_delete,
+            on_reparent=lambda ids, target: reparent_selection_to(self, ids, target),
         )
         self._hierarchy.pack(fill="both", expand=True)
+        # Root directory is the whole project (not just assets_dir) so reusable
+        # Scene files also appear here, browsable and draggable, per spec.
         project_assets = (
-            self._engine.project.assets_dir
-            if self._engine.project is not None
-            else Path.cwd() / "assets"
+            self._engine.project.path if self._engine.project is not None else Path.cwd() / "assets"
         )
         self._assets = AssetBrowserPanel(
             assets_host,
@@ -272,6 +275,7 @@ class EditorWindow:
             coordinator=self._coordinator,
             colors=self._colors,
             on_open=self._on_asset_open,
+            on_drop=lambda entry, x, y: drop_asset_on_viewport(self, entry, x, y),
         )
         self._assets.pack(fill="both", expand=True)
         self._hierarchy_host = hierarchy_host
@@ -292,6 +296,7 @@ class EditorWindow:
                 else None
             ),
             observer=self._observer,
+            on_transform_commit=self._push_spatial_command,
         )
         self._viewport.pack(fill="both", expand=True)
         self._viewport_host = view_frame
@@ -496,8 +501,10 @@ class EditorWindow:
         self._runtime_preview.stop()
         if self._engine.stop():
             self._console.log("[Engine] Stopped — scene restored", level="info")
+        self._project_workflow.restore_after_run_project()
         self._update_play_pause_state()
         self._present_all()
+
     # ------------------------------------------------------------------
     # Project and scene actions
     # ------------------------------------------------------------------
@@ -515,8 +522,9 @@ class EditorWindow:
         else:
             scene = Scene("New Scene")
         self._engine.set_scene(scene)
-        self._selected_id = None
+        self._selected_ids = ()
         self._actions.set_enabled("delete_entity", False)
+        self._actions.set_enabled("duplicate_selection", False)
         self._console.log(f"[Editor] Created scene: {scene.name}")
         self._present_all()
 
@@ -570,7 +578,13 @@ class EditorWindow:
         scene = self._engine.edit_scene
         if scene is None:
             return
-        self._last_save_path.write_text(json.dumps(scene.to_dict(), indent=2), encoding="utf-8")
+        project = self._engine.project
+        if project is None:
+            self._last_save_path.write_text(json.dumps(scene.to_dict(), indent=2), encoding="utf-8")
+            return
+        project.save_scene(
+            scene, self._last_save_path.resolve().relative_to(project.path).as_posix()
+        )
 
     def _start_autosave(self) -> None:
         """Schedule recurring silent saves using the configured preference."""
@@ -611,8 +625,13 @@ class EditorWindow:
         self._on_hierarchy_create()
 
     def _act_delete_entity(self) -> None:
-        if self._engine.run_state == EngineRunState.EDIT and self._selected_id:
-            self._on_hierarchy_delete(self._selected_id)
+        if len(self._selected_ids) == 1:
+            self._on_hierarchy_delete(self._selected_ids[0])
+        elif self._selected_ids:
+            delete_selection(self)
+
+    def _act_duplicate_selection(self) -> None:
+        duplicate_selection(self)
 
     # ------------------------------------------------------------------
     # Scripting actions
@@ -664,7 +683,7 @@ class EditorWindow:
             messagebox.showerror("Attach Script", str(exc), parent=self._root)
             return
         self._console.log(f"[Editor] Attached {class_name} to {entity.name}")
-        self._on_hierarchy_select(entity.entity_id)
+        self._on_hierarchy_select((entity.entity_id,))
         self._present_all()
 
     def _act_remove_script(self) -> None:
@@ -680,19 +699,30 @@ class EditorWindow:
         if scripts:
             entity.remove_component(scripts[-1])
             self._console.log(f"[Editor] Removed script from {entity.name}")
-            self._on_hierarchy_select(entity.entity_id)
+            self._on_hierarchy_select((entity.entity_id,))
             self._present_all()
 
-    def _on_hierarchy_select(self, entity_id: str | None) -> None:
-        self._selected_id = entity_id
-        self._actions.set_enabled("delete_entity", entity_id is not None)
+    @property
+    def _selected_id(self) -> str | None:
+        """Primary selected entity id, or None -- read-only alias for callers unaware of multi-select."""
+        return self._selected_ids[0] if self._selected_ids else None
+
+    def _on_hierarchy_select(self, ids: Sequence[str]) -> None:
+        """Central selection setter: dedupes, drops dead ids, updates dependent action state."""
         scene = self._engine.active_scene
-        entity = scene.find_entity(entity_id) if scene and entity_id else None
+        valid = tuple(
+            dict.fromkeys(i for i in ids if scene is None or scene.find_entity(i) is not None)
+        )
+        self._selected_ids = valid
+        primary_id = valid[0] if valid else None
+        self._actions.set_enabled("delete_entity", bool(valid))
+        self._actions.set_enabled("duplicate_selection", bool(valid))
+        entity = scene.find_entity(primary_id) if scene and primary_id else None
         has_script = bool(
             entity is not None
             and any(isinstance(component, ScriptComponent) for component in entity.components)
         )
-        self._actions.set_enabled("attach_script", entity_id is not None and not has_script)
+        self._actions.set_enabled("attach_script", primary_id is not None and not has_script)
         self._actions.set_enabled("remove_script", has_script)
         self._present_selection(scene, entity)
 
@@ -727,10 +757,13 @@ class EditorWindow:
             self._engine.set_scene(scene)
         entity = scene.create_entity("Entity")
         entity.add_component(TransformComponent())
+        self._command_stack.push(CreateEntityCommand(scene, entity))
+        self._update_undo_redo_state()
         self._console.log(f"[Editor] Created entity: {entity.name}")
         self._present_all()
         self._hierarchy.select(entity.entity_id)
-        self._on_hierarchy_select(entity.entity_id)
+        self._on_hierarchy_select((entity.entity_id,))
+
     def _on_hierarchy_delete(self, entity_id: str) -> None:
         if self._engine.run_state != EngineRunState.EDIT:
             return
@@ -743,13 +776,17 @@ class EditorWindow:
         cmd = DeleteEntityCommand(scene, entity)
         self._command_stack.push(cmd)
         self._console.log(f"[Editor] Deleted entity: {entity.name}")
-        if self._selected_id == entity_id:
-            self._selected_id = None
-            self._actions.set_enabled("delete_entity", False)
+        if entity_id in self._selected_ids:
+            self._selected_ids = tuple(i for i in self._selected_ids if i != entity_id)
+            self._actions.set_enabled("delete_entity", bool(self._selected_ids))
+            self._actions.set_enabled("duplicate_selection", bool(self._selected_ids))
         self._update_undo_redo_state()
         self._present_all()
+
+    _TRANSFORM_FIELDS = ("x", "y", "rotation", "scale_x", "scale_y")
+
     def _on_transform_change(self, entity_id: str, field: str, value: float) -> None:
-        if self._engine.run_state != EngineRunState.EDIT:
+        if self._engine.run_state != EngineRunState.EDIT or field not in self._TRANSFORM_FIELDS:
             return
         scene = self._engine.edit_scene
         if scene is None:
@@ -760,8 +797,14 @@ class EditorWindow:
         transform = entity.get_component(TransformComponent)
         if transform is None:
             return
-        setattr(transform, field, value)
-        self._request_render("viewport", (scene, self._selected_id), priority=10)
+        old = tuple(getattr(transform, name) for name in self._TRANSFORM_FIELDS)
+        index = self._TRANSFORM_FIELDS.index(field)
+        new = tuple(value if i == index else old[i] for i in range(len(old)))
+        if new == old:
+            return
+        self._command_stack.push(TransformEntityCommand(scene, entity_id, old, new))
+        self._update_undo_redo_state()
+        self._request_render("viewport", (scene, self._selected_ids), priority=10)
 
     def _on_entity_rename(self, entity_id: str, new_name: str) -> None:
         if self._engine.run_state != EngineRunState.EDIT:
@@ -777,7 +820,7 @@ class EditorWindow:
         self._update_undo_redo_state()
         self._ui.begin_batch()
         self._request_render("hierarchy", scene, priority=20)
-        self._request_render("viewport", (scene, self._selected_id), priority=10)
+        self._request_render("viewport", (scene, self._selected_ids), priority=10)
         self._ui.end_batch()
         self._hierarchy.select(entity_id)
 
@@ -788,9 +831,10 @@ class EditorWindow:
         if scene is None:
             return
         entity = scene.find_entity(entity_id)
-        if entity is None:
+        if entity is None or entity.enabled == enabled:
             return
-        entity.enabled = enabled
+        self._command_stack.push(ToggleEnabledCommand(scene, entity_id, entity.enabled, enabled))
+        self._update_undo_redo_state()
         self._present_all()
 
     # ------------------------------------------------------------------
@@ -811,9 +855,16 @@ class EditorWindow:
         self._update_undo_redo_state()
         self._present_all()
 
-    def _on_viewport_entity_click(self, entity_id: str | None) -> None:
-        self._on_hierarchy_select(entity_id)
-        self._hierarchy.select(entity_id)
+    def _on_viewport_entity_click(self, ids: tuple[str, ...], extend: bool) -> None:
+        """Plain click replaces selection; Shift/Ctrl toggles a single entity or extends (box-select)."""
+        if not extend:
+            new_ids = ids
+        elif len(ids) == 1 and ids[0] in self._selected_ids:
+            new_ids = tuple(i for i in self._selected_ids if i != ids[0])
+        else:
+            new_ids = tuple(dict.fromkeys((*self._selected_ids, *ids)))
+        self._on_hierarchy_select(new_ids)
+        self._hierarchy.select_many(new_ids)
 
     def _save_viewport_camera(self, values: dict[str, object]) -> None:
         # Pan/zoom/rotate fire this on every mouse-motion tick -- update the
@@ -837,11 +888,18 @@ class EditorWindow:
     def _refresh_viewport(self) -> None:
         self._request_render(
             "viewport",
-            (self._engine.active_scene, self._selected_id),
+            (self._engine.active_scene, self._selected_ids),
             priority=10,
         )
 
     def _refresh_all(self) -> None:
+        self._present_all()
+
+    def _push_spatial_command(self, command: Command) -> None:
+        """Commit one viewport drag gesture (move/rotate/scale) as one undo entry."""
+        self._command_stack.push(command)
+        self._console.log(f"[Editor] {command.description}")
+        self._update_undo_redo_state()
         self._present_all()
 
     def _update_play_pause_state(self) -> None:
@@ -851,7 +909,10 @@ class EditorWindow:
         self._actions.set_enabled("stop", state != EngineRunState.EDIT)
         self._actions.set_enabled("add_entity", state == EngineRunState.EDIT)
         self._actions.set_enabled(
-            "delete_entity", state == EngineRunState.EDIT and self._selected_id is not None
+            "delete_entity", state == EngineRunState.EDIT and bool(self._selected_ids)
+        )
+        self._actions.set_enabled(
+            "duplicate_selection", state == EngineRunState.EDIT and bool(self._selected_ids)
         )
         self._update_project_actions()
 
@@ -918,11 +979,14 @@ class EditorWindow:
         payload = intent.payload
         if not isinstance(payload, tuple) or len(payload) != 2:
             return
-        scene, selected_id = payload
+        scene, selected_ids = payload
+        ids = tuple(selected_ids) if selected_ids else ()
+        primary_id = ids[0] if ids else None
         runtime_preview = self._engine.run_state in (EngineRunState.PLAY, EngineRunState.PAUSED)
         self._viewport.render(
             scene,
-            selected_id,
+            primary_id,
+            selected_ids=frozenset(ids),
             editor_overlays=not runtime_preview,
             interpolator=self._engine.transform_interpolator if runtime_preview else None,
             interpolation_fraction=self._engine.interpolation_fraction if runtime_preview else 0.0,
@@ -933,7 +997,7 @@ class EditorWindow:
         self._ui.begin_batch()
         self._request_render("hierarchy", scene, priority=20)
         self._request_render("inspector", entity, owner_id=self._selected_id, priority=30)
-        self._request_render("viewport", (scene, self._selected_id), priority=10)
+        self._request_render("viewport", (scene, self._selected_ids), priority=10)
         self._ui.end_batch()
 
     def _present_all(self) -> None:
@@ -942,7 +1006,7 @@ class EditorWindow:
         self._ui.begin_batch()
         self._request_render("hierarchy", scene, priority=20)
         self._request_render("inspector", entity, owner_id=self._selected_id, priority=30)
-        self._request_render("viewport", (scene, self._selected_id), priority=10)
+        self._request_render("viewport", (scene, self._selected_ids), priority=10)
         self._request_render("toolbar", self._engine.run_state, priority=40)
         self._ui.end_batch()
 

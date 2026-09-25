@@ -169,6 +169,7 @@ def _register_builtin_components() -> None:
     _register_physics_components()
     _register_audio_components()
     _register_screen_components()
+    _register_composition_components()
 
 
 def _register_visual_components() -> None:
@@ -445,6 +446,21 @@ def _register_audio_components() -> None:
                 PlaybackType2D.DEFAULT.value,
                 enum_values=tuple(mode.value for mode in PlaybackType2D),
             ),
+            PropertyDescriptor("enabled", "Enabled", bool, True),
+        ),
+    )
+
+
+def _register_composition_components() -> None:
+    if "scene_instance" in _COMPONENT_REGISTRY:
+        return
+    from expra_engine.core.scene.scene_instance import SceneInstanceComponent
+
+    _register_component(
+        "scene_instance",
+        SceneInstanceComponent,
+        (
+            PropertyDescriptor("source_path", "Source Scene", str, ""),
             PropertyDescriptor("enabled", "Enabled", bool, True),
         ),
     )

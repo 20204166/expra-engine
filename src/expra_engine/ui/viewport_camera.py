@@ -12,6 +12,12 @@ from collections.abc import Iterable
 
 from expra_engine.core.camera import Camera2D
 
+__all__ = (
+    "VIEWPORT_BASE_PPU",
+    "ViewportCamera",
+    "compute_frame_fit",
+)
+
 # Pixels per world unit at zoom=1.0 on any canvas size.
 # At default zoom a 1-unit entity occupies 40 px regardless of panel layout.
 VIEWPORT_BASE_PPU: float = 40.0
@@ -148,3 +154,35 @@ class ViewportCamera:
             target_width=vw / (self._base_ppu * self.zoom_level),
         )
         self._camera.rotation = saved_rotation
+
+
+def compute_frame_fit(
+    points: list[tuple[float, float]],
+    viewport_size: tuple[int, int],
+    base_ppu: float,
+    *,
+    min_zoom: float = _MIN_ZOOM,
+    max_zoom: float = _MAX_ZOOM,
+    padding: float = 4.0,
+) -> tuple[tuple[float, float], float] | None:
+    """Return ``(center, zoom_level)`` that fits every point in the viewport.
+
+    Shared by ``ViewportPanel.frame_scene()`` (all enabled entities) and
+    ``frame_selected()`` (just the current selection, when more than one
+    entity is selected) so the bounding-box/zoom-fit math is written once.
+    Returns ``None`` for an empty ``points``.
+    """
+    if not points:
+        return None
+    min_x = min(p[0] for p in points)
+    max_x = max(p[0] for p in points)
+    min_y = min(p[1] for p in points)
+    max_y = max(p[1] for p in points)
+    center = ((min_x + max_x) / 2.0, (min_y + max_y) / 2.0)
+    world_w = max(padding, max_x - min_x + padding)
+    world_h = max(padding, max_y - min_y + padding)
+    vw, vh = viewport_size
+    fit_ppu_w = vw / world_w
+    fit_ppu_h = vh / world_h
+    zoom_level = max(min_zoom, min(max_zoom, min(fit_ppu_w, fit_ppu_h) / base_ppu * 0.9))
+    return center, zoom_level

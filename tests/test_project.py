@@ -5,8 +5,14 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from expra_engine.core.component import TransformComponent
 from expra_engine.core.project import Project, ProjectError
-from expra_engine.core.scene import Scene
+from expra_engine.core.scene import (
+    Scene,
+    SceneInstanceComponent,
+    SceneInstanceCycleError,
+    SceneInstanceSourceError,
+)
 from expra_engine.filesystem import ResourceId
 
 
@@ -138,6 +144,98 @@ class TestProjectActiveScene(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             project = Project("G", Path(tmp))
             self.assertIsNone(project.active_scene)
+
+
+class TestProjectSceneInstances(unittest.TestCase):
+    """Project-level load/save integration for reusable scene instances."""
+
+    def _make_project(self, tmp: str) -> Project:
+        project = Project.create("Instances", Path(tmp) / "proj")
+        room = Scene("Room Segment", scene_id="room-segment")
+        wall = room.create_entity("Wall")
+        wall.add_component(TransformComponent(x=1.0))
+        project.save_scene(room, "scenes/room_segment.json")
+
+        level = Scene("Level", scene_id="level")
+        root = level.create_entity("Room Instance", entity_id="root-e")
+        root.add_component(SceneInstanceComponent("scenes/room_segment.json"))
+        project.save_scene(level, "scenes/main.json")
+        return project
+
+    def test_load_scene_resolves_instance_and_save_scene_omits_materialized_content(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = self._make_project(tmp)
+
+            loaded = project.load_scene("scenes/main.json")
+            self.assertEqual({e.name for e in loaded.entities}, {"Room Instance", "Wall"})
+
+            project.save_scene(loaded, "scenes/main.json")
+            on_disk = json.loads(
+                (project.path / "scenes" / "main.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual([e["name"] for e in on_disk["entities"]], ["Room Instance"])
+
+    def test_source_identity_reflects_edits_to_source_scene_on_reload(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = self._make_project(tmp)
+
+            room = project.load_scene("scenes/room_segment.json")
+            room.create_entity("New Prop")
+            project.save_scene(room, "scenes/room_segment.json")
+
+            reloaded = project.load_scene("scenes/main.json")
+            self.assertIn("New Prop", {e.name for e in reloaded.entities})
+
+    def test_missing_source_scene_raises_explicit_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Project.create("Broken", Path(tmp) / "proj")
+            level = Scene("Level")
+            root = level.create_entity("Bad Instance")
+            root.add_component(SceneInstanceComponent("scenes/does_not_exist.json"))
+            project.save_scene(level, "scenes/main.json")
+
+            with self.assertRaises(SceneInstanceSourceError) as ctx:
+                project.load_scene("scenes/main.json")
+            self.assertIn("Bad Instance", str(ctx.exception))
+
+    def test_two_scene_cycle_raises_explicit_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Project.create("Cyclic", Path(tmp) / "proj")
+
+            scene_a = Scene("A")
+            a_root = scene_a.create_entity("A Instance")
+            a_root.add_component(SceneInstanceComponent("scenes/b.json"))
+            project.save_scene(scene_a, "scenes/a.json")
+
+            scene_b = Scene("B")
+            b_root = scene_b.create_entity("B Instance")
+            b_root.add_component(SceneInstanceComponent("scenes/a.json"))
+            project.save_scene(scene_b, "scenes/b.json")
+
+            with self.assertRaises(SceneInstanceCycleError):
+                project.load_scene("scenes/a.json")
+
+    def test_nested_instances_resolve_through_project_load_scene(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = self._make_project(tmp)
+
+            middle = Scene("Middle")
+            middle_root = middle.create_entity("Middle Instance")
+            middle_root.add_component(SceneInstanceComponent("scenes/main.json"))
+            project.save_scene(middle, "scenes/middle.json")
+
+            outer = Scene("Outer")
+            outer_root = outer.create_entity("Outer Instance")
+            outer_root.add_component(SceneInstanceComponent("scenes/middle.json"))
+            project.save_scene(outer, "scenes/outer.json")
+
+            loaded = project.load_scene("scenes/outer.json")
+            self.assertEqual(
+                {e.name for e in loaded.entities},
+                {"Outer Instance", "Middle Instance", "Room Instance", "Wall"},
+            )
 
 
 if __name__ == "__main__":

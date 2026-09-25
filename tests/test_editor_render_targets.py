@@ -228,6 +228,25 @@ class EditorRenderTargetTests(unittest.TestCase):
         self.assertEqual(target.colliders[0].entity_id, "body")
         self.assertEqual(target.colliders[0].outline, collider.editor_outline)
         self.assertEqual(entity.get_component(TransformComponent).x, 2.0)  # type: ignore[union-attr]
+        self.assertFalse(target.colliders[0].is_area)
+
+    def test_area_component_colliders_are_flagged_distinctly_from_plain_colliders(self) -> None:
+        from expra_engine.runtime.area import AreaComponent
+
+        scene = Scene("preview")
+        plain = scene.create_entity("plain", entity_id="plain")
+        plain.add_component(TransformComponent())
+        plain.add_component(ColliderComponent(width=1.0, height=1.0))
+        zone = scene.create_entity("zone", entity_id="zone")
+        zone.add_component(TransformComponent())
+        zone.add_component(ColliderComponent(width=1.0, height=1.0))
+        zone.add_component(AreaComponent())
+
+        target = build_editor_render_target(scene, viewport=(200, 100))
+
+        by_id = {outline.entity_id: outline for outline in target.colliders}
+        self.assertFalse(by_id["plain"].is_area)
+        self.assertTrue(by_id["zone"].is_area)
 
     def test_target_skips_malformed_visuals_without_losing_valid_items(self) -> None:
         scene = Scene("preview")
@@ -290,7 +309,7 @@ class ViewportCameraTests(unittest.TestCase):
         self.assertEqual(camera.position, (4.0, 1.0))
 
     def test_zoom_clamps_at_both_edges_using_camera_zoom(self) -> None:
-        from expra_engine.ui.viewport import _MAX_ZOOM, _MIN_ZOOM
+        from expra_engine.ui.viewport_camera import _MAX_ZOOM, _MIN_ZOOM
 
         camera = ViewportCamera((200, 100))
 

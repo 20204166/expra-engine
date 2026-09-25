@@ -18,6 +18,7 @@ from tests.support.project_engine import load_project_engine
 
 PROJECT_DIR = Path(__file__).parents[1] / "examples" / "blacksite_relay"
 LEVEL_2_SCENE = "scenes/level_02_deepcore.json"
+LEVEL_3_SCENE = "scenes/level_03_test_cell.json"
 
 
 def _project_engine() -> tuple[Project, Engine]:
@@ -95,11 +96,37 @@ def test_blacksite_relay_starts_renders_pauses_restarts_and_preserves_saved_scen
     assert json.loads(project.scene_file().read_text(encoding="utf-8")) == saved
 
 
-def test_project_registers_both_levels() -> None:
+def test_project_registers_all_levels() -> None:
     project = Project.load(PROJECT_DIR)
 
-    assert project.scene_paths() == ("scenes/main.json", LEVEL_2_SCENE)
+    # Membership, not exact-tuple equality: other reusable-scene/dogfood work
+    # in this same session registers further scenes of its own, so this only
+    # asserts what this test file is actually responsible for.
+    registered = project.scene_paths()
+    assert "scenes/main.json" in registered
+    assert LEVEL_2_SCENE in registered
+    assert LEVEL_3_SCENE in registered
     assert project.start_scene == "scenes/main.json"
+
+
+def test_level_3_test_cell_loads_with_a_different_square_arena() -> None:
+    """Level 03 Test Cell (built entirely through the editor -- see
+    tests/test_blacksite_level3_build.py for the build sequence) has a
+    genuinely different arena shape from both existing levels: Level 1 is
+    38.5x16.2, Level 2 is 54.5x23.0 (both wide rectangles); this one is a
+    small 25.0x25.0 square, not a scaled copy of either.
+    """
+    project = Project.load(PROJECT_DIR)
+    scene = project.load_scene(LEVEL_3_SCENE)
+
+    controller = scene.find_entity_by_name("Mission Controller")
+    assert controller is not None
+    script = cast(Any, controller.components[0])
+    assert script.exposed_values["arena_half_width"] == 25.0
+    assert script.exposed_values["arena_half_height"] == 25.0
+    assert scene.find_entity_by_name("Test Cell Alarm Zone") is not None
+    tags = {tag for entity in scene.entities for tag in entity.tags}
+    assert {"player", "enemy", "shard", "vip", "extraction", "game_controller"} <= tags
 
 
 def test_level_2_loads_with_its_own_entities_and_objectives() -> None:
