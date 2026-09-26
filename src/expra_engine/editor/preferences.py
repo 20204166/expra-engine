@@ -26,6 +26,29 @@ class EditorPreferences:
 _DEFAULTS = EditorPreferences()
 
 
+def _prune_recent_projects(recent_projects: tuple[str, ...]) -> tuple[str, ...]:
+    """Drop deleted recent-project paths, keeping existing-but-unreadable ones.
+
+    A path that is missing (deleted) is removed from the recent list. A path
+    that exists but cannot be stat'd (for example a permission error) is kept,
+    so opening it still reports the real cause rather than silently hiding a
+    genuine project failure.
+    """
+    retained: list[str] = []
+    for project in recent_projects:
+        if not isinstance(project, str) or not project:
+            continue
+        try:
+            Path(project).stat()
+        except (FileNotFoundError, NotADirectoryError, ValueError):
+            continue
+        except OSError:
+            retained.append(project)
+        else:
+            retained.append(project)
+    return tuple(dict.fromkeys(retained))[:10]
+
+
 class PreferencesStore:
     """Load and save ``EditorPreferences`` with atomic writes and safe defaults."""
 
@@ -42,7 +65,7 @@ class PreferencesStore:
                 return EditorPreferences()
             return EditorPreferences(
                 theme=str(data.get("theme", _DEFAULTS.theme)),
-                recent_projects=tuple(data.get("recent_projects", ())),
+                recent_projects=_prune_recent_projects(tuple(data.get("recent_projects", ()))),
                 autosave_interval_ms=int(
                     data.get("autosave_interval_ms", _DEFAULTS.autosave_interval_ms)
                 ),

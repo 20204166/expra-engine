@@ -38,6 +38,27 @@ async def test_start_and_close_lifecycle(server) -> None:
         assert result.structured_content["data"]["closed"] is True
 
 
+async def test_editor_worker_does_not_persist_automation_recents_into_home(
+    server, tmp_path, monkeypatch
+) -> None:
+    home = tmp_path / "isolated-home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+
+    async with Client(server) as client:
+        session_id = await _start_session(client)
+        try:
+            opened = await client.call_tool(
+                "editor_session",
+                {"action": "open_project", "session_id": session_id, "project": BLACKSITE},
+            )
+            assert opened.is_error is not True
+        finally:
+            await client.call_tool("editor_session", {"action": "close", "session_id": session_id})
+
+    assert not (home / ".expra" / "preferences.json").exists()
+
+
 async def test_unknown_session_id_is_error(server) -> None:
     async with Client(server) as client:
         result = await client.call_tool(
@@ -259,9 +280,22 @@ async def test_observability_snapshot_reflects_a_real_blacksite_play_session(ser
     async with Client(server) as client:
         session_id = await _start_session(client)
         try:
-            await client.call_tool(
+            opened = await client.call_tool(
                 "editor_session", {"action": "open_project", "session_id": session_id, "project": BLACKSITE}
             )
+            assert opened.is_error is not True
+            opened_snapshot = await client.call_tool(
+                "editor_session", {"action": "observability_snapshot", "session_id": session_id}
+            )
+            opened_targets = {m["target"] for m in opened_snapshot.structured_content["data"]["metrics"]}
+            assert {
+                "document:read",
+                "document:decode",
+                "document:convert",
+                "document:construct",
+                "scene:resolve_instances",
+                "document:load",
+            } <= opened_targets
 
             reset = await client.call_tool(
                 "editor_session",

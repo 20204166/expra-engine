@@ -47,16 +47,26 @@ class AssetEntry:
 
     @property
     def kind(self) -> str:
-        """Return the editor-facing asset kind, including registered audio files."""
+        """Return the canonical editor-facing document or asset kind."""
         if self.is_folder:
             return "Folder"
-        if self.path.suffix.casefold() in {".wav", ".ogg", ".mp3", ".flac", ".m4a"}:
+        suffix = self.path.suffix.casefold()
+        name = self.path.name.casefold()
+        parts = self.logical_id.path.split("/") if self.logical_id is not None else ()
+        if name == "project.json" and self.logical_id is not None:
+            return "Project"
+        if suffix == ".py":
+            return "Script"
+        if suffix in {".wav", ".ogg", ".mp3", ".flac", ".m4a"}:
             return "Audio"
-        if self.path.suffix.casefold() in {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"}:
+        if suffix in {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"}:
             return "Image"
-        if self.path.suffix.casefold() == ".json" and self.logical_id is not None:
-            parts = self.logical_id.path.split("/", 1)
-            if parts and parts[0] in ("scenes", "scene"):
+        if suffix in {".json", ".pb"} and self.logical_id is not None:
+            if name.endswith((".level.json", ".level.pb")) or (parts and parts[0] == "levels"):
+                return "Level"
+            if name.endswith((".scene.json", ".scene.pb")) or (
+                parts and parts[0] in ("scenes", "scene")
+            ):
                 return "Scene"
         return "File"
 

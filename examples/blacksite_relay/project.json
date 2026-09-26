@@ -3,13 +3,15 @@
   "name": "Blacksite Relay",
   "game_version": "1.0.0",
   "scenes": [
-    "scenes/main.json",
-    "scenes/level_02_deepcore.json",
-    "scenes/level_03_test_cell.json",
-    "scenes/security_door.json",
-    "scenes/g1_security_door_demo.json"
+    "scenes/security_door.scene.pb",
+    "scenes/g1_security_door_demo.scene.pb"
   ],
-  "start_scene": "scenes/main.json",
+  "entrypoint": "levels/main.level.pb",
+  "levels": [
+    "levels/main.level.pb",
+    "levels/level_02_deepcore.level.pb",
+    "levels/level_03_test_cell.level.pb"
+  ],
   "input": {
     "move_up": "keyboard:w",
     "move_down": "keyboard:s",

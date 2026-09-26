@@ -19,8 +19,24 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from expra_engine.core.persistence import atomic_write_text
-from expra_engine.core.scene import Scene, resolve_scene_instances
+from expra_engine.core.document_kind import DocumentKind
+from expra_engine.core.persistence import atomic_write_bytes, atomic_write_text
+from expra_engine.core.scene import (
+    Level,
+    Scene,
+    SceneInstanceComponent,
+    resolve_scene_instances,
+)
+from expra_engine.core.scene.document_codec import (
+    DocumentCodecError,
+    decode_json_payload,
+    encode_protobuf,
+    from_json,
+    kind_for_document_path,
+    parse_protobuf,
+    protobuf_to_document_data,
+)
+from expra_engine.observability import ObservabilityWatcher
 
 if TYPE_CHECKING:
     from expra_engine.filesystem import ResourceService
@@ -31,6 +47,34 @@ CURRENT_SCHEMA_VERSION = 1
 
 class ProjectError(ValueError):
     """Raised when a project cannot be safely created or loaded."""
+
+
+@contextlib.contextmanager
+def _observe_stage(observer: ObservabilityWatcher | None, target: str):
+    """Record one bounded document-load stage when a host supplies a watcher."""
+    if observer is None:
+        yield
+        return
+    token = observer.begin(target)
+    try:
+        yield
+    except Exception as exc:
+        observer.finish(token, outcome="failure", detail=f"{type(exc).__name__}: {exc}")
+        raise
+    else:
+        observer.finish(token)
+
+
+def _apply_expected_document_kind(data: dict[str, Any], expected_kind: DocumentKind | None) -> None:
+    if expected_kind is None:
+        return
+    stored_kind = data.get("kind")
+    if stored_kind is None:
+        data["kind"] = expected_kind.value
+    elif stored_kind != expected_kind.value:
+        raise DocumentCodecError(
+            f"expected a {expected_kind.value} document, found {stored_kind!r}"
+        )
 
 
 class Project:
@@ -50,15 +94,23 @@ class Project:
         schema_version: int = CURRENT_SCHEMA_VERSION,
         input_settings: dict[str, str] | None = None,
         entry_point: str = "__main__.py",
+        entrypoint: str | None = None,
+        script_entry_point: str | None = None,
+        level_paths: list[str] | None = None,
     ) -> None:
         self.name = str(name)
         self.path = path.resolve()
         self.game_version = game_version
-        self._start_scene = start_scene
+        if entrypoint is not None and start_scene is not None and entrypoint != start_scene:
+            raise ProjectError("entrypoint conflicts with legacy start_scene")
+        self._entrypoint = entrypoint if entrypoint is not None else start_scene
         self.schema_version = schema_version
         self.input_settings = dict(input_settings or {})
-        self.entry_point = entry_point
+        self.script_entry_point = (
+            script_entry_point if script_entry_point is not None else entry_point
+        )
         self._scene_paths: list[str] = []
+        self._level_paths: list[str] = list(level_paths or [])
         self._active_scene: Scene | None = None
 
     @property
@@ -70,6 +122,10 @@ class Project:
             else "scenes"
         )
         return self.path / folder
+
+    @property
+    def levels_dir(self) -> Path:
+        return self.path / "levels"
 
     @property
     def assets_dir(self) -> Path:
@@ -85,11 +141,25 @@ class Project:
 
     @property
     def start_scene(self) -> str | None:
-        return self._start_scene
+        return self._entrypoint
+
+    @property
+    def entrypoint(self) -> str | None:
+        """Canonical project-relative Scene/Level resource entrypoint."""
+        return self._entrypoint
+
+    @property
+    def entry_point(self) -> str:
+        """Compatibility alias for the Python script launcher."""
+        return self.script_entry_point
+
+    @entry_point.setter
+    def entry_point(self, value: str) -> None:
+        self.script_entry_point = value
 
     def set_start_scene(self, relative_path: str) -> None:
         self._validate_scene_path(relative_path)
-        self._start_scene = relative_path
+        self._entrypoint = relative_path
 
     def asset_id(self, path: str | Path) -> ResourceId:
         """Return the stable logical ID for an asset path.
@@ -174,11 +244,21 @@ class Project:
         self._active_scene = scene
 
     def register_scene_path(self, relative_path: str) -> None:
+        self._validate_scene_path(relative_path)
         if relative_path not in self._scene_paths:
             self._scene_paths.append(relative_path)
 
+    def register_level_path(self, relative_path: str) -> None:
+        """Register a project-relative Level document path."""
+        self._validate_level_path(relative_path)
+        if relative_path not in self._level_paths:
+            self._level_paths.append(relative_path)
+
+    def level_paths(self) -> tuple[str, ...]:
+        return tuple(self._level_paths)
+
     def scene_file(self, relative_path: str | None = None) -> Path:
-        """Return a validated project-owned scene file path."""
+        """Return a validated Scene resource path (legacy JSON or typed PB)."""
         value = relative_path or self.start_scene
         if value is None:
             raise ProjectError("project has no start scene")
@@ -190,34 +270,124 @@ class Project:
             raise ProjectError(f"scene escapes project: {value!r}") from exc
         return path
 
-    def load_scene(
-        self, relative_path: str | None = None, *, _chain: frozenset[str] = frozenset()
-    ) -> Scene:
+    def document_file(self, relative_path: str | None = None) -> Path:
+        """Return a validated project-owned Scene/Level document path."""
+        value = relative_path or self.entrypoint
+        if value is None:
+            raise ProjectError("project has no document entrypoint")
+        self._validate_entrypoint(value)
+        path = (self.path / value).resolve()
         try:
-            scene = Scene.from_dict(
-                json.loads(self.scene_file(relative_path).read_text(encoding="utf-8"))
-            )
-        except (OSError, json.JSONDecodeError, TypeError, KeyError) as exc:
-            raise ProjectError("could not load project scene") from exc
+            path.relative_to(self.path)
+        except ValueError as exc:
+            raise ProjectError(f"document escapes project: {value!r}") from exc
+        return path
 
-        current_path = relative_path or self.start_scene
-        current_chain = _chain | ({current_path} if current_path is not None else set())
-        resolve_scene_instances(
-            scene,
-            resolve_source=lambda path: self.load_scene(path, _chain=current_chain),
-            chain=current_chain,
-        )
+    def load_document(
+        self,
+        relative_path: str | None = None,
+        *,
+        _chain: frozenset[str] = frozenset(),
+        observer: ObservabilityWatcher | None = None,
+    ) -> Scene:
+        """Load typed protobuf or legacy JSON into the shared Scene/Level model."""
+        path = self.document_file(relative_path)
+        value = relative_path or self.entrypoint
+        expected_kind = self._registered_document_kind(value)
+        try:
+            with _observe_stage(observer, "document:load"):
+                with _observe_stage(observer, "document:read"):
+                    payload = path.read_bytes()
+                if str(path).casefold().endswith(".pb"):
+                    with _observe_stage(observer, "document:decode"):
+                        envelope = parse_protobuf(payload)
+                    with _observe_stage(observer, "document:convert"):
+                        data = protobuf_to_document_data(envelope)
+                        _apply_expected_document_kind(data, expected_kind)
+                else:
+                    with _observe_stage(observer, "document:decode"):
+                        data = decode_json_payload(payload)
+                        _apply_expected_document_kind(data, expected_kind)
+                with _observe_stage(observer, "document:construct"):
+                    document = from_json(data)
 
-        self.set_active_scene(scene)
-        return scene
+                current_chain = _chain | ({value} if value is not None else set())
+                with _observe_stage(observer, "scene:resolve_instances"):
+                    resolve_scene_instances(
+                        document,
+                        resolve_source=lambda source: self.load_scene(
+                            source, _chain=current_chain, observer=observer
+                        ),
+                        chain=current_chain,
+                    )
+        except (OSError, DocumentCodecError) as exc:
+            raise ProjectError(str(exc)) from exc
+        self.set_active_scene(document)
+        return document
+
+    def load_scene(
+        self,
+        relative_path: str | None = None,
+        *,
+        _chain: frozenset[str] = frozenset(),
+        observer: ObservabilityWatcher | None = None,
+    ) -> Scene:
+        # Compatibility API: Level is a Scene subtype and can still be loaded
+        # by older runtime callers. SceneInstance resolution separately rejects
+        # Level sources before materialization.
+        return self.load_document(relative_path, _chain=_chain, observer=observer)
 
     def save_scene(self, scene: Scene, relative_path: str | None = None) -> Path:
+        """Write a legacy JSON Scene for compatibility/import tooling.
+
+        New editor documents use ``save_document`` and typed ``.scene.pb``
+        paths. This method intentionally remains the explicit legacy writer.
+        """
+        if isinstance(scene, Level):
+            raise ProjectError("save_scene cannot save a Level; use save_document")
         path = self.scene_file(relative_path)
+        if str(path).casefold().endswith(".scene.pb"):
+            return self.save_document(scene, relative_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         atomic_write_text(path, json.dumps(scene.to_dict(include_instance_content=False), indent=2))
         value = relative_path or self.start_scene
         if value is not None:
             self.register_scene_path(value)
+        return path
+
+    def save_document(self, document: Scene, relative_path: str | None = None) -> Path:
+        """Save one canonical typed protobuf document, never a JSON sidecar."""
+        path = self.document_file(relative_path)
+        expected_kind = kind_for_document_path(path)
+        actual_kind = document.document_kind
+        if expected_kind is None:
+            raise ProjectError(
+                "legacy JSON documents are read-only through save_document; "
+                "migrate the project or Save As to a typed .scene.pb/.level.pb path"
+            )
+        if expected_kind != actual_kind:
+            raise ProjectError(
+                f"document extension declares {expected_kind.value}, but document is "
+                f"{actual_kind.value}"
+            )
+        if expected_kind is DocumentKind.SCENE and not str(path).endswith(".scene.pb"):
+            raise ProjectError("Scene documents must use the .scene.pb extension")
+        if expected_kind is DocumentKind.LEVEL and not str(path).endswith(".level.pb"):
+            raise ProjectError("Level documents must use the .level.pb extension")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            atomic_write_bytes(
+                path,
+                encode_protobuf(document.to_dict(include_instance_content=False)),
+            )
+        except DocumentCodecError as exc:
+            raise ProjectError(str(exc)) from exc
+        value = relative_path or self.entrypoint
+        if value is not None:
+            if isinstance(document, Level):
+                self.register_level_path(value)
+            else:
+                self.register_scene_path(value)
         return path
 
     def scene_paths(self) -> tuple[str, ...]:
@@ -230,18 +400,21 @@ class Project:
             "game_version": self.game_version,
             "scenes": list(self._scene_paths),
         }
-        if self._start_scene is not None:
-            data["start_scene"] = self._start_scene
+        if self._entrypoint is not None:
+            data["entrypoint"] = self._entrypoint
+        if self._level_paths:
+            data["levels"] = list(self._level_paths)
         if self.input_settings:
             data["input"] = dict(self.input_settings)
-        if self.entry_point != "__main__.py":
-            data["entry_point"] = self.entry_point
+        if self.script_entry_point != "__main__.py":
+            data["script_entry_point"] = self.script_entry_point
         return data
 
     def save(self) -> None:
         """Write project.json to disk. Creates directories if needed."""
         self.path.mkdir(parents=True, exist_ok=True)
         self.scenes_dir.mkdir(exist_ok=True)
+        self.levels_dir.mkdir(exist_ok=True)
         self.assets_dir.mkdir(exist_ok=True)
         self.scripts_dir.mkdir(exist_ok=True)
         atomic_write_text(self.project_file, json.dumps(self.to_dict(), indent=2))
@@ -264,9 +437,21 @@ class Project:
         scenes = data.get("scenes", [])
         if not isinstance(name, str) or not name.strip() or not isinstance(scenes, list):
             raise ProjectError("project manifest has invalid name or scenes")
-        start_scene = data.get("start_scene")
-        if start_scene is not None and not isinstance(start_scene, str):
+        legacy_start_scene = data.get("start_scene")
+        canonical_entrypoint = data.get("entrypoint")
+        if legacy_start_scene is not None and not isinstance(legacy_start_scene, str):
             raise ProjectError("project start_scene must be a string")
+        if canonical_entrypoint is not None and not isinstance(canonical_entrypoint, str):
+            raise ProjectError("project entrypoint must be a string")
+        if (
+            canonical_entrypoint is not None
+            and legacy_start_scene is not None
+            and canonical_entrypoint != legacy_start_scene
+        ):
+            raise ProjectError("entrypoint conflicts with legacy start_scene")
+        start_scene = canonical_entrypoint or legacy_start_scene
+        if start_scene is not None:
+            cls._validate_entrypoint(start_scene)
         input_settings = data.get("input", {})
         if not isinstance(input_settings, dict) or not all(
             isinstance(key, str) and isinstance(value, str) for key, value in input_settings.items()
@@ -276,7 +461,15 @@ class Project:
             ":" not in value or not all(value.split(":", 1)) for value in input_settings.values()
         ):
             raise ProjectError("project input bindings must look like keyboard:left")
-        entry_point = data.get("entry_point", "__main__.py")
+        legacy_entry_point = data.get("entry_point")
+        script_entry_point_value = data.get("script_entry_point")
+        if (
+            legacy_entry_point is not None
+            and script_entry_point_value is not None
+            and legacy_entry_point != script_entry_point_value
+        ):
+            raise ProjectError("script_entry_point conflicts with legacy entry_point")
+        entry_point = script_entry_point_value or legacy_entry_point or "__main__.py"
         if (
             not isinstance(entry_point, str)
             or Path(entry_point).is_absolute()
@@ -291,17 +484,34 @@ class Project:
             schema_version=schema_version,
             input_settings=input_settings,
             entry_point=entry_point,
+            entrypoint=start_scene,
+            script_entry_point=entry_point,
         )
         for scene_path in scenes:
             if not isinstance(scene_path, str):
                 raise ProjectError("project scene paths must be strings")
             project._validate_scene_path(scene_path)
             project.register_scene_path(scene_path)
+        levels = data.get("levels", [])
+        if not isinstance(levels, list) or not all(isinstance(value, str) for value in levels):
+            raise ProjectError("project level paths must be strings")
+        for level_path in levels:
+            project.register_level_path(level_path)
         if project.start_scene is not None:
-            project._validate_scene_path(project.start_scene)
+            project._validate_entrypoint(project.start_scene)
+            if (
+                project.entrypoint in project.level_paths()
+                and project.entrypoint in project.scene_paths()
+            ):
+                raise ProjectError("project entrypoint is registered as both a Scene and Level")
         if project.start_scene is None and project.scene_paths():
-            project._start_scene = project.scene_paths()[0]
-        for directory in (project.scenes_dir, project.assets_dir, project.scripts_dir):
+            project._entrypoint = project.scene_paths()[0]
+        for directory in (
+            project.scenes_dir,
+            project.levels_dir,
+            project.assets_dir,
+            project.scripts_dir,
+        ):
             directory.mkdir(parents=True, exist_ok=True)
         return project
 
@@ -324,13 +534,11 @@ class Project:
                 name=name,
                 path=stage,
                 game_version="0.1.0",
-                start_scene="scenes/main.json",
+                entrypoint="scenes/main.scene.pb",
             )
-            project.register_scene_path("scenes/main.json")
+            project.register_scene_path("scenes/main.scene.pb")
             project.save()
-            (stage / "scenes" / "main.json").write_text(
-                json.dumps(Scene("Main").to_dict(), indent=2) + "\n", encoding="utf-8"
-            )
+            project.save_document(Scene("Main"), "scenes/main.scene.pb")
             (stage / "__main__.py").write_text(
                 "from expra_engine.runtime.project_runner import run_project\n\n"
                 'if __name__ == "__main__":\n'
@@ -363,6 +571,92 @@ class Project:
             raise ProjectError(
                 f"scene must be project-relative under scene/ or scenes/: {relative_path!r}"
             )
+        try:
+            kind = kind_for_document_path(relative_path)
+        except DocumentCodecError as exc:
+            raise ProjectError(str(exc)) from exc
+        if kind is DocumentKind.LEVEL:
+            raise ProjectError(f"Scene registry path has a Level extension: {relative_path!r}")
+
+    @staticmethod
+    def _validate_level_path(relative_path: str) -> None:
+        Project._validate_entrypoint(relative_path)
+        kind = kind_for_document_path(relative_path)
+        if kind is DocumentKind.SCENE:
+            raise ProjectError(f"Level registry path has a Scene extension: {relative_path!r}")
+
+    @staticmethod
+    def _validate_entrypoint(relative_path: str) -> None:
+        candidate = Path(relative_path)
+        if candidate.is_absolute() or ".." in candidate.parts or not relative_path.strip():
+            raise ProjectError(f"entrypoint must be project-relative: {relative_path!r}")
+        try:
+            kind_for_document_path(relative_path)
+        except DocumentCodecError as exc:
+            raise ProjectError(str(exc)) from exc
+
+    def _registered_document_kind(self, relative_path: str | None) -> DocumentKind | None:
+        if relative_path is None:
+            return None
+        extension_kind = kind_for_document_path(relative_path)
+        if extension_kind is not None:
+            if relative_path in self._level_paths and extension_kind is not DocumentKind.LEVEL:
+                raise ProjectError(
+                    f"Level registry conflicts with document extension: {relative_path}"
+                )
+            if relative_path in self._scene_paths and extension_kind is not DocumentKind.SCENE:
+                raise ProjectError(
+                    f"Scene registry conflicts with document extension: {relative_path}"
+                )
+        elif relative_path in self._level_paths:
+            return DocumentKind.LEVEL
+        return extension_kind
+
+    def migrate_to_protobuf(self) -> dict[str, str]:
+        """Explicitly migrate registered legacy JSON documents to typed PB.
+
+        Legacy files are retained as import/recovery inputs. The manifest and
+        parsed Scene Instance source references are switched to the PB targets
+        only after every document has decoded successfully.
+        """
+        paths = list(dict.fromkeys((*self._scene_paths, *self._level_paths)))
+        if self.entrypoint is not None and self.entrypoint not in paths:
+            paths.append(self.entrypoint)
+        legacy_paths = [path for path in paths if str(path).casefold().endswith(".json")]
+        mapping: dict[str, str] = {}
+        documents: dict[str, Scene] = {}
+        for source in legacy_paths:
+            document = self.load_document(source)
+            documents[source] = document
+            if isinstance(document, Level):
+                target = f"levels/{Path(source).stem}.level.pb"
+            else:
+                target = f"scenes/{Path(source).stem}.scene.pb"
+            mapping[source] = target
+
+        for document in documents.values():
+            self._rewrite_scene_instance_sources(document, mapping)
+        for source, document in documents.items():
+            self.save_document(document, mapping[source])
+
+        self._scene_paths = list(
+            dict.fromkeys(mapping.get(path, path) for path in self._scene_paths)
+        )
+        self._level_paths = list(
+            dict.fromkeys(mapping.get(path, path) for path in self._level_paths)
+        )
+        if self.entrypoint is not None:
+            self._entrypoint = mapping.get(self.entrypoint, self.entrypoint)
+        self.schema_version = CURRENT_SCHEMA_VERSION
+        self.save()
+        return mapping
+
+    @staticmethod
+    def _rewrite_scene_instance_sources(scene: Scene, mapping: dict[str, str]) -> None:
+        for entity in scene.entities:
+            component = entity.get_component(SceneInstanceComponent)
+            if component is not None:
+                component.source_path = mapping.get(component.source_path, component.source_path)
 
     def __repr__(self) -> str:
         return f"Project({self.name!r}, path={self.path})"

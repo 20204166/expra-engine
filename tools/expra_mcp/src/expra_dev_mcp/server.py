@@ -985,7 +985,9 @@ def build_server(cfg: ExpraMcpConfig) -> MCPServer:
             "unique-vs-total diagnostic occurrences before/after (optional track_memory=true "
             "adds a tracemalloc delta). 'resource_cache' (needs project + asset_ids) repeatedly "
             "resolves the same assets, checking the cache stays near len(asset_ids) rather than "
-            "growing with iteration count. 'editor_redraw_stress' (needs session_id from a "
+            "growing with iteration count. 'document_load' (needs a project/resource or a "
+            "synthetic entity count) measures generic JSON/PB document stages through the real "
+            "Project load path. 'editor_redraw_stress' (needs session_id from a "
             "started editor_session) repeatedly redraws the REAL live Tk viewport, measuring "
             "Canvas item count and PhotoImage count via real Tcl introspection ('image names'). "
             "Every action reports verdict: 'bounded' | 'growing' | 'inconclusive', backed by the "
@@ -999,9 +1001,11 @@ def build_server(cfg: ExpraMcpConfig) -> MCPServer:
         ),
     )
     async def performance_probe(
-        action: Literal["render_stress", "resource_cache", "editor_redraw_stress"],
+        action: Literal["render_stress", "resource_cache", "editor_redraw_stress", "document_load"],
         project: str | None = None,
         scene: str | None = None,
+        resource: str | None = None,
+        compare_resource: str | None = None,
         session_id: str | None = None,
         iterations: int = 30,
         viewport_width: int = 400,
@@ -1009,6 +1013,14 @@ def build_server(cfg: ExpraMcpConfig) -> MCPServer:
         camera_width: float = 20.0,
         track_memory: bool = False,
         asset_ids: list[str] | None = None,
+        observer_enabled: bool = True,
+        synthetic_entity_count: int | None = None,
+        synthetic_kind: Literal["scene", "level"] = "scene",
+        synthetic_hierarchy_depth: int = 0,
+        synthetic_breadth: int = 4,
+        synthetic_component_density: float = 0.5,
+        synthetic_instance_count: int = 0,
+        synthetic_compare: bool = False,
     ) -> PerformanceProbeResult:
         if action == "editor_redraw_stress":
             if not session_id:
@@ -1059,6 +1071,43 @@ def build_server(cfg: ExpraMcpConfig) -> MCPServer:
                 request["scene"] = scene
             try:
                 raw = await run_static_op(executable, cfg.workspace.expra_root, request)
+            except StaticInspectionError as exc:
+                raise ValueError(f"{exc.kind}: {exc}") from exc
+            return PerformanceProbeResult(**raw)
+
+        if action == "document_load":
+            if synthetic_entity_count is None and (not project or not resource):
+                raise ValueError(
+                    "action='document_load' requires 'project'/'resource' or "
+                    "'synthetic_entity_count'"
+                )
+            executable, _ = resolve_configured_python(cfg)
+            document_request: dict[str, Any] = {
+                "op": "performance_probe",
+                "action": action,
+                "iterations": iterations,
+                "observer_enabled": observer_enabled,
+            }
+            if project is not None:
+                document_request["project"] = project
+            if resource is not None:
+                document_request["resource"] = resource
+            if compare_resource is not None:
+                document_request["compare_resource"] = compare_resource
+            if synthetic_entity_count is not None:
+                document_request.update(
+                    {
+                        "synthetic_entity_count": synthetic_entity_count,
+                        "synthetic_kind": synthetic_kind,
+                        "synthetic_hierarchy_depth": synthetic_hierarchy_depth,
+                        "synthetic_breadth": synthetic_breadth,
+                        "synthetic_component_density": synthetic_component_density,
+                        "synthetic_instance_count": synthetic_instance_count,
+                        "synthetic_compare": synthetic_compare,
+                    }
+                )
+            try:
+                raw = await run_static_op(executable, cfg.workspace.expra_root, document_request)
             except StaticInspectionError as exc:
                 raise ValueError(f"{exc.kind}: {exc}") from exc
             return PerformanceProbeResult(**raw)

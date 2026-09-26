@@ -208,6 +208,32 @@ class ComponentRegistryTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             component_from_dict({"type": "__nonexistent__"})
 
+    def test_entity_round_trip_preserves_unknown_component_payload(self) -> None:
+        entity = Entity.from_dict(
+            {
+                "entity_id": "entity-1",
+                "name": "Future Entity",
+                "components": [
+                    {
+                        "type": "vendor.future_component",
+                        "enabled": False,
+                        "nested": {"count": 3, "ratio": 3.0},
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual(
+            entity.to_dict()["components"],
+            [
+                {
+                    "type": "vendor.future_component",
+                    "enabled": False,
+                    "nested": {"count": 3, "ratio": 3.0},
+                }
+            ],
+        )
+
     def test_register_custom_type(self) -> None:
         @dataclass
         class TagComponent(Component):

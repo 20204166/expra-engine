@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any, cast
 from unittest.mock import MagicMock, patch
@@ -11,14 +10,15 @@ import pytest
 
 from expra_engine.core.engine import Engine, EngineRunState
 from expra_engine.core.project import Project
+from expra_engine.core.scene.document_codec import decode_protobuf
 from expra_engine.runtime.render_extractor import extract_render_frame
 from expra_engine.runtime.script_component import ScriptComponent
 from expra_engine.runtime.script_registry import ScriptRegistry
 from tests.support.project_engine import load_project_engine
 
 PROJECT_DIR = Path(__file__).parents[1] / "examples" / "blacksite_relay"
-LEVEL_2_SCENE = "scenes/level_02_deepcore.json"
-LEVEL_3_SCENE = "scenes/level_03_test_cell.json"
+LEVEL_2_SCENE = "levels/level_02_deepcore.level.pb"
+LEVEL_3_SCENE = "levels/level_03_test_cell.level.pb"
 
 
 def _project_engine() -> tuple[Project, Engine]:
@@ -45,7 +45,7 @@ def test_blacksite_relay_project_loads_scripts_and_asset_backed_scene() -> None:
     scene = project.load_scene()
 
     assert project.name == "Blacksite Relay"
-    assert project.start_scene == "scenes/main.json"
+    assert project.start_scene == "levels/main.level.pb"
     assert len(scene.entities) >= 60
     assert {"player", "enemy", "shard", "vip", "extraction"} <= {
         tag for entity in scene.entities for tag in entity.tags
@@ -71,7 +71,7 @@ def test_blacksite_relay_project_loads_scripts_and_asset_backed_scene() -> None:
 
 def test_blacksite_relay_starts_renders_pauses_restarts_and_preserves_saved_scene() -> None:
     project, engine = _project_engine()
-    saved = json.loads(project.scene_file().read_text(encoding="utf-8"))
+    saved = decode_protobuf(project.document_file().read_bytes())
 
     assert engine.play()
     game = cast(Any, engine.behaviour_system.instances[0])
@@ -93,7 +93,7 @@ def test_blacksite_relay_starts_renders_pauses_restarts_and_preserves_saved_scen
     assert restarted.health == 5
 
     engine.stop()
-    assert json.loads(project.scene_file().read_text(encoding="utf-8")) == saved
+    assert decode_protobuf(project.document_file().read_bytes()) == saved
 
 
 def test_project_registers_all_levels() -> None:
@@ -102,11 +102,11 @@ def test_project_registers_all_levels() -> None:
     # Membership, not exact-tuple equality: other reusable-scene/dogfood work
     # in this same session registers further scenes of its own, so this only
     # asserts what this test file is actually responsible for.
-    registered = project.scene_paths()
-    assert "scenes/main.json" in registered
+    registered = project.level_paths()
+    assert "levels/main.level.pb" in registered
     assert LEVEL_2_SCENE in registered
     assert LEVEL_3_SCENE in registered
-    assert project.start_scene == "scenes/main.json"
+    assert project.start_scene == "levels/main.level.pb"
 
 
 def test_level_3_test_cell_loads_with_a_different_square_arena() -> None:
@@ -192,7 +192,7 @@ def test_level_2_plays_end_to_end_with_extended_mission_clock() -> None:
     assert len(extract_render_frame(scene).items) >= 80
 
     engine.stop()
-    assert project.scene_file(LEVEL_2_SCENE).exists()
+    assert project.document_file(LEVEL_2_SCENE).exists()
 
 
 def test_create_runtime_selects_the_requested_scene() -> None:
@@ -204,7 +204,7 @@ def test_create_runtime_selects_the_requested_scene() -> None:
     not the pixel pipeline."""
     import examples.blacksite_relay.__main__ as entrypoint
 
-    assert entrypoint.LEVEL_SCENES["main"] == "scenes/main.json"
+    assert entrypoint.LEVEL_SCENES["main"] == "levels/main.level.pb"
     assert entrypoint.LEVEL_SCENES["level2"] == LEVEL_2_SCENE
     assert entrypoint.LEVEL_SCENES["deepcore"] == LEVEL_2_SCENE
 
@@ -239,7 +239,7 @@ def test_main_dispatches_argv_to_level_scenes() -> None:
         patch.object(entrypoint.sys, "argv", ["blacksite_relay"]),
     ):
         entrypoint.main()
-    assert seen == ["scenes/main.json"]
+    assert seen == ["levels/main.level.pb"]
 
     seen.clear()
     with (

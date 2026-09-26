@@ -6,6 +6,7 @@ import unittest
 
 from expra_engine.core.component import TransformComponent
 from expra_engine.core.scene import (
+    Level,
     Scene,
     SceneInstanceComponent,
     SceneInstanceCycleError,
@@ -61,6 +62,12 @@ class TestSceneInstanceComponent(unittest.TestCase):
 
 
 class TestResolveSceneInstances(unittest.TestCase):
+    def test_level_sources_are_rejected_as_scene_instances(self) -> None:
+        scene, _root_id = _owning_scene_with_instance()
+
+        with self.assertRaisesRegex(SceneInstanceSourceError, "must be Scene documents"):
+            resolve_scene_instances(scene, resolve_source=lambda _path: Level("Level"))
+
     def test_resolving_materializes_source_hierarchy_as_children(self) -> None:
         scene, root_id = _owning_scene_with_instance()
         resolve_scene_instances(scene, resolve_source=lambda path: _source_scene())

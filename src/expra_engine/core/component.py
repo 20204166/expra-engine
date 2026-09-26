@@ -6,6 +6,7 @@ through the action boundary; they never mutate themselves.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -36,6 +37,23 @@ class Component:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Component:
         return cls(enabled=data.get("enabled", True))
+
+
+class OpaqueComponent(Component):
+    """Preserve a component whose implementation is unavailable locally."""
+
+    component_type = "opaque"
+
+    def __init__(self, payload: dict[str, Any]) -> None:
+        super().__init__(enabled=bool(payload.get("enabled", True)))
+        component_type = payload.get("type")
+        if not isinstance(component_type, str) or not component_type:
+            raise ValueError("opaque component requires a non-empty type")
+        self.original_type = component_type
+        self._payload = deepcopy(payload)
+
+    def to_dict(self) -> dict[str, Any]:
+        return deepcopy(self._payload)
 
 
 @dataclass

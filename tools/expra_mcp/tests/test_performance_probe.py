@@ -69,6 +69,79 @@ async def test_resource_cache_requires_asset_ids(server) -> None:
         assert result.is_error is True
 
 
+async def test_document_load_reports_generic_production_stages(server) -> None:
+    async with Client(server) as client:
+        result = await client.call_tool(
+            "performance_probe",
+            {
+                "action": "document_load",
+                "project": BLACKSITE,
+                "resource": "levels/main.level.pb",
+                "iterations": 3,
+            },
+        )
+        assert result.is_error is not True
+        data = result.structured_content
+        assert data["format"] == "protobuf"
+        assert data["kind"] == "level"
+        assert data["bytes"] > 0
+        assert data["entities"] > 0
+        assert data["stages"]["document:read"]["count"] == 3
+        assert data["stages"]["document:decode"]["count"] == 3
+        assert data["stages"]["document:convert"]["count"] == 3
+        assert data["stages"]["document:construct"]["count"] == 3
+        assert data["stages"]["scene:resolve_instances"]["count"] == 3
+        assert data["stages"]["document:load"]["count"] == 3
+        assert data["first_load_total_ms"] >= 0
+
+
+async def test_document_load_compares_equivalent_json_and_protobuf(server) -> None:
+    async with Client(server) as client:
+        result = await client.call_tool(
+            "performance_probe",
+            {
+                "action": "document_load",
+                "project": BLACKSITE,
+                "resource": "scenes/main.json",
+                "compare_resource": "levels/main.level.pb",
+                "iterations": 2,
+            },
+        )
+        assert result.is_error is not True
+        comparisons = result.structured_content["comparisons"]
+        assert [item["format"] for item in comparisons] == ["legacy_json", "protobuf"]
+        # Legacy flat JSON has no kind field; the PB resource is explicitly
+        # typed. The probe reports the kind actually exercised rather than
+        # inferring one from the comparison pair.
+        assert [item["kind"] for item in comparisons] == ["scene", "level"]
+        assert all("document:load" in item["stages"] for item in comparisons)
+
+
+async def test_document_load_supports_deterministic_synthetic_documents(server) -> None:
+    async with Client(server) as client:
+        request = {
+            "action": "document_load",
+            "synthetic_entity_count": 100,
+            "synthetic_kind": "scene",
+            "synthetic_component_density": 0.5,
+            "iterations": 2,
+        }
+        result = await client.call_tool("performance_probe", request)
+        repeat = await client.call_tool("performance_probe", request)
+        assert result.is_error is not True
+        assert repeat.is_error is not True
+        data = result.structured_content
+        repeated_data = repeat.structured_content
+        assert data["sha256"] == repeated_data["sha256"]
+        assert data["bytes"] == repeated_data["bytes"]
+        assert data["entities"] == repeated_data["entities"]
+        assert data["components"] == repeated_data["components"]
+        assert data["format"] == "protobuf"
+        assert data["kind"] == "scene"
+        assert data["entities"] >= 100
+        assert data["components"] >= data["entities"]
+
+
 async def test_editor_redraw_stress_requires_session_id(server) -> None:
     async with Client(server) as client:
         result = await client.call_tool("performance_probe", {"action": "editor_redraw_stress"})

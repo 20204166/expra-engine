@@ -15,5 +15,5 @@ def load_project_engine(project_dir: Path) -> tuple[Project, Engine]:
     engine = Engine()
     engine.set_project(project)
     engine.set_script_registry(ScriptRegistry(project.path))
-    engine.set_scene(project.load_scene())
+    engine.set_scene(project.load_document())
     return project, engine

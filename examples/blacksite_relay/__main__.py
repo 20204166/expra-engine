@@ -17,10 +17,10 @@ PROJECT_DIR=Path(__file__).resolve().parent
 # applied automatically by PygameRuntime._sync_camera_target() on load, so
 # the follow/limit/width choices baked into level_02_deepcore.json take
 # effect without any code here reading which level is active.
-LEVEL_SCENES={'main':'scenes/main.json','level2':'scenes/level_02_deepcore.json','deepcore':'scenes/level_02_deepcore.json'}
+LEVEL_SCENES={'main':'levels/main.level.pb','level2':'levels/level_02_deepcore.level.pb','deepcore':'levels/level_02_deepcore.level.pb'}
 
 def create_runtime(pygame_module: Any, scene_path: str | None = None) -> PygameRuntime:
-    project=Project.load(PROJECT_DIR); engine=Engine(); engine.set_project(project); engine.set_script_registry(ScriptRegistry(project.path)); engine.set_scene(project.load_scene(scene_path)); renderer=PygameRenderer(pygame_module,None,screen_size=(1100,700),resource_provider=PygameResourceProvider(pygame_module,project.resource_service())); engine.play()
+    project=Project.load(PROJECT_DIR); engine=Engine(); engine.set_project(project); engine.set_script_registry(ScriptRegistry(project.path)); engine.set_scene(project.load_document(scene_path)); renderer=PygameRenderer(pygame_module,None,screen_size=(1100,700),resource_provider=PygameResourceProvider(pygame_module,project.resource_service())); engine.play()
     return PygameRuntime(engine,renderer,pygame_module=pygame_module,size=(1100,700),camera=OrthographicCamera(width=88.0,height=49.5),camera_target_id=None,frame_factory=lambda current,dt: extract_render_frame(current.active_scene,elapsed=dt,interpolator=current.transform_interpolator,interpolation_fraction=current.interpolation_fraction,animated_players=current.animated_sprite_system.players))
 
 def main():

@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+package expra.schema.v1;
+
+message JsonValue {
+  oneof kind {
+    bool null_value = 1;
+    bool bool_value = 2;
+    int64 int_value = 3;
+    double float_value = 4;
+    string string_value = 5;
+    JsonObject object_value = 6;
+    JsonArray array_value = 7;
+  }
+}
+
+message JsonObject {
+  map<string, JsonValue> values = 1;
+}
+
+message JsonArray {
+  repeated JsonValue values = 1;
+}
+
+message Component {
+  string type_id = 1;
+  bool enabled = 2;
+  JsonObject payload = 3;
+  bool payload_explicit = 4;
+}
+
+message Entity {
+  string entity_id = 1;
+  string name = 2;
+  bool enabled = 3;
+  int32 layer = 4;
+  optional string parent_id = 5;
+  repeated string tags = 6;
+  repeated Component components = 7;
+}

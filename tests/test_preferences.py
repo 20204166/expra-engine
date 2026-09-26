@@ -29,11 +29,17 @@ class PreferencesStoreTests(unittest.TestCase):
     def test_save_and_load_round_trip(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             path = Path(d) / "prefs.json"
-            prefs = EditorPreferences(theme="litera", recent_projects=("/a", "/b"))
+            existing_a = Path(d) / "project-a"
+            existing_b = Path(d) / "project-b"
+            existing_a.mkdir()
+            existing_b.mkdir()
+            prefs = EditorPreferences(
+                theme="litera", recent_projects=(str(existing_a), str(existing_b))
+            )
             self.store.save(path, prefs)
             loaded = self.store.load(path)
             self.assertEqual(loaded.theme, "litera")
-            self.assertEqual(loaded.recent_projects, ("/a", "/b"))
+            self.assertEqual(loaded.recent_projects, (str(existing_a), str(existing_b)))
 
     def test_viewport_camera_state_round_trips(self) -> None:
         with tempfile.TemporaryDirectory() as d:
@@ -88,11 +94,34 @@ class PreferencesStoreTests(unittest.TestCase):
     def test_recent_projects_preserved_as_tuple(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             path = Path(d) / "prefs.json"
-            prefs = EditorPreferences(recent_projects=("/game1", "/game2", "/game3"))
-            self.store.save(path, prefs)
+            existing = [Path(d) / f"game{i}" for i in range(3)]
+            for project in existing:
+                project.mkdir()
+            recent = tuple(str(project) for project in existing)
+            self.store.save(path, EditorPreferences(recent_projects=recent))
             loaded = self.store.load(path)
             self.assertIsInstance(loaded.recent_projects, tuple)
-            self.assertEqual(loaded.recent_projects, ("/game1", "/game2", "/game3"))
+            self.assertEqual(loaded.recent_projects, recent)
+
+    def test_load_prunes_missing_recent_projects_but_keeps_existing(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "prefs.json"
+            existing = Path(d) / "real-project"
+            existing.mkdir()
+            missing = Path(d) / "deleted-project"
+            path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "recent_projects": [str(existing), str(missing)],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            loaded = self.store.load(path)
+
+            self.assertEqual(loaded.recent_projects, (str(existing),))
 
     def test_window_geometry_round_trips(self) -> None:
         with tempfile.TemporaryDirectory() as d:

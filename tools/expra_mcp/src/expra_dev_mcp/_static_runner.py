@@ -26,6 +26,7 @@ why every result below carries "executed_project_code": false.
 from __future__ import annotations
 
 import base64
+import hashlib
 import io
 import json
 import logging
@@ -33,6 +34,7 @@ import os
 import sys
 import time
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
 
 # Must be set before any `import pygame` (done lazily below, inside the ops
@@ -75,8 +77,8 @@ def _load_project(expra_root: str, project: str):
     return Project.load(Path(expra_root) / project)
 
 
-def _load_scene(project: Any, scene: str | None):
-    return project.load_scene(scene)
+def _load_scene(project: Any, scene: str | None, *, observer: Any | None = None):
+    return project.load_document(scene, observer=observer)
 
 
 def _find_entity(scene: Any, entity: str):
@@ -129,7 +131,10 @@ def op_expra_inspect(req: dict) -> dict:
                 "schema_version": project.schema_version,
                 "entry_point": project.entry_point,
                 "start_scene": project.start_scene,
+                "entrypoint": project.entrypoint,
+                "script_entry_point": project.script_entry_point,
                 "scene_paths": list(project.scene_paths()),
+                "level_paths": list(project.level_paths()),
                 "input_settings": dict(project.input_settings),
                 "path": str(project.path),
             },
@@ -927,11 +932,13 @@ def _run_probe_step(engine: Any, action: str, step: dict) -> dict:
 
 def op_runtime_probe(req: dict) -> dict:
     from expra_engine.core.engine import Engine
+    from expra_engine.observability import ObservabilityWatcher, serialize_observability
 
     project = _load_project(req["expra_root"], req["project"])
-    scene = _load_scene(project, req.get("scene"))
+    observer = ObservabilityWatcher()
+    scene = _load_scene(project, req.get("scene"), observer=observer)
 
-    engine = Engine()
+    engine = Engine(observer=observer)
     engine.set_project(project)
     engine.set_scene(scene)
     # MUST happen before any "play" step: engine.behaviour_system is a lazy
@@ -955,6 +962,7 @@ def op_runtime_probe(req: dict) -> dict:
         "project": req["project"],
         "executed_project_code": True,
         "steps": step_results,
+        "observability": json.loads(serialize_observability(observer)),
     }
 
 
@@ -1082,8 +1090,253 @@ def op_export_inspect(req: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 
+def _synthetic_document(
+    *,
+    entity_count: int,
+    kind: str,
+    hierarchy_depth: int,
+    breadth: int,
+    component_density: float,
+    instance_count: int,
+):
+    from expra_engine.core.component import OpaqueComponent, TransformComponent
+    from expra_engine.core.scene import Level, LevelMetadata, Scene, SceneInstanceComponent
+
+    if entity_count < 1 or entity_count > 5000:
+        raise ValueError("synthetic_entity_count must be between 1 and 5000")
+    if kind not in ("scene", "level"):
+        raise ValueError("synthetic_kind must be 'scene' or 'level'")
+    if hierarchy_depth < 0 or breadth < 1 or instance_count < 0:
+        raise ValueError("synthetic hierarchy and instance values must be non-negative")
+    if not 0.0 <= component_density <= 1.0:
+        raise ValueError("synthetic_component_density must be between 0 and 1")
+
+    document = (
+        Level(
+            "Synthetic Level",
+            scene_id="synthetic-level",
+            level_metadata=LevelMetadata(display_name="Synthetic Level"),
+        )
+        if kind == "level"
+        else Scene("Synthetic Scene", scene_id="synthetic-scene")
+    )
+    depths: list[int] = []
+    entities: list[Any] = []
+    for index in range(entity_count):
+        parent_id = None
+        depth = 0
+        if index and hierarchy_depth:
+            candidate = (index - 1) // breadth
+            if candidate < len(entities) and depths[candidate] < hierarchy_depth:
+                parent_id = entities[candidate].entity_id
+                depth = depths[candidate] + 1
+        entity = document.create_entity(
+            f"Synthetic Entity {index}",
+            entity_id=f"synthetic-entity-{index}",
+            parent_id=parent_id,
+        )
+        entity.add_tag("synthetic")
+        entity.add_tag("even" if index % 2 == 0 else "odd")
+        entity.add_component(TransformComponent(x=float(index), y=float(depth)))
+        if index == 0 or index / max(entity_count, 1) < component_density:
+            entity.add_component(
+                OpaqueComponent(
+                    {
+                        "type": "synthetic.opaque",
+                        "enabled": True,
+                        "index": index,
+                        "values": [index, index / 10.0, index % 3 == 0],
+                        "labels": {"kind": kind, "depth": depth},
+                    }
+                )
+            )
+        entities.append(entity)
+        depths.append(depth)
+
+    for index in range(instance_count):
+        instance = document.create_entity(
+            f"Synthetic Instance {index}", entity_id=f"synthetic-instance-{index}"
+        )
+        instance.add_component(SceneInstanceComponent("scenes/synthetic_source.scene.pb"))
+    return document
+
+
+def _synthetic_project(request: dict) -> tuple[TemporaryDirectory[str], Any, str, str]:
+    from expra_engine.core.project import Project
+    from expra_engine.core.scene import Scene
+
+    temporary = TemporaryDirectory(prefix="expra-document-probe-")
+    project = Project.create("Synthetic Document Probe", Path(temporary.name) / "project")
+    document = _synthetic_document(
+        entity_count=int(request.get("synthetic_entity_count", 100)),
+        kind=str(request.get("synthetic_kind", "scene")),
+        hierarchy_depth=int(request.get("synthetic_hierarchy_depth", 0)),
+        breadth=int(request.get("synthetic_breadth", 4)),
+        component_density=float(request.get("synthetic_component_density", 0.5)),
+        instance_count=int(request.get("synthetic_instance_count", 0)),
+    )
+    source = Scene("Synthetic Source", scene_id="synthetic-source")
+    source.create_entity("Synthetic Source Entity", entity_id="synthetic-source-entity")
+    project.save_document(source, "scenes/synthetic_source.scene.pb")
+    pb_path = (
+        "levels/synthetic.level.pb"
+        if document.document_kind.value == "level"
+        else "scenes/synthetic.scene.pb"
+    )
+    json_path = (
+        "levels/synthetic.level.json"
+        if document.document_kind.value == "level"
+        else "scenes/synthetic.json"
+    )
+    project.save_document(document, pb_path)
+    if document.document_kind.value == "level":
+        json_file = project.path / json_path
+        json_file.parent.mkdir(parents=True, exist_ok=True)
+        json_file.write_text(json.dumps(document.to_dict(include_instance_content=False), indent=2))
+        project.register_level_path(json_path)
+    else:
+        project.save_scene(document, json_path)
+    project.save()
+    # Reload through the normal manifest path, not the creation-time object.
+    return temporary, Project.load(project.path), pb_path, json_path
+
+
+def _document_stage_stats(observer: Any | None) -> dict[str, dict[str, Any]]:
+    if observer is None:
+        return {}
+    result: dict[str, dict[str, Any]] = {}
+    for metric in observer.snapshot().metrics:
+        distribution = metric.distribution
+        result[metric.target] = {
+            "count": metric.count,
+            "min_ms": float(distribution.get("minimum", 0.0)) * 1000.0,
+            "p50_ms": float(distribution.get("p50", 0.0)) * 1000.0,
+            "p95_ms": float(distribution.get("p95", 0.0)) * 1000.0,
+            "max_ms": float(distribution.get("maximum", 0.0)) * 1000.0,
+            "failures": metric.failures,
+            "in_flight": metric.in_flight,
+            "peak_in_flight": metric.peak_in_flight,
+        }
+    return result
+
+
+def _document_shape(document: Any) -> tuple[int, int, int]:
+    entities = list(document.entities)
+    components = sum(len(entity.components) for entity in entities)
+    instances = sum(
+        1
+        for entity in entities
+        for component in entity.components
+        if getattr(component, "component_type", None) == "scene_instance"
+    )
+    return len(entities), components, instances
+
+
+def _measure_document_load(
+    project: Any,
+    resource: str,
+    *,
+    iterations: int,
+    observer_enabled: bool,
+) -> dict[str, Any]:
+    from expra_engine.observability import ObservabilityWatcher
+
+    path = project.document_file(resource)
+    format_name = "protobuf" if str(path).casefold().endswith(".pb") else "legacy_json"
+    observer = (
+        ObservabilityWatcher(sample_limit=min(max(iterations, 128), 4096))
+        if observer_enabled
+        else None
+    )
+    first_start = time.perf_counter()
+    try:
+        document = project.load_document(resource, observer=observer)
+    except Exception as exc:  # noqa: BLE001 -- preserve stage attribution in probe output
+        stages = _document_stage_stats(observer)
+        failed_stages = [target for target, data in stages.items() if data["failures"]]
+        return {
+            "resource": resource,
+            "format": format_name,
+            "kind": None,
+            "bytes": path.stat().st_size if path.exists() else 0,
+            "entities": 0,
+            "components": 0,
+            "instances": 0,
+            "iterations": 0,
+            "duration_seconds": 0.0,
+            "first_load_total_ms": (time.perf_counter() - first_start) * 1000.0,
+            "observer_enabled": observer_enabled,
+            "stages": stages,
+            "error": f"{type(exc).__name__}: {exc}",
+            "failed_stage": failed_stages[-1] if failed_stages else None,
+        }
+    first_load_total_ms = (time.perf_counter() - first_start) * 1000.0
+    if observer is not None:
+        observer.reset()
+    start = time.perf_counter()
+    for _ in range(iterations):
+        document = project.load_document(resource, observer=observer)
+    duration = time.perf_counter() - start
+    entities, components, instances = _document_shape(document)
+    return {
+        "resource": resource,
+        "format": format_name,
+        "kind": document.document_kind.value,
+        "bytes": path.stat().st_size,
+        "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        "entities": entities,
+        "components": components,
+        "instances": instances,
+        "iterations": iterations,
+        "duration_seconds": duration,
+        "first_load_total_ms": first_load_total_ms,
+        "observer_enabled": observer_enabled,
+        "stages": _document_stage_stats(observer),
+        "error": None,
+        "failed_stage": None,
+    }
+
+
 def op_performance_probe(req: dict) -> dict:
     action = req["action"]
+
+    if action == "document_load":
+        temporary = None
+        if req.get("synthetic_entity_count") is not None:
+            temporary, project, pb_path, json_path = _synthetic_project(req)
+            resource = req.get("resource") or pb_path
+            compare_resource = req.get("compare_resource")
+            if req.get("synthetic_compare") and compare_resource is None:
+                compare_resource = json_path if resource == pb_path else pb_path
+        else:
+            if not req.get("project") or not req.get("resource"):
+                raise ValueError("action='document_load' requires 'project' and 'resource'")
+            project = _load_project(req["expra_root"], req["project"])
+            resource = req["resource"]
+            compare_resource = req.get("compare_resource")
+        try:
+            iterations = max(1, int(req.get("iterations", 30)))
+            observer_enabled = bool(req.get("observer_enabled", True))
+            resources = [resource]
+            if compare_resource:
+                resources.append(compare_resource)
+            results = [
+                _measure_document_load(
+                    project,
+                    item,
+                    iterations=iterations,
+                    observer_enabled=observer_enabled,
+                )
+                for item in resources
+            ]
+            primary = dict(results[0])
+            primary["action"] = action
+            primary["verdict"] = "measured"
+            primary["comparisons"] = results if len(results) > 1 else []
+            return primary
+        finally:
+            if temporary is not None:
+                temporary.cleanup()
 
     if action == "render_stress":
         import pygame

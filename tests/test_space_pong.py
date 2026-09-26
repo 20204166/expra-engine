@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import json
 import threading
 from pathlib import Path
 from types import SimpleNamespace
 
 from expra_engine.core.engine import Engine, EngineRunState
 from expra_engine.core.project import Project
+from expra_engine.core.scene.document_codec import decode_protobuf
 from expra_engine.export.exporter import GameExporter
 from expra_engine.export.plan import ExportPlan, ExportTarget, PythonArch, RuntimeProfile
 from expra_engine.runtime.collider import ColliderComponent
@@ -32,7 +32,7 @@ def test_space_pong_project_uses_generic_scene_components_and_project_scripts() 
     ).registered_component_types()}
 
     assert project.name == "Space Pong"
-    assert project.start_scene == "scene/main.json"
+    assert project.start_scene == "levels/main.level.pb"
     assert len(scene.entities) >= 8
     assert any(entity.name == "Camera" for entity in scene.entities)
     assert {component.component_type for entity in scene.entities for component in entity.components} <= registered | {"script"}
@@ -53,7 +53,7 @@ def test_space_pong_project_uses_generic_scene_components_and_project_scripts() 
 
 def test_space_pong_opens_resolves_scripts_runs_and_stops_without_mutating_saved_scene() -> None:
     project, engine = _project_engine()
-    saved = json.loads(project.scene_file().read_text(encoding="utf-8"))
+    saved = decode_protobuf(project.document_file().read_bytes())
 
     assert engine.play()
     behaviours = engine.behaviour_system.instances
@@ -64,7 +64,7 @@ def test_space_pong_opens_resolves_scripts_runs_and_stops_without_mutating_saved
     engine.stop()
 
     assert engine.run_state is EngineRunState.EDIT
-    assert json.loads(project.scene_file().read_text(encoding="utf-8")) == saved
+    assert decode_protobuf(project.document_file().read_bytes()) == saved
 
 
 def test_space_pong_runtime_covers_score_win_pause_restart_and_hit_feedback() -> None:
@@ -134,7 +134,7 @@ def test_space_pong_hud_layout_is_stable_across_resize_and_render_extraction_is_
 def test_space_pong_save_reopen_and_export_workflow(tmp_path: Path) -> None:
     project, _ = _project_engine()
     scene = project.load_scene()
-    project.save_scene(scene)
+    project.save_document(scene)
     reopened = Project.load(PROJECT_DIR)
     assert reopened.load_scene().to_dict() == scene.to_dict()
 
@@ -155,7 +155,7 @@ def test_space_pong_save_reopen_and_export_workflow(tmp_path: Path) -> None:
     result = GameExporter(packager=_Packager()).export(plan, cancel=threading.Event())
     assert (result / "Space_Pong" / "project.json").is_file()
     assert (result / "Space_Pong" / "scripts" / "space_pong_behaviour.py").is_file()
-    assert (result / "Space_Pong" / "scene" / "main.json").is_file()
+    assert (result / "Space_Pong" / "levels" / "main.level.pb").is_file()
     assert (result / "Space_Pong" / "__main__.py").is_file()
 
 

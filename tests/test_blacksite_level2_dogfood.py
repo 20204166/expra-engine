@@ -36,7 +36,7 @@ from tests.support.tk_display import display_available
 
 DISPLAY_AVAILABLE = display_available()
 BLACKSITE_SRC = Path(__file__).parents[1] / "examples" / "blacksite_relay"
-LEVEL2 = "scenes/level_02_deepcore.json"
+LEVEL2 = "levels/level_02_deepcore.level.pb"
 
 
 def _copy_blacksite(destination: Path) -> Project:

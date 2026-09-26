@@ -194,7 +194,7 @@ def _dispatch(
 
         expra_root = Path(params["expra_root"])
         project = Project.load(expra_root / params["project"])
-        scene = project.load_scene(params.get("scene"))
+        scene = project.load_document(params.get("scene"), observer=window._observer)
         # Mirrors editor/project_workflow.py's ProjectWorkflow.open_loaded()
         # exactly (confirmed by reading it), so this behaves identically to
         # a human choosing File > Open Project.
@@ -217,6 +217,7 @@ def _dispatch(
             "executed_project_code": True,
             "project_name": project.name,
             "entity_count": len(scene.entities),
+            "document_kind": scene.document_kind.value,
             "run_state": engine.run_state.value,
         }
 
@@ -227,6 +228,7 @@ def _dispatch(
             "run_state": engine.run_state.value,
             "selected_id": window._selected_id,
             "entity_count": len(scene.entities) if scene is not None else 0,
+            "document_kind": scene.document_kind.value if scene is not None else None,
             "is_closing": getattr(window, "_is_closing", False),
         }
 
@@ -292,19 +294,23 @@ def _dispatch(
         # Mirrors editor/project_workflow.py's ProjectWorkflow.open_scene()
         # for an already-known relative path (confirmed by reading it) --
         # bypasses the file-picker dialog branch, which has no headless
-        # equivalent, but otherwise identical: same load_scene()/set_scene()
+        # equivalent, but otherwise identical: same load_document()/set_scene()
         # canonical path a human's "File > Open Scene..." choice uses.
         project = engine.project
         if project is None:
             raise RuntimeError("no project open")
         relative_path = params["relative_path"]
-        scene = project.load_scene(relative_path)
+        scene = project.load_document(relative_path)
         window._engine.set_scene(scene)
-        window._last_save_path = project.scene_file(relative_path)
+        window._last_save_path = project.document_file(relative_path)
         window._selected_ids = ()
         window._root.title(window._project_workflow.window_title())
         window._present_all()
-        return {"relative_path": relative_path, "entity_count": len(scene.entities)}
+        return {
+            "relative_path": relative_path,
+            "entity_count": len(scene.entities),
+            "document_kind": scene.document_kind.value,
+        }
 
     if command == "new_scene":
         project = engine.project
@@ -508,7 +514,12 @@ def main() -> None:
         _respond(0, False, error=f"could not import editor: {type(exc).__name__}: {exc}")
         return
 
+    preferences_directory = tempfile.TemporaryDirectory(prefix="expra-editor-worker-")
+    preferences_path = Path(preferences_directory.name) / "preferences.json"
     try:
+        from expra_engine.ui import editor_window as _editor_window_module
+
+        _editor_window_module._PREFERENCES_PATH = preferences_path
         engine = Engine()
         window = EditorWindow(engine)
         root = window._root
@@ -517,6 +528,7 @@ def main() -> None:
         # window has actually been mapped by the window manager.
         root.update()
     except Exception as exc:  # noqa: BLE001
+        preferences_directory.cleanup()
         _respond(0, False, error=f"could not construct editor window: {type(exc).__name__}: {exc}")
         return
 
@@ -585,7 +597,10 @@ def main() -> None:
         root.after(20, poll)
 
     root.after(20, poll)
-    root.mainloop()
+    try:
+        root.mainloop()
+    finally:
+        preferences_directory.cleanup()
 
 
 if __name__ == "__main__":

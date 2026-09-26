@@ -256,6 +256,7 @@ _RUNTIME_CORE_MODULES = (
     "component.py",
     "component_schema.py",
     "directions.py",
+    "document_kind.py",
     "engine.py",
     "entity.py",
     "errors.py",
@@ -266,6 +267,8 @@ _RUNTIME_CORE_MODULES = (
     "camera.py",
     "scene/__init__.py",
     "scene/camera.py",
+    "scene/document_codec.py",
+    "scene/level.py",
     "scene/scene.py",
     "scene/scene_instance.py",
     "string_utils.py",
@@ -298,6 +301,7 @@ def _stage_pygame_runtime(site_packages: Path) -> None:
         shutil.copy2(source_root / "core" / module, destination)
 
     shutil.copytree(source_root / "filesystem", package_root / "filesystem")
+    shutil.copytree(source_root / "schema", package_root / "schema")
 
     shutil.copytree(source_root / "ui_model", package_root / "ui_model")
     runtime_root = package_root / "runtime"

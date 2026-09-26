@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+package expra.schema.v1;
+
+import "scene.proto";
+
+message LevelMetadata {
+  optional string display_name = 1;
+  repeated double world_bounds = 2;
+  optional string spawn_entity_id = 3;
+  optional string default_camera_id = 4;
+  repeated string tags = 5;
+}
+
+message LevelDocument {
+  SceneDocument scene = 1;
+  LevelMetadata metadata = 2;
+}
+
+message DocumentEnvelope {
+  oneof document {
+    SceneDocument scene = 1;
+    LevelDocument level = 2;
+  }
+}

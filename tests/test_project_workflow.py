@@ -2,19 +2,70 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 from expra_engine.core.component import TransformComponent
 from expra_engine.core.engine import Engine
 from expra_engine.core.project import Project
+from expra_engine.editor.project_workflow import ProjectWorkflow
 from expra_engine.editor.script_tools import attach_script, create_behaviour_script
 from expra_engine.runtime import ScriptComponent, ScriptRegistry
 from expra_engine.runtime.input import PhysicalInput
 
 
 class TestProjectWorkflow(unittest.TestCase):
+    def test_run_project_launches_the_project_script_as_a_child_process(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Project.create("Runtime", Path(tmp) / "runtime")
+            engine = SimpleNamespace(project=project)
+            window = SimpleNamespace(_engine=engine, _console=MagicMock(), _root=MagicMock())
+            workflow = ProjectWorkflow(window)
+
+            with patch("expra_engine.editor.project_workflow.subprocess.Popen") as launch:
+                workflow.run_project()
+
+            launch.assert_called_once_with(
+                [sys.executable, str(project.path / "__main__.py")],
+                cwd=project.path,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            self.assertIs(workflow._project_process, launch.return_value)
+
+    def test_stop_project_terminates_a_running_child_process(self) -> None:
+        window = SimpleNamespace(_engine=SimpleNamespace(project=None))
+        workflow = ProjectWorkflow(window)
+        process = MagicMock()
+        process.poll.return_value = None
+        workflow._project_process = process
+
+        workflow.stop_project()
+
+        process.terminate.assert_called_once_with()
+        process.wait.assert_called_once_with(timeout=2)
+        self.assertIsNone(workflow._project_process)
+
+    def test_stop_project_kills_a_child_that_does_not_terminate(self) -> None:
+        window = SimpleNamespace(_engine=SimpleNamespace(project=None))
+        workflow = ProjectWorkflow(window)
+        process = MagicMock()
+        process.poll.return_value = None
+        process.wait.side_effect = [subprocess.TimeoutExpired("game", 2), None]
+        workflow._project_process = process
+
+        workflow.stop_project()
+
+        process.terminate.assert_called_once_with()
+        process.kill.assert_called_once_with()
+        self.assertIsNone(workflow._project_process)
+
     def test_new_project_has_standard_runtime_entry_point(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project = Project.create("Runtime", Path(tmp) / "runtime")

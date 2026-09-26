@@ -21,7 +21,7 @@ import tkinter as tk
 from collections.abc import Callable, Sequence
 from dataclasses import replace
 from pathlib import Path
-from tkinter import filedialog, messagebox, simpledialog
+from tkinter import messagebox, simpledialog
 from tkinter import ttk as tkttk
 from typing import Any
 
@@ -499,6 +499,7 @@ class EditorWindow:
 
     def _act_stop(self) -> None:
         self._runtime_preview.stop()
+        self._project_workflow.stop_project()
         if self._engine.stop():
             self._console.log("[Engine] Stopped — scene restored", level="info")
         self._project_workflow.restore_after_run_project()
@@ -550,41 +551,21 @@ class EditorWindow:
         self._project_workflow.open_loaded(project)
 
     def _act_save_scene(self) -> None:
-        scene = self._engine.edit_scene
-        if scene is None:
-            messagebox.showwarning("Save Scene", "No scene to save.")
-            return
-        project = self._engine.project
-        if project is not None and self._last_save_path is not None:
-            relative = self._last_save_path.resolve().relative_to(project.path)
-            project.save_scene(scene, relative.as_posix())
-            self._console.log(f"[Editor] Scene saved: {self._last_save_path}")
-            return
-        path = filedialog.asksaveasfilename(
-            title="Save Scene",
-            defaultextension=".json",
-            filetypes=[("Scene files", "*.json")],
-        )
-        if not path:
-            return
-        self._last_save_path = Path(path)
-        self._act_save_scene_silent()
-        self._console.log(f"[Editor] Scene saved: {path}")
+        self._project_workflow.save_scene()
 
     def _act_save_scene_silent(self) -> None:
-        """Save to the last selected path without opening a dialog."""
-        if self._last_save_path is None:
+        workflow = getattr(self, "_project_workflow", None)
+        if workflow is not None:
+            workflow.save_scene_silent()
             return
-        scene = self._engine.edit_scene
-        if scene is None:
-            return
-        project = self._engine.project
-        if project is None:
-            self._last_save_path.write_text(json.dumps(scene.to_dict(), indent=2), encoding="utf-8")
-            return
-        project.save_scene(
-            scene, self._last_save_path.resolve().relative_to(project.path).as_posix()
-        )
+        if (
+            self._last_save_path is not None
+            and self._engine.edit_scene is not None
+            and self._engine.project is None
+        ):
+            self._last_save_path.write_text(
+                json.dumps(self._engine.edit_scene.to_dict(), indent=2), encoding="utf-8"
+            )
 
     def _start_autosave(self) -> None:
         """Schedule recurring silent saves using the configured preference."""
@@ -1012,6 +993,9 @@ class EditorWindow:
 
     def _on_close(self) -> None:
         self._runtime_preview.stop()
+        workflow = getattr(self, "_project_workflow", None)
+        if workflow is not None:
+            workflow.stop_project()
         self._is_closing = True
         if self._autosave_after_id is not None:
             with contextlib.suppress(tk.TclError):

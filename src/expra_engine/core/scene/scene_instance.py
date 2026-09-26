@@ -146,6 +146,13 @@ def resolve_scene_instances(
         except Exception as exc:
             raise SceneInstanceSourceError(entity.name, component.source_path, exc) from exc
 
+        if source_scene.document_kind.value == "level":
+            raise SceneInstanceSourceError(
+                entity.name,
+                component.source_path,
+                ValueError("SceneInstanceComponent sources must be Scene documents, not Levels"),
+            )
+
         cloned = _materialize_source_scene(scene, source_scene, entity.entity_id)
         scene._set_instance_children(entity.entity_id, {clone.entity_id for clone in cloned})
 

@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+package expra.schema.v1;
+
+import "common.proto";
+
+message SceneDocument {
+  uint32 schema_version = 1;
+  string document_kind = 2;
+  string scene_id = 3;
+  string name = 4;
+  JsonObject camera = 5;
+  repeated Entity entities = 6;
+}

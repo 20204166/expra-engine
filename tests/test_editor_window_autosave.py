@@ -5,13 +5,16 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
-from expra_engine.core.engine import EngineRunState
+from expra_engine.core.engine import Engine, EngineRunState
 from expra_engine.core.scene import Scene
 from expra_engine.observability import ObservabilityWatcher
 from expra_engine.runtime.input import ActionId, InputMap, PhysicalInput
 from expra_engine.ui.editor_window import EditorWindow
+from tests.support.tk_display import display_available
+
+DISPLAY_AVAILABLE = display_available()
 
 
 class EditorWindowAutosaveTests(unittest.TestCase):
@@ -149,6 +152,27 @@ class RecentProjectsMenuTests(unittest.TestCase):
         window._populate_recent_projects()
 
         window._recent_menu.add_command.assert_called_once_with(label="(none)", state="disabled")
+
+
+class EditorPreferencesIsolationTests(unittest.TestCase):
+    @unittest.skipUnless(DISPLAY_AVAILABLE, "no display for real Tk editor tests")
+    def test_editor_window_uses_a_private_preferences_path(self) -> None:
+        import expra_engine.ui.editor_window as editor_window_module
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "preferences.json"
+            recent_project = Path(directory) / "project"
+            recent_project.mkdir()
+            path.write_text(
+                json.dumps({"schema_version": 1, "recent_projects": [str(recent_project)]}),
+                encoding="utf-8",
+            )
+            with patch.object(editor_window_module, "_PREFERENCES_PATH", path):
+                window = EditorWindow(Engine())
+            try:
+                self.assertEqual(window._preferences.recent_projects, (str(recent_project),))
+            finally:
+                window._on_close()
 
 
 if __name__ == "__main__":

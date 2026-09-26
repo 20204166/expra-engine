@@ -20,7 +20,7 @@ def create_runtime(pygame_module: Any) -> PygameRuntime:
     engine = Engine()
     engine.set_project(project)
     engine.set_script_registry(ScriptRegistry(project.path))
-    engine.set_scene(project.load_scene())
+    engine.set_scene(project.load_document())
     renderer = PygameRenderer(
         pygame_module,
         None,

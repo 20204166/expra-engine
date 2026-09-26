@@ -134,7 +134,7 @@ class TestSceneSerialization(unittest.TestCase):
         self.assertEqual(scene.scene_id, "m-1")
         self.assertIsNotNone(scene.find_entity("o-1"))
 
-    def test_from_dict_with_unknown_component_type_skips(self) -> None:
+    def test_from_dict_with_unknown_component_type_preserves_payload(self) -> None:
         data = {
             "scene_id": "s-1",
             "name": "Test",
@@ -152,7 +152,7 @@ class TestSceneSerialization(unittest.TestCase):
         entity = scene.find_entity("e-1")
         self.assertIsNotNone(entity)
         assert entity is not None
-        self.assertEqual(len(entity.components), 0)
+        self.assertEqual(entity.to_dict()["components"], [{"type": "unknown_future_type"}])
 
 
 class TestSceneWorldPose(unittest.TestCase):

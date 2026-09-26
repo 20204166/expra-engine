@@ -6,12 +6,11 @@ components. Hierarchy (parent/child) is supported via optional parent_id.
 
 from __future__ import annotations
 
-import contextlib
 import inspect
 import uuid
 from typing import TYPE_CHECKING, Any, TypeVar
 
-from expra_engine.core.component import Component, component_from_dict
+from expra_engine.core.component import Component, OpaqueComponent, component_from_dict
 
 if TYPE_CHECKING:
     from expra_engine.runtime.behaviour import Behaviour, BehaviourFactory
@@ -207,8 +206,11 @@ class Entity:
         for tag in data.get("tags", []):
             entity.add_tag(str(tag))
         for component_data in data.get("components", []):
-            with contextlib.suppress(ValueError, KeyError):
+            try:
                 entity.add_component(component_from_dict(component_data))
+            except (ValueError, KeyError):
+                if isinstance(component_data, dict) and isinstance(component_data.get("type"), str):
+                    entity.add_component(OpaqueComponent(component_data))
         return entity
 
     def __repr__(self) -> str:

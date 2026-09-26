@@ -52,19 +52,20 @@ class BlacksiteLevel3BuildTests(unittest.TestCase):
             working_root = Path(directory) / "blacksite_relay"
             _copy_project(BLACKSITE, working_root)
             # The real Blacksite example already permanently ships this
-            # session's own "scenes/level_03_test_cell.json" (the persistent
+            # session's own "levels/level_03_test_cell.level.pb" (the persistent
             # deliverable this test's build sequence produces) -- remove it
             # from the copied fixture so the test always builds it fresh and
             # stays a faithful regression check, independent of whatever the
             # real example directory currently contains.
             (working_root / "scenes" / "level_03_test_cell.json").unlink(missing_ok=True)
+            (working_root / "levels" / "level_03_test_cell.level.pb").unlink(missing_ok=True)
             project = Project.load(working_root)
 
             window = EditorWindow(Engine())
             try:
                 # 1. Open the project through the real editor bridge -- this
                 # is the same ProjectWorkflow.open_loaded() a human's
-                # File > Open Project triggers, landing on scenes/main.json.
+                # File > Open Project triggers, landing on levels/main.level.pb.
                 window._project_workflow.open_loaded(project)
                 window._root.update()
                 base_entity_count = len(window._engine.edit_scene.entities)  # type: ignore[union-attr]
@@ -79,7 +80,7 @@ class BlacksiteLevel3BuildTests(unittest.TestCase):
                 scene = window._engine.edit_scene
                 self.assertEqual(scene.name, "level_03_test_cell")  # type: ignore[union-attr]
                 self.assertEqual(len(scene.entities), base_entity_count)  # type: ignore[union-attr]
-                new_scene_path = project.scene_file("scenes/level_03_test_cell.json")
+                new_scene_path = project.document_file("levels/level_03_test_cell.level.pb")
                 self.assertTrue(new_scene_path.is_file())
 
                 # 3. Different arena size -- via the same SetExposedValueCommand
@@ -244,7 +245,7 @@ class BlacksiteLevel3BuildTests(unittest.TestCase):
             try:
                 reopened_window._project_workflow.open_loaded(reopened_project)
                 reopened_window._root.update()
-                reopened_window._project_workflow.open_scene("scenes/level_03_test_cell.json")
+                reopened_window._project_workflow.open_scene("levels/level_03_test_cell.level.pb")
                 reopened_window._root.update()
                 reopened_scene = reopened_window._engine.edit_scene
                 assert reopened_scene is not None

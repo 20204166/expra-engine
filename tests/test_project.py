@@ -8,10 +8,16 @@ from pathlib import Path
 from expra_engine.core.component import TransformComponent
 from expra_engine.core.project import Project, ProjectError
 from expra_engine.core.scene import (
+    Level,
+    LevelMetadata,
     Scene,
     SceneInstanceComponent,
     SceneInstanceCycleError,
     SceneInstanceSourceError,
+)
+from expra_engine.core.scene.document_codec import (
+    decode_protobuf_document,
+    encode_protobuf,
 )
 from expra_engine.filesystem import ResourceId
 
@@ -69,11 +75,82 @@ class TestProjectCreateAndSave(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             project = Project.create("My Game", Path(tmp) / "My Game")
             self.assertTrue(project.scripts_dir.is_dir())
-            self.assertEqual(project.start_scene, "scenes/main.json")
-            self.assertEqual(project.load_scene().name, "Main")
+            self.assertEqual(project.start_scene, "scenes/main.scene.pb")
+            self.assertEqual(project.load_document().name, "Main")
             data = json.loads(project.project_file.read_text())
             self.assertEqual(data["schema_version"], 1)
+            self.assertEqual(data["entrypoint"], "scenes/main.scene.pb")
             self.assertEqual(data["game_version"], "0.1.0")
+
+    def test_new_project_persists_its_starter_document_as_typed_pb(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Project.create("PB Project", Path(tmp) / "project")
+            self.assertEqual(project.entrypoint, "scenes/main.scene.pb")
+            self.assertTrue(project.document_file().is_file())
+            self.assertFalse((project.path / "scenes" / "main.json").exists())
+            self.assertEqual(project.load_document().name, "Main")
+
+    def test_pb_document_save_load_is_deterministic_and_extension_checked(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Project.create("PB Project", Path(tmp) / "project")
+            scene = Scene("Door", scene_id="door-1")
+            scene.create_entity("Door Body", entity_id="door-body")
+            path = "scenes/door.scene.pb"
+
+            project.save_document(scene, path)
+            first = project.document_file(path).read_bytes()
+            loaded = project.load_document(path)
+            project.save_document(loaded, path)
+            second = project.document_file(path).read_bytes()
+
+            self.assertEqual(first, second)
+            self.assertEqual(decode_protobuf_document(first).scene_id, "door-1")
+            with self.assertRaisesRegex(ProjectError, "extension"):
+                project.save_document(scene, "levels/wrong.level.pb")
+
+    def test_typed_pb_load_rejects_kind_mismatch_and_corruption(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Project.create("PB Project", Path(tmp) / "project")
+            level = Level("Deepcore", scene_id="deepcore")
+            wrong_kind_path = project.path / "scenes" / "wrong.scene.pb"
+            wrong_kind_path.parent.mkdir(parents=True, exist_ok=True)
+            wrong_kind_path.write_bytes(encode_protobuf(level))
+            with self.assertRaisesRegex(ProjectError, "expected a scene document"):
+                project.load_document("scenes/wrong.scene.pb")
+
+            corrupt_path = project.path / "scenes" / "corrupt.scene.pb"
+            corrupt_path.write_bytes(b"not a protobuf document")
+            with self.assertRaisesRegex(ProjectError, "corrupt protobuf"):
+                project.load_document("scenes/corrupt.scene.pb")
+
+    def test_explicit_migration_writes_pb_and_preserves_legacy_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Project.create("Migration", Path(tmp) / "project")
+            source = Scene("Reusable Door", scene_id="door")
+            project.save_scene(source, "scenes/door.json")
+            main = Scene("Main", scene_id="main")
+            root = main.create_entity("Door Instance", entity_id="door-instance")
+            root.add_component(SceneInstanceComponent("scenes/door.json"))
+            project.save_scene(main, "scenes/main.json")
+            project._entrypoint = "scenes/main.json"
+            project.register_scene_path("scenes/door.json")
+            project.register_scene_path("scenes/main.json")
+            project.save()
+
+            mapping = project.migrate_to_protobuf()
+
+            self.assertEqual(mapping["scenes/door.json"], "scenes/door.scene.pb")
+            self.assertEqual(mapping["scenes/main.json"], "scenes/main.scene.pb")
+            self.assertTrue((project.path / "scenes/door.json").is_file())
+            self.assertTrue((project.path / "scenes/main.json").is_file())
+            self.assertTrue((project.path / "scenes/main.scene.pb").is_file())
+            self.assertEqual(project.entrypoint, "scenes/main.scene.pb")
+            migrated = project.load_document("scenes/main.scene.pb")
+            instance = migrated.find_entity("door-instance")
+            assert instance is not None
+            component = instance.get_component(SceneInstanceComponent)
+            assert component is not None
+            self.assertEqual(component.source_path, "scenes/door.scene.pb")
 
     def test_create_rejects_non_empty_destination_without_touching_it(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -103,6 +180,86 @@ class TestProjectCreateAndSave(unittest.TestCase):
             with self.assertRaises(ProjectError):
                 Project.load(root)
 
+    def test_canonical_manifest_separates_resource_and_script_entrypoints(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "levels").mkdir()
+            (root / "scripts").mkdir()
+            (root / "project.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "name": "Canonical",
+                        "entrypoint": "levels/main.level.json",
+                        "script_entry_point": "scripts/game.py",
+                        "scenes": ["scenes/room.scene.json"],
+                        "levels": ["levels/main.level.json"],
+                    }
+                )
+            )
+
+            project = Project.load(root)
+
+            self.assertEqual(project.entrypoint, "levels/main.level.json")
+            self.assertEqual(project.start_scene, "levels/main.level.json")
+            self.assertEqual(project.script_entry_point, "scripts/game.py")
+            self.assertEqual(project.entry_point, "scripts/game.py")
+            self.assertEqual(project.to_dict()["entrypoint"], "levels/main.level.json")
+            self.assertNotIn("start_scene", project.to_dict())
+            self.assertNotIn("entry_point", project.to_dict())
+
+    def test_legacy_manifest_migrates_in_memory_without_rewriting_on_load(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "scenes").mkdir()
+            (root / "scripts").mkdir()
+            manifest = {
+                "name": "Legacy",
+                "start_scene": "scenes/main.json",
+                "entry_point": "game.py",
+            }
+            manifest_path = root / "project.json"
+            manifest_path.write_text(json.dumps(manifest))
+
+            project = Project.load(root)
+
+            self.assertEqual(project.entrypoint, "scenes/main.json")
+            self.assertEqual(project.script_entry_point, "game.py")
+            self.assertEqual(json.loads(manifest_path.read_text()), manifest)
+
+    def test_conflicting_canonical_and_legacy_entrypoints_fail_clearly(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "project.json").write_text(
+                json.dumps(
+                    {
+                        "name": "Conflict",
+                        "entrypoint": "scenes/canonical.json",
+                        "start_scene": "scenes/legacy.json",
+                    }
+                )
+            )
+
+            with self.assertRaisesRegex(ProjectError, "entrypoint"):
+                Project.load(root)
+
+    def test_document_io_dispatches_level_without_creating_a_second_graph(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Project.create("Documents", Path(tmp) / "project")
+            level = Level(
+                "Main Level",
+                scene_id="level-1",
+                level_metadata=LevelMetadata(display_name="Main"),
+            )
+            level.create_entity("Player", entity_id="player")
+
+            project.save_document(level, "levels/main.level.pb")
+            loaded = project.load_document("levels/main.level.pb")
+
+            self.assertIsInstance(loaded, Level)
+            self.assertIs(loaded.entities[0].__class__, level.entities[0].__class__)
+            self.assertEqual(loaded.level_metadata.display_name, "Main")  # type: ignore[union-attr]
+
     def test_scene_paths_cannot_escape_project(self) -> None:
         project = Project("Game", Path("/tmp/game"))
         with self.assertRaises(ProjectError):
@@ -127,9 +284,9 @@ class TestProjectCreateAndSave(unittest.TestCase):
     def test_register_scene_path_idempotent(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project = Project("Game", Path(tmp))
-            project.register_scene_path("s/a.json")
-            project.register_scene_path("s/a.json")
-            self.assertEqual(project.scene_paths().count("s/a.json"), 1)
+            project.register_scene_path("scenes/a.json")
+            project.register_scene_path("scenes/a.json")
+            self.assertEqual(project.scene_paths().count("scenes/a.json"), 1)
 
 
 class TestProjectActiveScene(unittest.TestCase):

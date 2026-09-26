@@ -242,9 +242,23 @@ class EditorSessionResult(BaseModel):
 
 class PerformanceProbeResult(BaseModel):
     action: str
-    iterations: int
-    duration_seconds: float
-    verdict: str  # "bounded" | "growing" | "inconclusive"
+    iterations: int = 0
+    duration_seconds: float = 0.0
+    verdict: str = "measured"  # "bounded" | "growing" | "inconclusive" | "measured"
+    resource: str | None = None
+    format: str | None = None
+    kind: str | None = None
+    bytes: int | None = None
+    entities: int | None = None
+    components: int | None = None
+    instances: int | None = None
+    sha256: str | None = None
+    first_load_total_ms: float | None = None
+    observer_enabled: bool | None = None
+    stages: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    comparisons: list[dict[str, Any]] = Field(default_factory=list)
+    error: str | None = None
+    failed_stage: str | None = None
     resource_cache_count_before: int | None = None
     resource_cache_count_after: int | None = None
     logger_handler_count_before: int | None = None

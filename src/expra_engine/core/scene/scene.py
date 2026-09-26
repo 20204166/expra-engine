@@ -14,6 +14,7 @@ import uuid
 from typing import Any
 
 from expra_engine.core.component import TransformComponent
+from expra_engine.core.document_kind import DocumentKind
 from expra_engine.core.entity import Entity
 from expra_engine.core.math_utils import compose_2d_pose
 from expra_engine.core.scene.camera import SceneCamera
@@ -34,6 +35,8 @@ class Scene:
     - create_entity / remove_entity / find_entity
     - to_dict / from_dict (JSON-round-trippable)
     """
+
+    document_kind = DocumentKind.SCENE
 
     def __init__(
         self,

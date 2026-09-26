@@ -75,14 +75,64 @@ class TestAssetNormalization(unittest.TestCase):
         )
         self.assertEqual(entry.kind, "Scene")
 
-    def test_json_outside_scenes_is_not_a_scene_entry(self) -> None:
+    def test_project_manifest_is_not_a_scene_entry(self) -> None:
         entry = AssetEntry(
             Path("/proj/project.json"),
             "project.json",
             False,
             ResourceId.from_project_path("project.json", scheme="project"),
         )
-        self.assertEqual(entry.kind, "File")
+        self.assertEqual(entry.kind, "Project")
+
+    def test_typed_pb_documents_are_not_generic_files(self) -> None:
+        self.assertEqual(
+            AssetEntry(
+                Path("/proj/levels/deepcore.level.pb"),
+                "deepcore.level.pb",
+                False,
+                ResourceId.from_project_path("levels/deepcore.level.pb", scheme="project"),
+            ).kind,
+            "Level",
+        )
+        self.assertEqual(
+            AssetEntry(
+                Path("/proj/scenes/security_door.scene.pb"),
+                "security_door.scene.pb",
+                False,
+                ResourceId.from_project_path("scenes/security_door.scene.pb", scheme="project"),
+            ).kind,
+            "Scene",
+        )
+
+    def test_typed_project_documents_and_scripts_have_canonical_labels(self) -> None:
+        self.assertEqual(
+            AssetEntry(
+                Path("/proj/levels/main.level.json"),
+                "main.level.json",
+                False,
+                ResourceId.from_project_path("levels/main.level.json", scheme="project"),
+            ).kind,
+            "Level",
+        )
+        self.assertEqual(
+            AssetEntry(
+                Path("/proj/scenes/room.scene.json"),
+                "room.scene.json",
+                False,
+                ResourceId.from_project_path("scenes/room.scene.json", scheme="project"),
+            ).kind,
+            "Scene",
+        )
+        self.assertEqual(
+            AssetEntry(
+                Path("/proj/project.json"),
+                "project.json",
+                False,
+                ResourceId.from_project_path("project.json", scheme="project"),
+            ).kind,
+            "Project",
+        )
+        self.assertEqual(AssetEntry(Path("game.py"), "game.py", False).kind, "Script")
 
 
 class TestAssetBrowserState(unittest.TestCase):

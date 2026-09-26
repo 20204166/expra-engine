@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 import uuid
 from dataclasses import replace
 from pathlib import Path
@@ -10,7 +12,7 @@ from tkinter import filedialog, messagebox, simpledialog
 from typing import Any
 
 from expra_engine.core.project import Project, ProjectError
-from expra_engine.core.scene import Scene
+from expra_engine.core.scene import Level, Scene
 from expra_engine.runtime.input import ActionId, PhysicalInput
 from expra_engine.runtime.script_registry import ScriptRegistry
 
@@ -21,6 +23,7 @@ class ProjectWorkflow:
     def __init__(self, window: Any) -> None:
         self.window = window
         self._pending_restore: tuple[Any, Path | None] | None = None
+        self._project_process: subprocess.Popen[bytes] | None = None
 
     def new_project(self) -> None:
         window = self.window
@@ -116,6 +119,7 @@ class ProjectWorkflow:
         window = self.window
         if not self._confirm_switch():
             return
+        self.stop_project()
         if window._engine.run_state.value != "edit":
             window._engine.stop()
         self._pending_restore = None
@@ -150,7 +154,7 @@ class ProjectWorkflow:
 
     def open_loaded(self, project: Project) -> None:
         window = self.window
-        scene = project.load_scene()
+        scene = project.load_document(observer=window._observer)
         window._engine.set_project(project)
         window._engine.set_scene(scene)
         window._viewport.set_resource_service(project.resource_service(observer=window._observer))
@@ -164,7 +168,7 @@ class ProjectWorkflow:
             recent_projects=tuple(dict.fromkeys(recent))[:10],
         )
         window._selected_ids = ()
-        window._last_save_path = project.scene_file()
+        window._last_save_path = project.document_file()
         window._root.title(self.window_title())
         window._update_project_actions()
         window._console.log(f"[Editor] Opened project: {project.name}")
@@ -192,7 +196,7 @@ class ProjectWorkflow:
         relative = self._current_relative_path(project)
         if relative is None:
             return f"{project.name} — Expra Editor"
-        suffix = " (main)" if relative == project.start_scene else ""
+        suffix = " (main)" if relative == project.entrypoint else ""
         return f"{project.name} — {relative}{suffix} — Expra Editor"
 
     def open_scene(self, relative_path: str | None = None) -> None:
@@ -205,7 +209,11 @@ class ProjectWorkflow:
             selected = filedialog.askopenfilename(
                 title="Open Scene",
                 initialdir=str(project.scenes_dir),
-                filetypes=[("Scene files", "*.json")],
+                filetypes=[
+                    ("Scene documents", "*.scene.pb"),
+                    ("Level documents", "*.level.pb"),
+                    ("Legacy JSON", "*.json"),
+                ],
             )
             if not selected:
                 return
@@ -219,12 +227,12 @@ class ProjectWorkflow:
         if not self._confirm_switch():
             return
         try:
-            scene = project.load_scene(relative_path)
+            scene = project.load_document(relative_path, observer=window._observer)
         except ProjectError as exc:
             messagebox.showerror("Open Scene", str(exc), parent=window._root)
             return
         window._engine.set_scene(scene)
-        window._last_save_path = project.scene_file(relative_path)
+        window._last_save_path = project.document_file(relative_path)
         window._selected_ids = ()
         window._root.title(self.window_title())
         window._console.log(f"[Editor] Opened scene: {relative_path}")
@@ -238,11 +246,19 @@ class ProjectWorkflow:
             messagebox.showwarning("Save Scene As", "No scene to save.", parent=window._root)
             return
         project = window._engine.project
+        is_level = isinstance(scene, Level)
+        extension = ".level.pb" if is_level else ".scene.pb"
+        file_type = "Level documents" if is_level else "Scene documents"
+        initial_dir = (
+            (project.levels_dir if is_level else project.scenes_dir)
+            if project is not None
+            else None
+        )
         path = filedialog.asksaveasfilename(
             title="Save Scene As",
-            defaultextension=".json",
-            filetypes=[("Scene files", "*.json")],
-            initialdir=str(project.scenes_dir) if project is not None else None,
+            defaultextension=extension,
+            filetypes=[(file_type, f"*{extension}"), ("Legacy JSON", "*.json")],
+            initialdir=str(initial_dir) if initial_dir is not None else None,
         )
         if not path:
             return
@@ -260,9 +276,56 @@ class ProjectWorkflow:
                 "Save Scene As", "Scene must be saved inside the project.", parent=window._root
             )
             return
-        project.save_scene(scene, relative)
+        project.save_document(scene, relative)
         window._root.title(self.window_title())
         window._console.log(f"[Editor] Scene saved as: {relative}")
+
+    def save_scene(self) -> None:
+        window = self.window
+        scene = window._engine.edit_scene
+        if scene is None:
+            messagebox.showwarning("Save Scene", "No scene to save.")
+            return
+        project = window._engine.project
+        if project is not None and window._last_save_path is not None:
+            relative = window._last_save_path.resolve().relative_to(project.path)
+            if relative.suffix.casefold() == ".json":
+                mapping = project.migrate_to_protobuf()
+                relative = Path(mapping.get(relative.as_posix(), relative.as_posix()))
+                window._last_save_path = project.document_file(relative.as_posix())
+                window._console.log("[Editor] Migrated legacy JSON documents to canonical PB")
+            project.save_document(scene, relative.as_posix())
+            window._console.log(f"[Editor] Scene saved: {window._last_save_path}")
+            return
+        path = filedialog.asksaveasfilename(
+            title="Save Scene",
+            defaultextension=".json",
+            filetypes=[("Scene files", "*.json")],
+        )
+        if path:
+            window._last_save_path = Path(path)
+            self.save_scene_silent()
+            window._console.log(f"[Editor] Scene saved: {path}")
+
+    def save_scene_silent(self) -> None:
+        """Save to the last selected path without opening a dialog."""
+        window = self.window
+        if window._last_save_path is None or window._engine.edit_scene is None:
+            return
+        scene = window._engine.edit_scene
+        project = window._engine.project
+        if project is None:
+            window._last_save_path.write_text(
+                json.dumps(scene.to_dict(), indent=2), encoding="utf-8"
+            )
+            return
+        relative = window._last_save_path.resolve().relative_to(project.path).as_posix()
+        if relative.casefold().endswith(".json"):
+            mapping = project.migrate_to_protobuf()
+            relative = mapping.get(relative, relative)
+            window._last_save_path = project.document_file(relative)
+            window._console.log("[Editor] Migrated legacy JSON documents to canonical PB")
+        project.save_document(scene, relative)
 
     def duplicate_scene(self, name: str | None = None) -> None:
         """Copy the current edit scene into a new, independent scene file."""
@@ -275,8 +338,11 @@ class ProjectWorkflow:
             name = simpledialog.askstring("Duplicate Scene", "New scene name:", parent=window._root)
         if not name:
             return
-        relative = f"scenes/{Path(name).stem}.json"
-        if project.scene_file(relative).exists():
+        if isinstance(scene, Level):
+            relative = f"levels/{Path(name).stem}.level.pb"
+        else:
+            relative = f"scenes/{Path(name).stem}.scene.pb"
+        if project.document_file(relative).exists():
             messagebox.showerror(
                 "Duplicate Scene", f"Scene already exists: {relative}", parent=window._root
             )
@@ -284,34 +350,56 @@ class ProjectWorkflow:
         data = scene.to_dict()
         data["scene_id"] = str(uuid.uuid4())
         data["name"] = name
-        duplicate = Scene.from_dict(data)
-        project.save_scene(duplicate, relative)
+        duplicate = Level.from_dict(data) if isinstance(scene, Level) else Scene.from_dict(data)
+        project.save_document(duplicate, relative)
         window._engine.set_scene(duplicate)
-        window._last_save_path = project.scene_file(relative)
+        window._last_save_path = project.document_file(relative)
         window._selected_ids = ()
         window._root.title(self.window_title())
         window._console.log(f"[Editor] Duplicated scene as: {relative}")
         window._present_all()
 
     def run_project(self) -> None:
-        """Play from the project's start scene, restoring the prior scene on Stop."""
+        """Launch the project's Python entry point independently of the edit scene."""
         window = self.window
         project = window._engine.project
-        if project is None or project.start_scene is None:
-            window._act_play()
+        if project is None:
             return
-        if self._current_relative_path(project) == project.start_scene:
-            window._act_play()
+        if self._project_process is not None:
+            if self._project_process.poll() is None:
+                return
+            self._project_process = None
+        script = project.path / project.script_entry_point
+        if not script.is_file():
+            messagebox.showerror(
+                "Run Project", f"Script entry point not found: {script}", parent=window._root
+            )
             return
         try:
-            start_scene = project.load_scene(project.start_scene)
-        except ProjectError as exc:
+            self._project_process = subprocess.Popen(
+                [sys.executable, str(script)],
+                cwd=project.path,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except OSError as exc:
             messagebox.showerror("Run Project", str(exc), parent=window._root)
             return
-        self._pending_restore = (window._engine.edit_scene, window._last_save_path)
-        window._engine.set_scene(start_scene)
-        window._last_save_path = project.scene_file(project.start_scene)
-        window._act_play()
+        window._console.log(f"[Editor] Started project: {project.script_entry_point}")
+
+    def stop_project(self) -> None:
+        """Terminate a child launched by Run Project, if it is still alive."""
+        process = self._project_process
+        self._project_process = None
+        if process is None or process.poll() is not None:
+            return
+        process.terminate()
+        try:
+            process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=2)
 
     def restore_after_run_project(self) -> None:
         """Undo ``run_project``'s scene swap once the run has stopped."""

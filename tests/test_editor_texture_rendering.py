@@ -34,7 +34,11 @@ from expra_engine.runtime.rendering import (
     Transform,
     Viewport,
 )
-from expra_engine.runtime.visual_components import PrimitiveComponent, SpriteComponent
+from expra_engine.runtime.visual_components import (
+    PrimitiveComponent,
+    SpriteComponent,
+    TextComponent,
+)
 from expra_engine.ui.editor_pixel_renderer import (
     EditorPixelRenderer,
     PillowEditorPhotoImage,
@@ -148,9 +152,19 @@ def test_editor_pixel_bridge_returns_none_for_incomplete_backend_frames(caplog) 
 
 
 def test_editor_pixel_bridge_logs_missing_resource_provider(caplog) -> None:
+    textured = RenderFrame(
+        (
+            RenderItem(
+                "sprite",
+                PrimitiveDescriptor("sprite", (1.0, 1.0)),
+                Transform(),
+                material=MaterialDescriptor(texture_id="assets://missing.png"),
+            ),
+        )
+    )
     with caplog.at_level(logging.ERROR, logger="expra_engine.ui.editor_pixel_renderer"):
         image = render_editor_frame_to_tk_image(
-            RenderFrame(),
+            textured,
             RenderContext(Viewport(0, 0, 160, 90)),
             width=160,
             height=90,
@@ -162,6 +176,33 @@ def test_editor_pixel_bridge_logs_missing_resource_provider(caplog) -> None:
 
     assert image is None
     assert "[EditorTexture] renderer has no resource provider" in caplog.text
+
+
+def test_textureless_editor_frame_without_project_resources_logs_no_error(caplog) -> None:
+    pytest.importorskip("pygame")
+    try:
+        root = tk.Tk()
+    except tk.TclError:
+        pytest.skip("no display for editor presentation test")
+
+    scene = Scene("No Project")
+    rectangle = scene.create_entity("Rectangle")
+    rectangle.add_component(TransformComponent())
+    rectangle.add_component(PrimitiveComponent())
+    label = scene.create_entity("Label")
+    label.add_component(TransformComponent(y=2.0))
+    label.add_component(TextComponent(text="No project assets needed"))
+    frame = extract_render_frame(scene)
+    renderer = EditorPixelRenderer()
+    try:
+        with caplog.at_level(logging.ERROR, logger="expra_engine.ui.editor_pixel_renderer"):
+            image = renderer.render(frame, ViewportCamera(), 160, 90, root)
+            root.update()
+
+        assert image is None
+        assert "renderer has no resource provider" not in caplog.text
+    finally:
+        root.destroy()
 
 
 def test_editor_pixel_renderer_logs_presentation_failure(monkeypatch, caplog) -> None:
@@ -992,7 +1033,7 @@ def test_pillow_bridge_reallocates_photoimage_on_resize(tmp_path: Path) -> None:
     so a viewport resize must allocate a fresh PillowEditorPhotoImage rather
     than corrupt/truncate the reused one -- see PATCH spec section 9/13.
     """
-    pygame = pytest.importorskip("pygame")
+    pytest.importorskip("pygame")
     try:
         root = tk.Tk()
     except tk.TclError:

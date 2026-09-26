@@ -2,9 +2,11 @@
   "schema_version": 1,
   "name": "Space Pong",
   "game_version": "1.0.0",
-  "start_scene": "scene/main.json",
-  "entry_point": "__main__.py",
-  "scenes": ["scene/main.json"],
+  "scenes": [],
+  "entrypoint": "levels/main.level.pb",
+  "levels": [
+    "levels/main.level.pb"
+  ],
   "input": {
     "left_up": "keyboard:w",
     "left_down": "keyboard:s",

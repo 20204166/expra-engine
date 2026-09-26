@@ -1,13 +1,12 @@
 """Tests for Phase F multi-level workflow: Open/Save As/Duplicate Scene, Run Project.
 
 Also regression-covers the ``_act_save_scene_silent`` fix: saving must always
-route through ``Project.save_scene`` (which omits resolve-from-source scene-
+route through ``Project.save_document`` (which omits resolve-from-source scene-
 instance content), never a raw ``scene.to_dict()`` write.
 """
 
 from __future__ import annotations
 
-import json
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -17,6 +16,7 @@ from expra_engine.core.component import TransformComponent
 from expra_engine.core.engine import Engine, EngineRunState
 from expra_engine.core.project import Project
 from expra_engine.core.scene import Scene, SceneInstanceComponent
+from expra_engine.core.scene.document_codec import decode_protobuf
 from expra_engine.ui.editor_window import EditorWindow
 from tests.support.tk_display import display_available
 
@@ -27,10 +27,7 @@ def _make_project(root: Path) -> Project:
     project = Project.create("Test Project", root / "Test Project")
     second = Scene("Level Two")
     second.create_entity("Marker")
-    (project.scenes_dir / "level_two.json").write_text(
-        json.dumps(second.to_dict(), indent=2), encoding="utf-8"
-    )
-    project.register_scene_path("scenes/level_two.json")
+    project.save_document(second, "scenes/level_two.scene.pb")
     project.save()
     return project
 
@@ -39,9 +36,8 @@ def _make_room_segment(root: Path) -> None:
     """A tiny reusable scene under scenes/ for instance-leak regression tests."""
     room = Scene("Room Segment")
     room.create_entity("Door")
-    (root / "scenes" / "room_segment.json").write_text(
-        json.dumps(room.to_dict(), indent=2), encoding="utf-8"
-    )
+    project = Project.load(root)
+    project.save_document(room, "scenes/room_segment.scene.pb")
 
 
 @unittest.skipUnless(DISPLAY_AVAILABLE, "no display for real Tk editor tests")
@@ -58,11 +54,11 @@ class MultiLevelWorkflowTests(unittest.TestCase):
             window, project = self._window_with_project(Path(directory))
             try:
                 self.assertEqual(window._engine.edit_scene.name, "Main")  # type: ignore[union-attr]
-                window._project_workflow.open_scene("scenes/level_two.json")
+                window._project_workflow.open_scene("scenes/level_two.scene.pb")
                 window._root.update()
                 self.assertEqual(window._engine.edit_scene.name, "Level Two")  # type: ignore[union-attr]
                 self.assertEqual(
-                    window._last_save_path, project.scene_file("scenes/level_two.json")
+                    window._last_save_path, project.document_file("scenes/level_two.scene.pb")
                 )
             finally:
                 window._on_close()
@@ -78,7 +74,7 @@ class MultiLevelWorkflowTests(unittest.TestCase):
                     "expra_engine.editor.project_workflow.messagebox.askyesnocancel",
                     return_value=None,  # Cancel
                 ):
-                    window._project_workflow.open_scene("scenes/level_two.json")
+                    window._project_workflow.open_scene("scenes/level_two.scene.pb")
                 self.assertEqual(window._engine.edit_scene.name, "Main")  # type: ignore[union-attr]
             finally:
                 window._on_close()
@@ -87,22 +83,22 @@ class MultiLevelWorkflowTests(unittest.TestCase):
         with TemporaryDirectory() as directory:
             window, project = self._window_with_project(Path(directory))
             try:
-                new_path = project.scenes_dir / "branched.json"
+                new_path = project.scenes_dir / "branched.scene.pb"
                 with patch(
                     "expra_engine.editor.project_workflow.filedialog.asksaveasfilename",
                     return_value=str(new_path),
                 ):
                     window._project_workflow.save_scene_as()
                 self.assertTrue(new_path.is_file())
-                self.assertIn("scenes/branched.json", project.scene_paths())
+                self.assertIn("scenes/branched.scene.pb", project.scene_paths())
                 self.assertEqual(window._last_save_path, new_path)
 
                 window._act_add_entity()
                 window._root.update()
                 window._act_save_scene()
-                saved = json.loads(new_path.read_text(encoding="utf-8"))
+                saved = decode_protobuf(new_path.read_bytes())
                 self.assertEqual(len(saved["entities"]), len(window._engine.edit_scene.entities))  # type: ignore[union-attr]
-                original = json.loads(project.scene_file().read_text(encoding="utf-8"))
+                original = decode_protobuf(project.document_file().read_bytes())
                 self.assertNotEqual(len(original["entities"]), len(saved["entities"]))
             finally:
                 window._on_close()
@@ -124,7 +120,7 @@ class MultiLevelWorkflowTests(unittest.TestCase):
                 scene = window._engine.edit_scene
                 instance_root = scene.create_entity("Room Instance")  # type: ignore[union-attr]
                 instance_root.add_component(TransformComponent(x=3.0, y=4.0))
-                instance_root.add_component(SceneInstanceComponent("scenes/room_segment.json"))
+                instance_root.add_component(SceneInstanceComponent("scenes/room_segment.scene.pb"))
                 from expra_engine.core.scene import resolve_scene_instances
 
                 resolve_scene_instances(
@@ -136,7 +132,7 @@ class MultiLevelWorkflowTests(unittest.TestCase):
                 window._last_save_path = project.scene_file()
                 window._act_save_scene_silent()
 
-                saved = json.loads(project.scene_file().read_text(encoding="utf-8"))
+                saved = decode_protobuf(project.document_file().read_bytes())
                 saved_ids = {entity["entity_id"] for entity in saved["entities"]}
                 self.assertIn(instance_root.entity_id, saved_ids)
                 materialized_ids = {
@@ -160,7 +156,7 @@ class MultiLevelWorkflowTests(unittest.TestCase):
             try:
                 scene = window._engine.edit_scene
                 instance_root = scene.create_entity("Room Instance")  # type: ignore[union-attr]
-                instance_root.add_component(SceneInstanceComponent("scenes/room_segment.json"))
+                instance_root.add_component(SceneInstanceComponent("scenes/room_segment.scene.pb"))
                 from expra_engine.core.scene import resolve_scene_instances
 
                 resolve_scene_instances(
@@ -173,7 +169,7 @@ class MultiLevelWorkflowTests(unittest.TestCase):
                 window._root.after_cancel(window._autosave_after_id)  # don't actually reschedule
                 window._act_save_scene_silent()
 
-                saved = json.loads(project.scene_file().read_text(encoding="utf-8"))
+                saved = decode_protobuf(project.document_file().read_bytes())
                 saved_ids = {entity["entity_id"] for entity in saved["entities"]}
                 self.assertIn(instance_root.entity_id, saved_ids)
                 self.assertEqual(len(saved["entities"]), 1)  # only the instance root, no children
@@ -189,8 +185,8 @@ class MultiLevelWorkflowTests(unittest.TestCase):
                 window._root.update()
                 self.assertEqual(window._engine.edit_scene.name, "main_copy")  # type: ignore[union-attr]
                 self.assertNotEqual(window._engine.edit_scene.scene_id, original_scene_id)  # type: ignore[union-attr]
-                self.assertIn("scenes/main_copy.json", project.scene_paths())
-                self.assertTrue((project.scenes_dir / "main_copy.json").is_file())
+                self.assertIn("scenes/main_copy.scene.pb", project.scene_paths())
+                self.assertTrue((project.scenes_dir / "main_copy.scene.pb").is_file())
             finally:
                 window._on_close()
 
@@ -207,11 +203,11 @@ class MultiLevelWorkflowTests(unittest.TestCase):
             finally:
                 window._on_close()
 
-    def test_run_project_from_a_non_start_scene_restores_it_on_stop(self) -> None:
+    def test_run_project_from_a_non_start_scene_preserves_edit_scene_on_stop(self) -> None:
         with TemporaryDirectory() as directory:
             window, project = self._window_with_project(Path(directory))
             try:
-                window._project_workflow.open_scene("scenes/level_two.json")
+                window._project_workflow.open_scene("scenes/level_two.scene.pb")
                 window._root.update()
                 window._act_add_entity()  # unsaved edit on Level Two
                 window._root.update()
@@ -219,8 +215,9 @@ class MultiLevelWorkflowTests(unittest.TestCase):
 
                 window._project_workflow.run_project()
                 window._root.update()
-                self.assertEqual(window._engine.run_state, EngineRunState.PLAY)
-                self.assertEqual(window._engine.edit_scene.name, "Main")  # type: ignore[union-attr]
+                self.assertIsNotNone(window._project_workflow._project_process)
+                self.assertEqual(window._engine.run_state, EngineRunState.EDIT)
+                self.assertEqual(window._engine.edit_scene.name, "Level Two")  # type: ignore[union-attr]
 
                 window._act_stop()
                 window._root.update()
@@ -231,21 +228,23 @@ class MultiLevelWorkflowTests(unittest.TestCase):
                     entity_count_before,  # type: ignore[union-attr]
                 )
                 self.assertEqual(
-                    window._last_save_path, project.scene_file("scenes/level_two.json")
+                    window._last_save_path, project.document_file("scenes/level_two.scene.pb")
                 )
             finally:
                 window._on_close()
 
-    def test_run_project_when_already_on_start_scene_behaves_like_plain_play(self) -> None:
+    def test_run_project_when_already_on_start_scene_starts_a_child_process(self) -> None:
         with TemporaryDirectory() as directory:
             window, _project = self._window_with_project(Path(directory))
             try:
                 before_scene_id = window._engine.edit_scene.scene_id  # type: ignore[union-attr]
                 window._project_workflow.run_project()
                 window._root.update()
-                self.assertEqual(window._engine.run_state, EngineRunState.PLAY)
+                self.assertIsNotNone(window._project_workflow._project_process)
+                self.assertEqual(window._engine.run_state, EngineRunState.EDIT)
                 window._act_stop()
                 window._root.update()
+                self.assertIsNone(window._project_workflow._project_process)
                 self.assertEqual(window._engine.edit_scene.scene_id, before_scene_id)  # type: ignore[union-attr]
             finally:
                 window._on_close()

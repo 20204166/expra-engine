@@ -37,7 +37,7 @@ async def test_expra_inspect_project(server) -> None:
         data = result.structured_content
         assert data["executed_project_code"] is False
         assert data["data"]["project"]["name"] == "Blacksite Relay"
-        assert "scenes/main.json" in data["data"]["project"]["scene_paths"]
+        assert "levels/main.level.pb" in data["data"]["project"]["level_paths"]
 
 
 async def test_expra_inspect_scene_lists_real_entities(server) -> None:

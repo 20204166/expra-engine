@@ -106,7 +106,7 @@ class AssetAndSceneInstanceDropTests(unittest.TestCase):
             project = _make_project_with_room(tmp)
             window = EditorWindow(Engine())
             try:
-                window._project_workflow.open_loaded(project)  # opens scenes/main.json
+                window._project_workflow.open_loaded(project)  # opens scenes/main.scene.pb
                 window._root.update()
                 scene = window._engine.edit_scene
                 before = len(scene.entities)
@@ -114,7 +114,7 @@ class AssetAndSceneInstanceDropTests(unittest.TestCase):
                 canvas = window._viewport._canvas
                 x_root = canvas.winfo_rootx() + canvas.winfo_width() // 2
                 y_root = canvas.winfo_rooty() + canvas.winfo_height() // 2
-                entry = _entry_for(project, "scenes/main.json")
+                entry = _entry_for(project, "scenes/main.scene.pb")
 
                 drop_asset_on_viewport(window, entry, x_root, y_root)
                 window._root.update()

@@ -12,7 +12,13 @@ from typing import Any, cast
 from expra_engine.observability import ObservabilityWatcher
 from expra_engine.runtime.pygame_renderer import PygameRenderer, PygameResourceProvider
 from expra_engine.runtime.render_diagnostics import RenderDiagnostics
-from expra_engine.runtime.rendering import OrthographicCamera, RenderContext, RenderFrame, Viewport
+from expra_engine.runtime.rendering import (
+    OrthographicCamera,
+    RenderContext,
+    RenderFrame,
+    RenderItem,
+    Viewport,
+)
 
 __all__ = (
     "EditorPixelRenderer",
@@ -63,7 +69,9 @@ def render_editor_frame_to_image(
         if encode_token is not None:
             assert observer is not None
             observer.finish(encode_token)
-        image_token = observer.begin("editor.pixelbridge.photoimage") if observer is not None else None
+        image_token = (
+            observer.begin("editor.pixelbridge.photoimage") if observer is not None else None
+        )
         image = image_factory(encoded)
         if image_token is not None:
             assert observer is not None
@@ -145,6 +153,13 @@ def encode_pygame_surface_fast(pygame_module: Any, surface: Any) -> bytes:
     )
 
 
+def _texture_id_for_item(item: RenderItem) -> str | None:
+    texture_id = item.material.texture_id
+    if texture_id is None and item.nine_slice is not None:
+        texture_id = item.nine_slice.texture_id
+    return texture_id
+
+
 def frame_textures_available(
     frame: RenderFrame,
     context: RenderContext,
@@ -159,9 +174,7 @@ def frame_textures_available(
         items = frame.visible_items(context)
         available = True
         for item in items:
-            texture_id = item.material.texture_id
-            if texture_id is None and item.nine_slice is not None:
-                texture_id = item.nine_slice.texture_id
+            texture_id = _texture_id_for_item(item)
             if (
                 texture_id is None
                 and item.text is None
@@ -336,7 +349,9 @@ def _render_pillow_bridge(
                 entity_names=entity_names,
             )
             return None
-        extract_token = observer.begin("editor.pixelbridge.extract") if observer is not None else None
+        extract_token = (
+            observer.begin("editor.pixelbridge.extract") if observer is not None else None
+        )
         rgba = pygame_module.image.tostring(surface, "RGBA")
         if extract_token is not None:
             assert observer is not None
@@ -348,7 +363,9 @@ def _render_pillow_bridge(
         if encode_token is not None:
             assert observer is not None
             observer.finish(encode_token)
-        upload_token = observer.begin("editor.pixelbridge.photoimage") if observer is not None else None
+        upload_token = (
+            observer.begin("editor.pixelbridge.photoimage") if observer is not None else None
+        )
         if (
             photo_image_reuse is not None
             and photo_image_reuse.width() == width
@@ -385,7 +402,7 @@ def render_editor_frame_to_tk_image(
     width: int,
     height: int,
     resource_service: Any | None,
-    resource_provider: PygameResourceProvider | None,
+    resource_provider: Callable[[str], Any | None] | None,
     pygame_module: Any,
     image_master: Any,
     diagnostics: RenderDiagnostics | None = None,
@@ -403,26 +420,20 @@ def render_editor_frame_to_tk_image(
     need, not a live Tk image).
     """
     diagnostics = diagnostics or RenderDiagnostics(_LOGGER)
-    if resource_service is None:
-        _log_presentation_failure(
-            frame,
-            "renderer has no resource provider",
-            diagnostics=diagnostics,
-            entity_names=entity_names,
-        )
-        return None
-    if resource_provider is None:
-        _log_presentation_failure(
-            frame,
-            "renderer has no resource provider",
-            diagnostics=diagnostics,
-            entity_names=entity_names,
-        )
+    provider = resource_provider
+    if provider is None:
+        if any(_texture_id_for_item(item) is not None for item in frame.visible_items(context)):
+            _log_presentation_failure(
+                frame,
+                "renderer has no resource provider",
+                diagnostics=diagnostics,
+                entity_names=entity_names,
+            )
         return None
     if not frame_textures_available(
         frame,
         context,
-        resource_provider,
+        provider,
         diagnostics=diagnostics,
         entity_names=entity_names,
     ):
@@ -445,7 +456,7 @@ def render_editor_frame_to_tk_image(
                 surface,
                 screen_size=(width, height),
                 arena_bounds=(0, 0, width, height),
-                resource_provider=resource_provider,
+                resource_provider=provider,
                 clear_color=None,
                 diagnostics=diagnostics,
                 observer=observer,
@@ -553,18 +564,13 @@ class EditorPixelRenderer:
         *,
         entity_names: Mapping[str, str] | None = None,
     ) -> Any | None:
-        if self._resource_service is None:
-            _log_presentation_failure(
-                frame,
-                "renderer has no resource provider",
-                diagnostics=self._diagnostics,
-                entity_names=entity_names,
-            )
-            return None
         try:
             import pygame  # type: ignore[reportMissingImports]
 
-            if self._provider_resources is not self._resource_service:
+            if (
+                self._resource_service is not None
+                and self._provider_resources is not self._resource_service
+            ):
                 self._provider = PygameResourceProvider(
                     pygame, self._resource_service, observer=self._observer
                 )
