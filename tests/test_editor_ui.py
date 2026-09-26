@@ -4,8 +4,10 @@ import tkinter as tk
 import unittest
 from contextlib import suppress
 from pathlib import Path
+from tkinter import ttk
 from types import SimpleNamespace
 from typing import Any, cast
+from unittest.mock import patch
 
 from expra_engine.core.component import TransformComponent
 from expra_engine.core.component_schema import PropertyDescriptor
@@ -14,9 +16,11 @@ from expra_engine.core.scene import Scene, SceneInstanceComponent
 from expra_engine.editor.assets import AssetEntry
 from expra_engine.editor.runtime_preview import RuntimePreviewLoop
 from expra_engine.filesystem import ResourceId
+from expra_engine.observability import ObservabilityWatcher
+from expra_engine.runtime.collider import ColliderComponent
 from expra_engine.runtime.rendering import Color
 from expra_engine.runtime.script_component import ScriptComponent
-from expra_engine.runtime.visual_components import TextComponent
+from expra_engine.runtime.visual_components import PrimitiveComponent, TextComponent
 from expra_engine.ui.asset_browser import AssetBrowserPanel
 from expra_engine.ui.editor_window import EditorWindow
 from expra_engine.ui.hierarchy import HierarchyPanel
@@ -26,6 +30,10 @@ from expra_engine.ui.viewport import ViewportPanel
 from tests.support.tk_display import display_available
 
 DISPLAY_AVAILABLE = display_available()
+
+
+def _tk_call_counters() -> dict[str, int]:
+    return {"insert": 0, "delete": 0, "item": 0, "move": 0}
 
 
 class RuntimePreviewLoopTests(unittest.TestCase):
@@ -200,6 +208,158 @@ class EditorPanelTests(unittest.TestCase):
         self.assertEqual(panel._tree.item(child, "text"), "hero.png")
         self.assertEqual(panel._tree.set(child, "logical_id"), "assets://textures/hero.png")
 
+    def test_asset_unchanged_refresh_reuses_rows_and_browser_state(self) -> None:
+        panel = AssetBrowserPanel(self.root, root_directory=self.root_path, coordinator=None)
+        panel.pack(fill="both", expand=True)
+        folder_path = self.root_path / "textures"
+        hero_path = folder_path / "hero.png"
+        folder = AssetEntry(folder_path, "textures", True, ResourceId.parse("assets://textures"))
+        hero = AssetEntry(
+            hero_path, "hero.png", False, ResourceId.parse("assets://textures/hero.png")
+        )
+        panel.render_entries((folder, hero))
+        folder_id = panel._iid_for_path(folder_path)
+        hero_id = panel._iid_for_path(hero_path)
+        panel._tree.item(folder_id, open=True)
+        panel._tree.selection_set(hero_id)
+        panel._on_select()
+
+        calls = _tk_call_counters()
+        for name in calls:
+            original = getattr(panel._tree, name)
+
+            def count_call(
+                *args: Any, _original: Any = original, _name: str = name, **kwargs: Any
+            ) -> Any:
+                calls[_name] += 1
+                return _original(*args, **kwargs)
+
+            setattr(panel._tree, name, count_call)
+
+        refreshed_folder = AssetEntry(
+            folder_path, "textures", True, ResourceId.parse("assets://textures")
+        )
+        refreshed_hero = AssetEntry(
+            hero_path, "hero.png", False, ResourceId.parse("assets://textures/hero.png")
+        )
+        panel.render_entries((refreshed_folder, refreshed_hero))
+        for _ in range(4):
+            panel.render_entries((refreshed_folder, refreshed_hero))
+
+        self.assertEqual(calls, {"insert": 0, "delete": 0, "item": 0, "move": 0})
+        self.assertEqual(len(panel._path_iids), len(panel._entries) + 1)
+        self.assertTrue(panel._tree.item(folder_id, "open"))
+        self.assertEqual(panel._tree.selection(), (hero_id,))
+        self.assertEqual(panel.selected_entry, refreshed_hero)
+
+    def test_asset_small_delta_preserves_surviving_selection_and_expansion(self) -> None:
+        panel = AssetBrowserPanel(self.root, root_directory=self.root_path, coordinator=None)
+        panel.pack(fill="both", expand=True)
+        folder_path = self.root_path / "textures"
+        first_path = folder_path / "a.png"
+        last_path = folder_path / "c.png"
+        added_path = folder_path / "b.png"
+        folder = AssetEntry(folder_path, "textures", True, ResourceId.parse("assets://textures"))
+        first = AssetEntry(first_path, "a.png", False, ResourceId.parse("assets://textures/a.png"))
+        last = AssetEntry(last_path, "c.png", False, ResourceId.parse("assets://textures/c.png"))
+        panel.render_entries((folder, first, last))
+        folder_id = panel._iid_for_path(folder_path)
+        first_id = panel._iid_for_path(first_path)
+        panel._tree.item(folder_id, open=True)
+        panel._tree.selection_set(first_id)
+        panel._on_select()
+
+        calls = _tk_call_counters()
+        for name in calls:
+            original = getattr(panel._tree, name)
+
+            def count_call(
+                *args: Any, _original: Any = original, _name: str = name, **kwargs: Any
+            ) -> Any:
+                calls[_name] += 1
+                return _original(*args, **kwargs)
+
+            setattr(panel._tree, name, count_call)
+
+        added = AssetEntry(added_path, "b.png", False, ResourceId.parse("assets://textures/b.png"))
+        refreshed_first = AssetEntry(
+            first_path, "a.png", False, ResourceId.parse("assets://textures/a.png")
+        )
+        refreshed_last = AssetEntry(
+            last_path, "c.png", False, ResourceId.parse("assets://textures/c.png")
+        )
+        panel.render_entries((folder, refreshed_first, added, refreshed_last))
+
+        self.assertEqual(calls, {"insert": 1, "delete": 0, "item": 0, "move": 0})
+        self.assertEqual(
+            panel._tree.get_children(folder_id),
+            tuple(panel._iid_for_path(path) for path in (first_path, added_path, last_path)),
+        )
+        self.assertEqual(panel._tree.selection(), (first_id,))
+        self.assertTrue(panel._tree.item(folder_id, "open"))
+        self.assertIs(panel.selected_entry, refreshed_first)
+
+    def test_asset_removal_clears_selection_and_folder_classification_updates(self) -> None:
+        panel = AssetBrowserPanel(self.root, root_directory=self.root_path, coordinator=None)
+        panel.pack(fill="both", expand=True)
+        node_path = self.root_path / "node"
+        file_entry = AssetEntry(node_path, "node", False, ResourceId.parse("assets://node"))
+        panel.render_entries((file_entry,))
+        node_id = panel._iid_for_path(node_path)
+        panel._tree.selection_set(node_id)
+        panel._on_select()
+
+        folder_entry = AssetEntry(node_path, "node", True, ResourceId.parse("assets://node"))
+        panel.render_entries((folder_entry,))
+        self.assertEqual(panel._tree.set(node_id, "kind"), "Folder")
+        self.assertEqual(panel._tree.selection(), (node_id,))
+        self.assertIs(panel.selected_entry, folder_entry)
+
+        panel.render_entries(())
+        self.assertEqual(panel._tree.selection(), ())
+        self.assertIsNone(panel.selected_entry)
+
+    def test_asset_folder_navigation_keeps_child_after_parent_branch_is_removed(self) -> None:
+        panel = AssetBrowserPanel(self.root, root_directory=self.root_path, coordinator=None)
+        panel.pack(fill="both", expand=True)
+        folder_path = self.root_path / "textures"
+        image_path = folder_path / "hero.png"
+        folder = AssetEntry(folder_path, "textures", True, ResourceId.parse("assets://textures"))
+        image = AssetEntry(
+            image_path, "hero.png", False, ResourceId.parse("assets://textures/hero.png")
+        )
+        panel.render_entries((folder, image))
+
+        panel._current_directory = folder_path
+        panel.render_entries((image,))
+
+        image_id = panel._iid_for_path(image_path)
+        self.assertTrue(panel._tree.exists(image_id))
+        self.assertEqual(panel._tree.parent(image_id), "")
+        self.assertEqual(panel._tree.get_children(""), (image_id,))
+
+    def test_asset_population_uses_one_stable_observability_target(self) -> None:
+        observer = ObservabilityWatcher()
+        panel = AssetBrowserPanel(
+            self.root,
+            root_directory=self.root_path,
+            coordinator=None,
+            observer=observer,
+        )
+        entry = AssetEntry(
+            self.root_path / "hero.png",
+            "hero.png",
+            False,
+            ResourceId.parse("assets://hero.png"),
+        )
+
+        panel.render_entries((entry,))
+
+        metrics = observer.snapshot().metrics
+        self.assertEqual(len(metrics), 1)
+        self.assertEqual(metrics[0].target, "ui:assets:populate")
+        self.assertEqual(metrics[0].count, 1)
+
     def test_hierarchy_render_retains_existing_items_and_selection(self) -> None:
         panel = HierarchyPanel(self.root)
         panel.pack(fill="both", expand=True)
@@ -218,6 +378,159 @@ class EditorPanelTests(unittest.TestCase):
         self.assertEqual(panel._tree.selection(), (entity.entity_id,))
         self.assertEqual(panel._tree.item(entity.entity_id, "text"), "[PLY] Player")
         self.assertTrue(panel._tree.item(entity.entity_id, "open"))
+
+    def test_unchanged_hierarchy_render_does_not_update_or_move_rows(self) -> None:
+        panel = HierarchyPanel(self.root)
+        panel.pack(fill="both", expand=True)
+        scene = Scene("Unchanged")
+        parent = scene.create_entity("Parent")
+        for index in range(20):
+            scene.create_entity(f"Child {index}", parent_id=parent.entity_id)
+        panel.render(scene)
+        self.root.update_idletasks()
+
+        calls = {"item": 0, "move": 0}
+        for name in calls:
+            original = getattr(panel._tree, name)
+
+            def count_call(
+                *args: Any, _original: Any = original, _name: str = name, **kwargs: Any
+            ) -> Any:
+                calls[_name] += 1
+                return _original(*args, **kwargs)
+
+            setattr(panel._tree, name, count_call)
+
+        panel.render(scene)
+
+        self.assertEqual(calls, {"item": 0, "move": 0})
+
+    def test_hierarchy_reconciles_one_rename_without_moving_unchanged_rows(self) -> None:
+        panel = HierarchyPanel(self.root)
+        panel.pack(fill="both", expand=True)
+        scene = Scene("Rename")
+        entities = [scene.create_entity(f"Entity {index}") for index in range(10)]
+        panel.render(scene)
+        calls = {"item": 0, "move": 0}
+        for name in calls:
+            original = getattr(panel._tree, name)
+
+            def count_call(
+                *args: Any, _original: Any = original, _name: str = name, **kwargs: Any
+            ) -> Any:
+                calls[_name] += 1
+                return _original(*args, **kwargs)
+
+            setattr(panel._tree, name, count_call)
+
+        entities[4].name = "Renamed"
+        panel.render(scene)
+
+        self.assertEqual(calls, {"item": 1, "move": 0})
+        self.assertEqual(panel._tree.item(entities[4].entity_id, "text"), "Renamed")
+
+    def test_hierarchy_reconciles_add_delete_reparent_and_enabled_state(self) -> None:
+        panel = HierarchyPanel(self.root)
+        panel.pack(fill="both", expand=True)
+        scene = Scene("Structural diff")
+        parent_a = scene.create_entity("Parent A")
+        parent_b = scene.create_entity("Parent B")
+        child = scene.create_entity("Child", parent_id=parent_a.entity_id)
+        panel.render(scene)
+
+        calls = _tk_call_counters()
+        originals = {name: getattr(panel._tree, name) for name in calls}
+
+        def watch(name: str) -> None:
+            original = originals[name]
+
+            def count_call(*args: Any, **kwargs: Any) -> Any:
+                calls[name] += 1
+                return original(*args, **kwargs)
+
+            setattr(panel._tree, name, count_call)
+
+        for name in calls:
+            watch(name)
+
+        added = scene.create_entity("Added")
+        panel.render(scene)
+        self.assertEqual(calls, {"insert": 1, "delete": 0, "item": 0, "move": 0})
+        calls.update(_tk_call_counters())
+
+        scene.set_entity_parent(child.entity_id, parent_b.entity_id)
+        panel.render(scene)
+        self.assertEqual(calls, {"insert": 0, "delete": 0, "item": 0, "move": 1})
+        self.assertEqual(panel._tree.parent(child.entity_id), parent_b.entity_id)
+        calls.update(_tk_call_counters())
+
+        added.enabled = False
+        panel.render(scene)
+        self.assertEqual(calls, {"insert": 0, "delete": 0, "item": 1, "move": 0})
+        self.assertEqual(panel._tree.item(added.entity_id, "tags"), ("disabled",))
+        calls.update(_tk_call_counters())
+
+        scene.remove_entity(added.entity_id)
+        panel.render(scene)
+        self.assertEqual(calls, {"insert": 0, "delete": 1, "item": 0, "move": 0})
+        self.assertFalse(panel._tree.exists(added.entity_id))
+
+    def test_hierarchy_reorders_only_the_reinserted_sibling(self) -> None:
+        panel = HierarchyPanel(self.root)
+        panel.pack(fill="both", expand=True)
+        scene = Scene("Sibling order")
+        entities = [scene.create_entity(f"Entity {index}") for index in range(3)]
+        panel.render(scene)
+        moves = 0
+        original_move = panel._tree.move
+
+        def count_move(*args: Any, **kwargs: Any) -> Any:
+            nonlocal moves
+            moves += 1
+            return original_move(*args, **kwargs)
+
+        with patch.object(panel._tree, "move", side_effect=count_move):
+            scene.remove_entity(entities[0].entity_id)
+            scene.add_entity(entities[0])
+            panel.render(scene)
+
+        self.assertEqual(
+            panel._tree.get_children(""),
+            (entities[1].entity_id, entities[2].entity_id, entities[0].entity_id),
+        )
+        self.assertEqual(moves, 1)
+
+    def test_hierarchy_reparents_survivor_out_of_removed_treeview_subtree(self) -> None:
+        panel = HierarchyPanel(self.root)
+        panel.pack(fill="both", expand=True)
+        scene = Scene("Parent deletion and reparent")
+        removed_parent = scene.create_entity("Removed Parent")
+        surviving_parent = scene.create_entity("Surviving Parent")
+        child = scene.create_entity("Child", parent_id=removed_parent.entity_id)
+        panel.render(scene)
+
+        scene.set_entity_parent(child.entity_id, surviving_parent.entity_id)
+        scene.remove_entity(removed_parent.entity_id)
+        panel.render(scene)
+
+        self.assertFalse(panel._tree.exists(removed_parent.entity_id))
+        self.assertTrue(panel._tree.exists(child.entity_id))
+        self.assertEqual(panel._tree.parent(child.entity_id), surviving_parent.entity_id)
+
+    def test_hierarchy_render_handles_more_than_one_thousand_nested_entities(self) -> None:
+        panel = HierarchyPanel(self.root)
+        panel.pack(fill="both", expand=True)
+        scene = Scene("Deep")
+        parent_id = None
+        depth = 1_200
+        for index in range(depth):
+            entity = scene.create_entity(f"Node {index}", parent_id=parent_id)
+            parent_id = entity.entity_id
+
+        panel.render(scene)
+
+        self.assertEqual(len(panel._entity_ids), depth)
+        self.assertEqual(panel._tree.get_children("")[0], scene.roots()[0].entity_id)
 
     def test_hierarchy_marks_camera_and_player_roles(self) -> None:
         panel = HierarchyPanel(self.root)
@@ -263,6 +576,206 @@ class EditorPanelTests(unittest.TestCase):
         self.root.update_idletasks()
         self.assertEqual(panel._current_entity_id, entity.entity_id)
         self.assertIsNotNone(panel._scroll_canvas.bbox("all"))
+
+    def test_inspector_reuses_controls_and_updates_values_for_matching_schema(self) -> None:
+        panel = InspectorPanel(self.root)
+        panel.pack(fill="both", expand=True)
+        scene = Scene("Inspector reuse")
+        first = scene.create_entity("First")
+        first.add_component(TransformComponent(x=1.0))
+        second = scene.create_entity("Second")
+        second.add_component(TransformComponent(x=2.0))
+        panel.render(first)
+        self.root.update_idletasks()
+        name_var = panel._name_var
+        transform_vars = dict(panel._component_vars)
+        content_children = tuple(panel._content.winfo_children())
+
+        panel.render(second)
+
+        self.assertIs(panel._name_var, name_var)
+        assert panel._name_var is not None
+        self.assertEqual(panel._name_var.get(), "Second")
+        for field, variable in transform_vars.items():
+            self.assertIs(panel._component_vars[field], variable)
+        self.assertEqual(panel._component_vars[(0, "x")].get(), "2.0")
+        self.assertEqual(tuple(panel._content.winfo_children()), content_children)
+
+        second.get_component(TransformComponent).x = 7.0  # type: ignore[union-attr]
+        panel.render(second)
+        self.assertEqual(panel._component_vars[(0, "x")].get(), "7.0")
+        self.assertEqual(tuple(panel._content.winfo_children()), content_children)
+
+    def test_reused_component_entry_commits_to_the_current_entity(self) -> None:
+        changed: list[tuple[Any, ...]] = []
+        panel = InspectorPanel(
+            self.root,
+            on_component_change=lambda *args: changed.append(args),
+        )
+        panel.pack(fill="both", expand=True)
+        scene = Scene("Component callbacks")
+        first = scene.create_entity("First")
+        first.add_component(TransformComponent())
+        first.add_component(ColliderComponent(width=12.5))
+        second = scene.create_entity("Second")
+        second.add_component(TransformComponent())
+        second.add_component(ColliderComponent(width=20.0))
+        panel.render(first)
+        entry = panel._component_widgets[(1, "width")]
+
+        panel.render(second)
+
+        self.assertIs(panel._component_widgets[(1, "width")], entry)
+        self.assertEqual(entry.get(), "20.0")
+        entry.focus_force()
+        self.root.update()
+        entry.delete(0, tk.END)
+        entry.insert(0, "37.5")
+        entry.event_generate("<Return>", when="now")
+        self.assertEqual(changed, [(second.entity_id, "collider", "width", 37.5)])
+
+    def test_reused_script_controls_commit_to_the_current_entity(self) -> None:
+        changed: list[tuple[Any, ...]] = []
+        panel = InspectorPanel(
+            self.root,
+            on_script_value_change=lambda *args: changed.append(args),
+        )
+        panel.pack(fill="both", expand=True)
+        scene = Scene("Script callbacks")
+        first = scene.create_entity("First")
+        first.add_component(TransformComponent())
+        first.add_component(
+            ScriptComponent(
+                "project://scripts/probe.py",
+                "Probe",
+                exposed_values={"speed": 2, "enabled": False},
+            )
+        )
+        second = scene.create_entity("Second")
+        second.add_component(TransformComponent())
+        second.add_component(
+            ScriptComponent(
+                "project://scripts/probe.py",
+                "Probe",
+                exposed_values={"speed": 8, "enabled": False},
+            )
+        )
+        panel.render(first)
+        speed_entry = cast(ttk.Entry, panel._script_widgets[(1, "speed")])
+        enabled_check = cast(ttk.Checkbutton, panel._script_widgets[(1, "enabled")])
+
+        panel.render(second)
+
+        self.assertIs(panel._script_widgets[(1, "speed")], speed_entry)
+        self.assertIs(panel._script_widgets[(1, "enabled")], enabled_check)
+        self.assertEqual(speed_entry.get(), "8")
+        speed_entry.focus_force()
+        self.root.update()
+        speed_entry.delete(0, tk.END)
+        speed_entry.insert(0, "11")
+        speed_entry.event_generate("<Return>", when="now")
+        enabled_check.invoke()
+        self.assertEqual(
+            changed,
+            [
+                (second.entity_id, 1, "speed", 11),
+                (second.entity_id, 1, "enabled", True),
+            ],
+        )
+
+    def test_inspector_rebuilds_when_component_or_script_schema_changes(self) -> None:
+        panel = InspectorPanel(self.root)
+        panel.pack(fill="both", expand=True)
+        entity = Scene("Schema changes").create_entity("Player")
+        entity.add_component(TransformComponent())
+        panel.render(entity)
+        original_name_var = panel._name_var
+
+        collider = ColliderComponent()
+        entity.add_component(collider)
+        panel.render(entity)
+        self.assertIsNot(panel._name_var, original_name_var)
+        self.assertIn((1, "width"), panel._component_vars)
+
+        script = ScriptComponent("project://scripts/probe.py", "Probe", exposed_values={"speed": 1})
+        entity.add_component(script)
+        panel.render(entity)
+        self.assertIn((2, "speed"), panel._script_vars)
+        old_speed = panel._script_vars[(2, "speed")]
+        script.exposed_values["enabled"] = False
+        panel.render(entity)
+        self.assertIsNot(panel._script_vars[(2, "speed")], old_speed)
+        self.assertIn((2, "enabled"), panel._script_vars)
+
+        entity.remove_component(collider)
+        panel.render(entity)
+        self.assertNotIn((1, "width"), panel._component_vars)
+
+    def test_inspector_defers_same_schema_selection_while_a_field_is_focused(self) -> None:
+        panel = InspectorPanel(self.root)
+        panel.pack(fill="both", expand=True)
+        scene = Scene("Inspector focus")
+        first = scene.create_entity("First")
+        first.add_component(TransformComponent())
+        second = scene.create_entity("Second")
+        second.add_component(TransformComponent(x=9.0))
+        changed: list[tuple[Any, ...]] = []
+        panel._on_component_change = lambda *args: changed.append(args)
+        panel.render(first)
+        variable = panel._component_vars[(0, "x")]
+        old_name_var = panel._name_var
+        entry = panel._component_widgets[(0, "x")]
+        entry.focus_force()
+        self.root.update()
+        variable.set("3.")
+
+        panel.render(second)
+
+        self.assertIs(panel._name_var, old_name_var)
+        self.assertEqual(panel._current_entity_id, first.entity_id)
+        self.assertEqual(variable.get(), "3.")
+        self.assertEqual(self.root.focus_get(), entry)
+
+        self.root.focus_force()
+        self.root.update()
+        self.assertEqual(changed, [(first.entity_id, "transform", "x", 3.0)])
+        self.assertEqual(panel._current_entity_id, second.entity_id)
+        self.assertEqual(panel._component_vars[(0, "x")].get(), "9.0")
+
+    def test_inspector_preserves_scroll_position_across_schema_rebuild(self) -> None:
+        self.root.geometry("360x240")
+        panel = InspectorPanel(self.root)
+        panel.pack(fill="both", expand=True)
+        first = Scene("Scroll").create_entity("First")
+        first.add_component(TransformComponent())
+        first.add_component(
+            ScriptComponent(
+                "project://scripts/probe.py",
+                "Probe",
+                exposed_values={f"field_{index}": index for index in range(30)},
+            )
+        )
+        second = Scene("Scroll").create_entity("Second")
+        second.add_component(TransformComponent())
+        second.add_component(
+            ScriptComponent(
+                "project://scripts/probe.py",
+                "Probe",
+                exposed_values={
+                    **{f"field_{index}": index for index in range(30)},
+                    "new_field": 1,
+                },
+            )
+        )
+        panel.render(first)
+        self.root.update()
+        panel._scroll_canvas.yview_moveto(0.7)
+        self.root.update_idletasks()
+
+        panel.render(second)
+        self.root.update()
+
+        self.assertGreater(panel._scroll_canvas.yview()[0], 0.6)
 
     def test_viewport_handles_disabled_entities_and_empty_scene(self) -> None:
         panel = ViewportPanel(self.root)
@@ -388,6 +901,84 @@ class EditorPanelTests(unittest.TestCase):
         }
         self.assertEqual(restored_types, initial_types)
 
+    def test_canvas_dispatch_keeps_primitive_selection_multi_select_and_drag(self) -> None:
+        window = EditorWindow(Engine())
+        try:
+            scene = Scene("Canvas dispatch")
+            entities = []
+            for name, x in (("First", -5.0), ("Second", 5.0)):
+                entity = scene.create_entity(name)
+                entity.add_component(TransformComponent(x=x))
+                entity.add_component(PrimitiveComponent())
+                entities.append(entity)
+            window._engine.set_scene(scene)
+            window._selected_ids = ()
+            window._present_all()
+            window._root.update()
+            canvas = window._viewport._canvas
+
+            def click(entity: Any, state: int = 0) -> tuple[int, int]:
+                items = canvas.find_withtag(f"entity:{entity.entity_id}")
+                self.assertTrue(items)
+                bounds = canvas.bbox(f"entity:{entity.entity_id}")
+                self.assertIsNotNone(bounds)
+                assert bounds is not None
+                x = (bounds[0] + bounds[2]) // 2
+                y = (bounds[1] + bounds[3]) // 2
+                canvas.event_generate("<Button-1>", x=x, y=y, state=state, when="now")
+                window._root.update()
+                return x, y
+
+            first_point = click(entities[0])
+            self.assertEqual(window._selected_ids, (entities[0].entity_id,))
+            canvas.event_generate(
+                "<ButtonRelease-1>", x=first_point[0], y=first_point[1], when="now"
+            )
+            window._root.update()
+
+            click(entities[1], state=0x0001)
+            self.assertEqual(
+                window._selected_ids,
+                (entities[0].entity_id, entities[1].entity_id),
+            )
+            self.assertTrue(window._viewport._spatial_edit.is_dragging_transform)
+            window._viewport._spatial_edit.cancel_drag()
+        finally:
+            window._on_close()
+
+    def test_canvas_dispatch_keeps_marker_click_and_selection_color_updates(self) -> None:
+        window = EditorWindow(Engine())
+        try:
+            window._root.update()
+            scene = Scene("Marker dispatch")
+            marker = scene.create_entity("Camera")
+            marker.add_component(TransformComponent())
+            window._engine.set_scene(scene)
+            window._selected_ids = ()
+            window._present_all()
+            window._root.update()
+            canvas = window._viewport._canvas
+            marker_items = canvas.find_withtag(f"entity:{marker.entity_id}")
+            self.assertTrue(marker_items)
+            marker_body = marker_items[0]
+            self.assertEqual(canvas.itemcget(marker_body, "fill"), COLORS["camera"])
+
+            bounds = canvas.bbox(marker_body)
+            self.assertIsNotNone(bounds)
+            assert bounds is not None
+            canvas.event_generate(
+                "<Button-1>",
+                x=(bounds[0] + bounds[2]) // 2,
+                y=(bounds[1] + bounds[3]) // 2,
+                when="now",
+            )
+            window._root.update()
+
+            self.assertEqual(window._selected_ids, (marker.entity_id,))
+            self.assertEqual(canvas.itemcget(marker_body, "fill"), COLORS["camera_active"])
+        finally:
+            window._on_close()
+
 
 @unittest.skipUnless(DISPLAY_AVAILABLE, "no display for real Tk editor tests")
 class EditorWindowLayoutTests(unittest.TestCase):
@@ -428,6 +1019,286 @@ class EditorWindowLayoutTests(unittest.TestCase):
             self.assertEqual(window._selected_id, selected_id)
         finally:
             window._on_close()
+
+    def test_selection_updates_tree_selection_without_rendering_hierarchy(self) -> None:
+        window = EditorWindow(Engine())
+        try:
+            scene = window._engine.edit_scene
+            self.assertIsNotNone(scene)
+            entity_id = scene.entities[0].entity_id  # type: ignore[union-attr]
+            window._observer.reset()
+
+            window._on_hierarchy_select((entity_id,))
+
+            metrics = {
+                metric.target: metric.count for metric in window._observer.snapshot().metrics
+            }
+            self.assertEqual(metrics.get("ui:render:hierarchy", 0), 0)
+            self.assertEqual(metrics.get("ui:render:inspector"), 1)
+            self.assertEqual(metrics.get("ui:render:viewport"), 1)
+            self.assertEqual(window._hierarchy._tree.selection(), (entity_id,))
+        finally:
+            window._on_close()
+
+    def test_selection_refresh_updates_viewport_overlay_without_reextracting_scene(self) -> None:
+        window = EditorWindow(Engine())
+        try:
+            window._root.update()
+            scene = Scene("Selection overlay")
+            entities = []
+            for index in range(12):
+                entity = scene.create_entity(f"Entity {index}")
+                entity.add_component(TransformComponent(x=float(index * 2)))
+                entity.add_component(PrimitiveComponent())
+                entities.append(entity)
+            window._engine.set_scene(scene)
+            window._selected_ids = ()
+            window._present_all()
+            window._root.update_idletasks()
+            previous_frame = window._viewport._target.frame
+            previous_items = tuple(window._viewport._canvas_items)
+            window._observer.reset()
+
+            window._on_hierarchy_select((entities[4].entity_id,))
+            window._root.update_idletasks()
+
+            self.assertIs(window._viewport._target.frame, previous_frame)
+            self.assertEqual(tuple(window._viewport._canvas_items), previous_items)
+            self.assertIn(entities[4].entity_id, window._viewport._items_by_id)
+            self.assertIn(entities[4].entity_id, window._viewport._canvas_items)
+            self.assertTrue(
+                window._viewport._canvas.find_withtag("selection"),
+                (window._viewport._selected_id, window._viewport._target.selected_id),
+            )
+            self.assertEqual(window._viewport._selected_id, entities[4].entity_id)
+            metrics = {
+                metric.target: metric.count for metric in window._observer.snapshot().metrics
+            }
+            self.assertEqual(metrics.get("render:extract", 0), 0)
+            self.assertEqual(metrics.get("ui:render:viewport"), 1)
+        finally:
+            window._on_close()
+
+    def test_add_entity_commits_each_panel_once(self) -> None:
+        window = EditorWindow(Engine())
+        try:
+            window._observer.reset()
+
+            window._act_add_entity()
+
+            metrics = {
+                metric.target: metric.count for metric in window._observer.snapshot().metrics
+            }
+            for target in (
+                "ui:render:hierarchy",
+                "ui:render:inspector",
+                "ui:render:viewport",
+                "ui:render:toolbar",
+            ):
+                with self.subTest(target=target):
+                    self.assertEqual(metrics.get(target), 1)
+            self.assertEqual(window._hierarchy._tree.selection(), (window._selected_id,))
+        finally:
+            window._on_close()
+
+    def test_script_attach_and_remove_present_inspector_once(self) -> None:
+        window = EditorWindow(Engine())
+        try:
+            entity = window._engine.edit_scene.entities[0]  # type: ignore[union-attr]
+            window._on_hierarchy_select((entity.entity_id,))
+
+            window._observer.reset()
+            with (
+                patch(
+                    "expra_engine.ui.editor_window.simpledialog.askstring",
+                    side_effect=("project://scripts/example.py", "ExampleBehaviour"),
+                ),
+                patch(
+                    "expra_engine.ui.editor_window.ScriptRegistry.resolve",
+                    return_value=SimpleNamespace(exposed_schema=lambda: {}),
+                ),
+            ):
+                window._act_attach_script()
+            attach_metrics = {
+                metric.target: metric.count for metric in window._observer.snapshot().metrics
+            }
+            self.assertEqual(attach_metrics.get("ui:render:inspector"), 1)
+            self.assertLessEqual(attach_metrics.get("ui:render:viewport", 0), 1)
+
+            window._observer.reset()
+            window._act_remove_script()
+            remove_metrics = {
+                metric.target: metric.count for metric in window._observer.snapshot().metrics
+            }
+            self.assertEqual(remove_metrics.get("ui:render:inspector"), 1)
+            self.assertLessEqual(remove_metrics.get("ui:render:viewport", 0), 1)
+        finally:
+            window._on_close()
+
+    def test_duplicate_selection_presents_once_and_selects_new_rows(self) -> None:
+        window = EditorWindow(Engine())
+        try:
+            ids: list[str] = []
+            for _ in range(2):
+                window._act_add_entity()
+                window._root.update_idletasks()
+                assert window._selected_id is not None
+                ids.append(window._selected_id)
+            window._on_viewport_entity_click(tuple(ids), False)
+            window._observer.reset()
+
+            window._act_duplicate_selection()
+
+            metrics = {
+                metric.target: metric.count for metric in window._observer.snapshot().metrics
+            }
+            for target in (
+                "ui:render:hierarchy",
+                "ui:render:inspector",
+                "ui:render:viewport",
+                "ui:render:toolbar",
+            ):
+                with self.subTest(target=target):
+                    self.assertEqual(metrics.get(target), 1)
+            self.assertEqual(len(window._selected_ids), 2)
+            self.assertEqual(set(window._hierarchy._tree.selection()), set(window._selected_ids))
+            self.assertTrue(
+                all(window._hierarchy._tree.exists(entity_id) for entity_id in window._selected_ids)
+            )
+        finally:
+            window._on_close()
+
+    def test_undo_create_clears_removed_selection_and_action_state(self) -> None:
+        window = EditorWindow(Engine())
+        try:
+            window._act_add_entity()
+            self.assertTrue(window._selected_ids)
+
+            window._act_undo()
+
+            self.assertEqual(window._selected_ids, ())
+            self.assertEqual(window._hierarchy._tree.selection(), ())
+            self.assertFalse(window._actions.is_enabled("delete_entity"))
+            self.assertFalse(window._actions.is_enabled("duplicate_selection"))
+            self.assertIsNone(window._inspector._current_entity_id)
+        finally:
+            window._on_close()
+
+    def test_delete_undo_and_redo_each_present_final_state_once(self) -> None:
+        window = EditorWindow(Engine())
+        try:
+            entity_ids: list[str] = []
+            for _ in range(2):
+                window._act_add_entity()
+                assert window._selected_id is not None
+                entity_ids.append(window._selected_id)
+            window._on_hierarchy_select(entity_ids)
+
+            def assert_one_panel_commit() -> None:
+                metrics = {
+                    metric.target: metric.count for metric in window._observer.snapshot().metrics
+                }
+                for target in (
+                    "ui:render:hierarchy",
+                    "ui:render:inspector",
+                    "ui:render:viewport",
+                    "ui:render:toolbar",
+                ):
+                    with self.subTest(target=target):
+                        self.assertEqual(metrics.get(target), 1)
+
+            window._observer.reset()
+            window._act_delete_entity()
+            assert_one_panel_commit()
+            self.assertEqual(window._selected_ids, ())
+
+            window._observer.reset()
+            window._act_undo()
+            assert_one_panel_commit()
+
+            window._observer.reset()
+            window._act_redo()
+            assert_one_panel_commit()
+            self.assertEqual(window._selected_ids, ())
+        finally:
+            window._on_close()
+
+    def test_play_stop_cycles_keep_canvas_callback_commands_bounded(self) -> None:
+        window = EditorWindow(Engine())
+        try:
+            scene = Scene("Callback lifecycle")
+            entity = scene.create_entity("Clickable")
+            entity.add_component(TransformComponent())
+            window._engine.set_scene(scene)
+            window._selected_ids = ()
+            window._present_all()
+            window._root.update_idletasks()
+            canvas = window._viewport._canvas
+            baseline = len(getattr(canvas, "_tclCommands", None) or ())
+
+            for _ in range(50):
+                window._act_play()
+                window._act_pause()
+                window._act_play()
+                window._act_stop()
+                window._root.update_idletasks()
+
+            self.assertLessEqual(len(getattr(canvas, "_tclCommands", None) or ()), baseline + 1)
+            scene.remove_entity(entity.entity_id)
+            window._present_all()
+            scene.add_entity(entity)
+            window._present_all()
+            window._root.update_idletasks()
+            self.assertLessEqual(len(getattr(canvas, "_tclCommands", None) or ()), baseline + 1)
+            bounds = canvas.bbox(f"entity:{entity.entity_id}")
+            self.assertIsNotNone(bounds)
+            assert bounds is not None
+            canvas.focus_force()
+            canvas.event_generate(
+                "<Button-1>",
+                x=(bounds[0] + bounds[2]) // 2,
+                y=(bounds[1] + bounds[3]) // 2,
+                when="now",
+            )
+            window._root.update()
+            self.assertEqual(window._selected_ids, (entity.entity_id,))
+        finally:
+            window._on_close()
+
+    def test_scene_switches_release_retired_canvas_callback_commands(self) -> None:
+        window = EditorWindow(Engine())
+        try:
+            scenes: list[Scene] = []
+            for scene_index in range(2):
+                scene = Scene(f"Scene {scene_index}")
+                for entity_index in range(8):
+                    entity = scene.create_entity(f"Entity {entity_index}")
+                    entity.add_component(TransformComponent())
+                scenes.append(scene)
+            window._engine.set_scene(scenes[0])
+            window._selected_ids = ()
+            window._present_all()
+            window._root.update_idletasks()
+            canvas = window._viewport._canvas
+            baseline = len(getattr(canvas, "_tclCommands", None) or ())
+
+            for index in range(50):
+                window._engine.set_scene(scenes[index % 2])
+                window._selected_ids = ()
+                window._present_all()
+                window._root.update_idletasks()
+
+            self.assertLessEqual(len(getattr(canvas, "_tclCommands", None) or ()), baseline + 1)
+        finally:
+            window._on_close()
+
+    def test_editor_close_releases_canvas_callback_commands(self) -> None:
+        window = EditorWindow(Engine())
+        canvas = window._viewport._canvas
+
+        window._on_close()
+
+        self.assertFalse(getattr(canvas, "_tclCommands", None) or ())
 
     def test_delete_disables_after_selected_entity_is_removed(self) -> None:
         window = EditorWindow(Engine())
@@ -607,7 +1478,11 @@ class MultiSelectionAndCommandTests(unittest.TestCase):
         try:
             entity_id = self._add_entities(window, 1)[0]
             entity = window._engine.edit_scene.find_entity(entity_id)  # type: ignore[union-attr]
+            self.assertIsNotNone(entity)
+            assert entity is not None
             transform = entity.get_component(TransformComponent)
+            self.assertIsNotNone(transform)
+            assert transform is not None
             history_before = len(window._command_stack.history)
             window._on_transform_change(entity_id, "x", 42.0)
             self.assertEqual(transform.x, 42.0)
@@ -625,6 +1500,8 @@ class MultiSelectionAndCommandTests(unittest.TestCase):
         try:
             entity_id = self._add_entities(window, 1)[0]
             entity = window._engine.edit_scene.find_entity(entity_id)  # type: ignore[union-attr]
+            self.assertIsNotNone(entity)
+            assert entity is not None
             self.assertTrue(entity.enabled)
             window._on_entity_toggle(entity_id, False)
             self.assertFalse(entity.enabled)

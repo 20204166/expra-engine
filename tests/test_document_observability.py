@@ -36,6 +36,9 @@ class DocumentObservabilityTests(unittest.TestCase):
                     "document:decode",
                     "document:convert",
                     "document:construct",
+                    "document:construct:entities",
+                    "document:construct:components",
+                    "document:construct:hierarchy",
                     "scene:resolve_instances",
                     "document:load",
                 },
@@ -56,6 +59,26 @@ class DocumentObservabilityTests(unittest.TestCase):
             self.assertNotIn("document:convert", metrics)
             self.assertEqual(metrics["document:decode"].count, 1)
             self.assertEqual(metrics["document:construct"].count, 1)
+
+    def test_construction_records_aggregate_substages(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            project = Project.create("Observed", Path(directory) / "project")
+            scene = Scene("Observed Scene", scene_id="observed-scene")
+            entity = scene.create_entity("Entity")
+            entity.add_component(TransformComponent(x=2.0))
+            project.save_document(scene, "scenes/observed.scene.pb")
+            observer = ObservabilityWatcher()
+
+            project.load_document("scenes/observed.scene.pb", observer=observer)
+
+            metrics = _metric_map(observer)
+            for target in (
+                "document:construct:entities",
+                "document:construct:components",
+                "document:construct:hierarchy",
+            ):
+                assert metrics[target].count == 1
+                assert metrics[target].in_flight == 0
 
     def test_nested_scene_instance_loads_reuse_the_same_targets(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -117,7 +140,7 @@ class DocumentObservabilityTests(unittest.TestCase):
                 project.load_document("scenes/document-0.scene.pb", observer=observer)
 
             snapshot = observer.snapshot()
-            self.assertEqual(len(snapshot.metrics), 6)
+            self.assertEqual(len(snapshot.metrics), 9)
             self.assertEqual(
                 next(
                     metric.count for metric in snapshot.metrics if metric.target == "document:load"

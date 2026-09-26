@@ -115,6 +115,7 @@ class TransformComponent(Component):
 _COMPONENT_REGISTRY: dict[str, type[Component]] = {
     "transform": TransformComponent,
 }
+_BUILTINS_REGISTERED = False
 
 register_component_spec(
     ComponentTypeSpec(
@@ -136,7 +137,8 @@ register_component_spec(
 
 def component_from_dict(data: dict[str, Any]) -> Component:
     """Deserialize a component from its dict representation."""
-    _register_builtin_components()
+    if not _BUILTINS_REGISTERED:
+        _register_builtin_components()
     component_type = data.get("type", "")
     if component_type == "script":
         from expra_engine.runtime.script_component import (
@@ -166,7 +168,8 @@ def register_component_type(name: str, cls: type[Component]) -> None:
 
 def registered_component_types() -> tuple[tuple[str, type[Component]], ...]:
     """Return registered component types in registration order for editor tooling."""
-    _register_builtin_components()
+    if not _BUILTINS_REGISTERED:
+        _register_builtin_components()
     return tuple(_COMPONENT_REGISTRY.items())
 
 
@@ -183,11 +186,15 @@ def _register_component(
 
 def _register_builtin_components() -> None:
     """Ensure every built-in component category is registered (each is idempotent)."""
+    global _BUILTINS_REGISTERED
+    if _BUILTINS_REGISTERED:
+        return
     _register_visual_components()
     _register_physics_components()
     _register_audio_components()
     _register_screen_components()
     _register_composition_components()
+    _BUILTINS_REGISTERED = True
 
 
 def _register_visual_components() -> None:

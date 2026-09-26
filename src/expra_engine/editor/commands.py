@@ -608,9 +608,7 @@ def delete_selection(window: Any) -> None:
         return
     window._command_stack.push(CompositeCommand(commands, f"Delete {len(commands)} entities"))
     window._console.log(f"[Editor] Deleted: {', '.join(names)}")
-    window._selected_ids = ()
-    window._actions.set_enabled("delete_entity", False)
-    window._actions.set_enabled("duplicate_selection", False)
+    window._set_selection_state(())
     window._update_undo_redo_state()
     window._present_all()
 
@@ -640,8 +638,8 @@ def duplicate_selection(window: Any) -> None:
     plural = "y" if len(commands) == 1 else "ies"
     window._console.log(f"[Editor] Duplicated {len(commands)} entit{plural}")
     window._update_undo_redo_state()
-    window._on_hierarchy_select(tuple(new_ids))
-    window._hierarchy.select_many(tuple(new_ids))
+    window._set_selection_state(tuple(new_ids))
+    window._present_all()
 
 
 def reparent_selection_to(window: Any, dragged_ids: tuple[str, ...], target_id: str | None) -> None:
@@ -741,8 +739,7 @@ def _drop_sprite(window: Any, scene: Any, entry: Any, world_x: float, world_y: f
     window._command_stack.push(CreateEntityCommand(scene, entity))
     window._update_undo_redo_state()
     window._console.log(f"[Editor] Placed sprite: {entity.name}")
-    window._on_hierarchy_select((entity.entity_id,))
-    window._hierarchy.select_many((entity.entity_id,))
+    window._set_selection_state((entity.entity_id,))
     window._present_all()
 
 
@@ -782,6 +779,5 @@ def _drop_scene_instance(
         return
     window._update_undo_redo_state()
     window._console.log(f"[Editor] Placed scene instance: {entity.name}")
-    window._on_hierarchy_select((entity.entity_id,))
-    window._hierarchy.select_many((entity.entity_id,))
+    window._set_selection_state((entity.entity_id,))
     window._present_all()

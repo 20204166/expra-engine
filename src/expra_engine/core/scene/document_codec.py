@@ -11,6 +11,7 @@ from google.protobuf.message import DecodeError
 
 from expra_engine.core.document_kind import DocumentKind
 from expra_engine.core.scene import Level, Scene
+from expra_engine.observability import ObservabilityWatcher
 from expra_engine.schema.generated import common_pb2, level_pb2
 
 CURRENT_DOCUMENT_SCHEMA_VERSION = 1
@@ -49,20 +50,36 @@ def to_json(document: Scene | dict[str, Any]) -> dict[str, Any]:
 def from_json(document: str | dict[str, Any]) -> Scene:
     """Load a Scene or Level from the canonical JSON representation."""
     try:
-        data = json.loads(document) if isinstance(document, str) else deepcopy(document)
+        data = json.loads(document) if isinstance(document, str) else document
     except json.JSONDecodeError as exc:
         raise DocumentCodecError("legacy JSON document is malformed") from exc
+    return from_document_data(data, copy_data=isinstance(document, dict))
+
+
+def from_document_data(
+    data: dict[str, Any],
+    *,
+    validate: bool = True,
+    copy_data: bool = False,
+    observer: ObservabilityWatcher | None = None,
+) -> Scene:
+    """Construct a Scene/Level from owned decoded data through one path."""
     if not isinstance(data, dict):
         raise DocumentCodecError("document must contain a JSON object")
-    kind = data.get("kind", "scene")
-    if kind == DocumentKind.LEVEL.value:
-        return Level.from_dict(data)
-    if kind != DocumentKind.SCENE.value:
+    working = deepcopy(data) if copy_data else data
+    kind = working.get("kind", DocumentKind.SCENE.value)
+    if not isinstance(kind, str):
+        raise DocumentCodecError("document kind must be a string")
+    if validate:
+        _validate_document_data(working, kind)
+    if kind not in {DocumentKind.LEVEL.value, DocumentKind.SCENE.value}:
         raise DocumentCodecError(f"unsupported document kind: {kind!r}")
     try:
-        return Scene.from_dict(data)
+        if kind == DocumentKind.LEVEL.value:
+            return Level.from_dict(working, observer=observer)
+        return Scene.from_dict(working, observer=observer)
     except (TypeError, KeyError, ValueError) as exc:
-        raise DocumentCodecError(f"invalid Scene document: {exc}") from exc
+        raise DocumentCodecError(f"invalid {kind.title()} document: {exc}") from exc
 
 
 def decode_json_payload(payload: bytes) -> dict[str, Any]:
@@ -133,7 +150,7 @@ def decode_protobuf_document(
         raise DocumentCodecError(
             f"expected a {DocumentKind(expected_kind).value} document, found {actual_kind.value}"
         )
-    return from_json(data)
+    return from_document_data(data, validate=False)
 
 
 def document_to_protobuf(document: Scene) -> bytes:
@@ -162,7 +179,7 @@ def document_from_path_bytes(
         data["kind"] = expected.value
     elif expected is not None and stored_kind != expected.value:
         raise DocumentCodecError(f"expected a {expected.value} document, found {stored_kind!r}")
-    document = from_json(data)
+    document = from_document_data(data)
     actual_kind = document.document_kind
     if expected is not None and actual_kind != expected:
         raise DocumentCodecError(f"expected a {expected.value} document, found {actual_kind.value}")
@@ -186,15 +203,18 @@ def _validate_document_data(data: dict[str, Any], kind: str) -> None:
         if not isinstance(metadata, dict):
             raise DocumentCodecError("Level document requires level_metadata")
         bounds = metadata.get("world_bounds")
-        if bounds is not None and len(bounds) != 4:
+        if bounds is not None and (not isinstance(bounds, (list, tuple)) or len(bounds) != 4):
             raise DocumentCodecError("Level world_bounds must contain four values")
     entities = data.get("entities", [])
     if not isinstance(entities, list):
         raise DocumentCodecError("document entities must be a list")
     entity_ids: set[str] = set()
+    parent_ids: dict[str, str | None] = {}
     for entity in entities:
-        entity_id = entity.get("entity_id") if isinstance(entity, dict) else None
-        name = entity.get("name") if isinstance(entity, dict) else None
+        if not isinstance(entity, dict):
+            raise DocumentCodecError("each entity must be an object")
+        entity_id = entity.get("entity_id")
+        name = entity.get("name")
         if not isinstance(entity_id, str) or not entity_id.strip():
             raise DocumentCodecError("each entity requires a non-empty entity_id")
         if not isinstance(name, str) or not name.strip():
@@ -202,10 +222,34 @@ def _validate_document_data(data: dict[str, Any], kind: str) -> None:
         if entity_id in entity_ids:
             raise DocumentCodecError(f"duplicate entity_id: {entity_id!r}")
         entity_ids.add(entity_id)
-        for component in entity.get("components", []):
+        parent_id = entity.get("parent_id")
+        if parent_id is not None and (not isinstance(parent_id, str) or not parent_id.strip()):
+            raise DocumentCodecError(f"entity {entity_id!r} has an invalid parent_id")
+        parent_ids[entity_id] = parent_id
+        components = entity.get("components", [])
+        if not isinstance(components, list):
+            raise DocumentCodecError(f"entity {entity_id!r} components must be a list")
+        for component in components:
+            if not isinstance(component, dict):
+                raise DocumentCodecError(f"entity {entity_id!r} has a non-object component")
             component_type = component.get("type", component.get("type_id"))
             if not isinstance(component_type, str) or not component_type.strip():
                 raise DocumentCodecError(f"entity {entity_id!r} has a component without type")
+    for entity_id, parent_id in parent_ids.items():
+        if parent_id is not None and parent_id not in entity_ids:
+            raise DocumentCodecError(f"entity {entity_id!r} has missing parent {parent_id!r}")
+    state: dict[str, int] = {}
+    for start in entity_ids:
+        current: str | None = start
+        trail: list[str] = []
+        while current is not None and state.get(current, 0) == 0:
+            state[current] = 1
+            trail.append(current)
+            current = parent_ids[current]
+        if current is not None and state.get(current) == 1:
+            raise DocumentCodecError("entity hierarchy contains a cycle")
+        for entity_id in trail:
+            state[entity_id] = 2
 
 
 def _fill_scene(message: Any, data: dict[str, Any]) -> None:

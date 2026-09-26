@@ -273,6 +273,7 @@ class EditorWindow:
             root_directory=project_assets,
             resource_root=project_assets,
             coordinator=self._coordinator,
+            observer=self._observer,
             colors=self._colors,
             on_open=self._on_asset_open,
             on_drop=lambda entry, x, y: drop_asset_on_viewport(self, entry, x, y),
@@ -523,9 +524,7 @@ class EditorWindow:
         else:
             scene = Scene("New Scene")
         self._engine.set_scene(scene)
-        self._selected_ids = ()
-        self._actions.set_enabled("delete_entity", False)
-        self._actions.set_enabled("duplicate_selection", False)
+        self._set_selection_state(())
         self._console.log(f"[Editor] Created scene: {scene.name}")
         self._present_all()
 
@@ -664,7 +663,6 @@ class EditorWindow:
             messagebox.showerror("Attach Script", str(exc), parent=self._root)
             return
         self._console.log(f"[Editor] Attached {class_name} to {entity.name}")
-        self._on_hierarchy_select((entity.entity_id,))
         self._present_all()
 
     def _act_remove_script(self) -> None:
@@ -680,7 +678,6 @@ class EditorWindow:
         if scripts:
             entity.remove_component(scripts[-1])
             self._console.log(f"[Editor] Removed script from {entity.name}")
-            self._on_hierarchy_select((entity.entity_id,))
             self._present_all()
 
     @property
@@ -690,6 +687,11 @@ class EditorWindow:
 
     def _on_hierarchy_select(self, ids: Sequence[str]) -> None:
         """Central selection setter: dedupes, drops dead ids, updates dependent action state."""
+        scene, entity = self._set_selection_state(ids)
+        self._present_selection(scene, entity)
+
+    def _set_selection_state(self, ids: Sequence[str]) -> tuple[Scene | None, Any | None]:
+        """Set the canonical selection and its action state without presenting it."""
         scene = self._engine.active_scene
         valid = tuple(
             dict.fromkeys(i for i in ids if scene is None or scene.find_entity(i) is not None)
@@ -705,7 +707,7 @@ class EditorWindow:
         )
         self._actions.set_enabled("attach_script", primary_id is not None and not has_script)
         self._actions.set_enabled("remove_script", has_script)
-        self._present_selection(scene, entity)
+        return scene, entity
 
     def _on_add_component(self, component_name: str) -> None:
         if self._engine.run_state != EngineRunState.EDIT or self._selected_id is None:
@@ -740,10 +742,9 @@ class EditorWindow:
         entity.add_component(TransformComponent())
         self._command_stack.push(CreateEntityCommand(scene, entity))
         self._update_undo_redo_state()
+        self._set_selection_state((entity.entity_id,))
         self._console.log(f"[Editor] Created entity: {entity.name}")
         self._present_all()
-        self._hierarchy.select(entity.entity_id)
-        self._on_hierarchy_select((entity.entity_id,))
 
     def _on_hierarchy_delete(self, entity_id: str) -> None:
         if self._engine.run_state != EngineRunState.EDIT:
@@ -757,10 +758,9 @@ class EditorWindow:
         cmd = DeleteEntityCommand(scene, entity)
         self._command_stack.push(cmd)
         self._console.log(f"[Editor] Deleted entity: {entity.name}")
-        if entity_id in self._selected_ids:
-            self._selected_ids = tuple(i for i in self._selected_ids if i != entity_id)
-            self._actions.set_enabled("delete_entity", bool(self._selected_ids))
-            self._actions.set_enabled("duplicate_selection", bool(self._selected_ids))
+        self._set_selection_state(
+            tuple(selected_id for selected_id in self._selected_ids if selected_id != entity_id)
+        )
         self._update_undo_redo_state()
         self._present_all()
 
@@ -845,7 +845,6 @@ class EditorWindow:
         else:
             new_ids = tuple(dict.fromkeys((*self._selected_ids, *ids)))
         self._on_hierarchy_select(new_ids)
-        self._hierarchy.select_many(new_ids)
 
     def _save_viewport_camera(self, values: dict[str, object]) -> None:
         # Pan/zoom/rotate fire this on every mouse-motion tick -- update the
@@ -927,6 +926,7 @@ class EditorWindow:
         payload: object,
         *,
         owner_id: str | None = None,
+        components: frozenset[str] = frozenset(),
         priority: int = 0,
     ) -> None:
         if target == "inspector":
@@ -950,6 +950,7 @@ class EditorWindow:
             target=target,
             generation=generation,
             owner_id=owner_id,
+            components=components,
             payload=payload,
             payload_set=True,
             priority=priority,
@@ -964,6 +965,13 @@ class EditorWindow:
         ids = tuple(selected_ids) if selected_ids else ()
         primary_id = ids[0] if ids else None
         runtime_preview = self._engine.run_state in (EngineRunState.PLAY, EngineRunState.PAUSED)
+        if (
+            intent.components == frozenset({"selection"})
+            and scene is self._viewport._scene
+            and not runtime_preview
+        ):
+            self._viewport.update_selection(primary_id, frozenset(ids))
+            return
         self._viewport.render(
             scene,
             primary_id,
@@ -975,21 +983,26 @@ class EditorWindow:
         )
 
     def _present_selection(self, scene: Scene | None, entity: Any) -> None:
+        self._hierarchy.select_many(self._selected_ids)
         self._ui.begin_batch()
-        self._request_render("hierarchy", scene, priority=20)
         self._request_render("inspector", entity, owner_id=self._selected_id, priority=30)
-        self._request_render("viewport", (scene, self._selected_ids), priority=10)
+        self._request_render(
+            "viewport",
+            (scene, self._selected_ids),
+            components=frozenset({"selection"}),
+            priority=10,
+        )
         self._ui.end_batch()
 
     def _present_all(self) -> None:
-        scene = self._engine.active_scene
-        entity = scene.find_entity(self._selected_id) if scene and self._selected_id else None
+        scene, entity = self._set_selection_state(self._selected_ids)
         self._ui.begin_batch()
         self._request_render("hierarchy", scene, priority=20)
         self._request_render("inspector", entity, owner_id=self._selected_id, priority=30)
         self._request_render("viewport", (scene, self._selected_ids), priority=10)
         self._request_render("toolbar", self._engine.run_state, priority=40)
         self._ui.end_batch()
+        self._hierarchy.select_many(self._selected_ids)
 
     def _on_close(self) -> None:
         self._runtime_preview.stop()

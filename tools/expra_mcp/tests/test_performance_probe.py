@@ -90,6 +90,12 @@ async def test_document_load_reports_generic_production_stages(server) -> None:
         assert data["stages"]["document:decode"]["count"] == 3
         assert data["stages"]["document:convert"]["count"] == 3
         assert data["stages"]["document:construct"]["count"] == 3
+        for target in (
+            "document:construct:entities",
+            "document:construct:components",
+            "document:construct:hierarchy",
+        ):
+            assert data["stages"][target]["count"] == 3
         assert data["stages"]["scene:resolve_instances"]["count"] == 3
         assert data["stages"]["document:load"]["count"] == 3
         assert data["first_load_total_ms"] >= 0

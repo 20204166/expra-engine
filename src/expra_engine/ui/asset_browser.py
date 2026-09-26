@@ -16,6 +16,7 @@ from expra_engine.editor.assets import (
     accept_scan_result,
     scan_directory,
 )
+from expra_engine.observability import ObservabilityWatcher, observe_stage
 from expra_engine.ui.styles import (
     COLORS,
     FONTS,
@@ -37,6 +38,7 @@ class AssetBrowserPanel(tk.Frame):
         root_directory: Path,
         resource_root: Path | None = None,
         coordinator: AppCoordinator | None = None,
+        observer: ObservabilityWatcher | None = None,
         colors: dict[str, str] | None = None,
         on_open: Callable[[AssetEntry], None] | None = None,
         on_drop: Callable[[AssetEntry, int, int], None] | None = None,
@@ -45,6 +47,7 @@ class AssetBrowserPanel(tk.Frame):
         super().__init__(parent, bg=c["panel_bg"])
         self._colors = c
         self._coordinator = coordinator
+        self._observer = observer
         self._on_open = on_open
         self._on_drop = on_drop
         self._root_directory = Path(root_directory).resolve()
@@ -53,6 +56,13 @@ class AssetBrowserPanel(tk.Frame):
         self._generation = 0
         self._selected_entry: AssetEntry | None = None
         self._entries: dict[str, AssetEntry] = {}
+        self._entry_parents: dict[str, str] = {}
+        self._entry_rows: dict[str, tuple[str, tuple[str, str]]] = {}
+        self._entry_sort_keys: dict[str, tuple[int, str, bool]] = {}
+        self._child_order: dict[str, tuple[str, ...]] = {}
+        self._path_iids: dict[Path, str] = {self._current_directory: "asset-root"}
+        self._last_render_key: tuple[Path, Path] | None = None
+        self._last_input_entries: tuple[AssetEntry, ...] | None = None
         self._drag_start: tuple[int, int] | None = None
         self._drag_entry: AssetEntry | None = None
 
@@ -118,10 +128,16 @@ class AssetBrowserPanel(tk.Frame):
 
     def set_root_directory(self, directory: Path) -> None:
         """Switch the browser to a new project asset root."""
-        self._root_directory = directory.resolve()
+        new_root = directory.resolve()
+        if new_root != self._root_directory or self._current_directory != new_root:
+            self._path_iids = {new_root: "asset-root"}
+        self._root_directory = new_root
         self._resource_root = self._root_directory
         self._current_directory = self._root_directory
         self._selected_entry = None
+        selection = self._tree.selection()
+        if selection:
+            self._tree.selection_remove(selection)
         self._path_var.set(str(self._current_directory))
         self.refresh()
 
@@ -148,31 +164,165 @@ class AssetBrowserPanel(tk.Frame):
         )
 
     def render_entries(self, entries: Iterable[AssetEntry]) -> None:
-        self._entries.clear()
-        for item in self._tree.get_children(""):
-            self._tree.delete(item)
-        ordered = sorted(
-            entries,
-            key=lambda entry: (
-                len(entry.path.relative_to(self._current_directory).parts),
-                entry.path.relative_to(self._current_directory).as_posix().casefold(),
-                not entry.is_folder,
-            ),
-        )
-        for entry in ordered:
-            iid = self._iid_for_path(entry.path)
-            parent_iid = self._iid_for_path(entry.path.parent)
-            if parent_iid != "asset-root" and not self._tree.exists(parent_iid):
-                continue
-            self._entries[iid] = entry
-            self._tree.insert(
-                "" if parent_iid == "asset-root" else parent_iid,
-                "end",
-                iid=iid,
-                text=entry.name,
-                values=(entry.kind, str(entry.logical_id or "")),
+        with observe_stage(self._observer, "ui:assets:populate"):
+            self._reconcile_entries(entries)
+
+    def _reconcile_entries(self, entries: Iterable[AssetEntry]) -> None:
+        incoming = tuple(entries)
+        render_key = (self._current_directory, self._resource_root)
+        if render_key == self._last_render_key and incoming == self._last_input_entries:
+            return
+
+        decorated: list[tuple[tuple[int, str, bool], str, AssetEntry]] = []
+        for entry in incoming:
+            iid = self._path_iids.get(entry.path) or self._iid_for_path(entry.path)
+            previous = self._entries.get(iid)
+            sort_key = (
+                self._entry_sort_keys.get(iid)
+                if render_key == self._last_render_key and previous == entry
+                else None
             )
-        self._selected_entry = None
+            if sort_key is None:
+                relative_path = entry.path.relative_to(self._current_directory)
+                sort_key = (
+                    len(relative_path.parts),
+                    relative_path.as_posix().casefold(),
+                    not entry.is_folder,
+                )
+            decorated.append((sort_key, iid, entry))
+        decorated.sort(key=lambda value: value[0])
+        desired_entries: dict[str, AssetEntry] = {}
+        desired_parents: dict[str, str] = {}
+        desired_rows: dict[str, tuple[str, tuple[str, str]]] = {}
+        desired_sort_keys: dict[str, tuple[int, str, bool]] = {}
+        children_by_parent: dict[str, list[str]] = {}
+        for sort_key, iid, entry in decorated:
+            previous_parent = (
+                self._entry_parents.get(iid)
+                if render_key == self._last_render_key and iid in self._entries
+                else None
+            )
+            parent_iid = (
+                "asset-root"
+                if previous_parent == ""
+                else previous_parent
+                if previous_parent is not None
+                else self._iid_for_path(entry.path.parent)
+            )
+            if parent_iid != "asset-root" and parent_iid not in desired_entries:
+                continue
+            parent = "" if parent_iid == "asset-root" else parent_iid
+            row = self._entry_rows.get(iid) if self._entries.get(iid) == entry else None
+            values = row[1] if row is not None else (entry.kind, str(entry.logical_id or ""))
+            desired_entries[iid] = entry
+            desired_parents[iid] = parent
+            desired_rows[iid] = row if row is not None else (entry.name, values)
+            desired_sort_keys[iid] = sort_key
+            children_by_parent.setdefault(parent, []).append(iid)
+
+        desired_order = {parent: tuple(children) for parent, children in children_by_parent.items()}
+        desired_indices = {
+            iid: index for children in desired_order.values() for index, iid in enumerate(children)
+        }
+        desired_ids = set(desired_entries)
+        stale_ids = set(self._entries) - desired_ids
+        selected = self._tree.selection()
+        selected_iid = selected[0] if selected else None
+
+        # Treeview.delete() removes a subtree. Delete only stale subtree roots;
+        # descendants are removed with the parent and are skipped in this loop.
+        for iid in self._entries:
+            if (
+                iid in stale_ids
+                and self._entry_parents.get(iid, "") not in stale_ids
+                and self._tree.exists(iid)
+            ):
+                self._tree.delete(iid)
+
+        working_orders = {
+            parent: [
+                iid for iid in old_order if iid in desired_ids and desired_parents[iid] == parent
+            ]
+            for parent, old_order in self._child_order.items()
+        }
+        reordered_parents: set[str] = set()
+        for parent, children in desired_order.items():
+            old_common = tuple(
+                iid
+                for iid in self._child_order.get(parent, ())
+                if iid in desired_ids and desired_parents[iid] == parent
+            )
+            new_common = tuple(
+                iid
+                for iid in children
+                if iid in self._entries and self._entry_parents.get(iid) == parent
+            )
+            if old_common != new_common:
+                reordered_parents.add(parent)
+
+        for _sort_key, iid, entry in decorated:
+            if iid not in desired_entries:
+                continue
+            parent = desired_parents[iid]
+            index = desired_indices[iid]
+            previous = self._entries.get(iid)
+            previous_parent = self._entry_parents.get(iid)
+            tree_item_exists = previous is not None and self._tree.exists(iid)
+            if not tree_item_exists:
+                siblings = working_orders.setdefault(parent, [])
+                insertion_index = min(index, len(siblings))
+                if insertion_index == len(siblings):
+                    self._tree.insert(
+                        parent, "end", iid=iid, text=entry.name, values=desired_rows[iid][1]
+                    )
+                else:
+                    self._tree.insert(
+                        parent,
+                        insertion_index,
+                        iid=iid,
+                        text=entry.name,
+                        values=desired_rows[iid][1],
+                    )
+                siblings.insert(insertion_index, iid)
+            elif previous_parent != parent:
+                siblings = working_orders.setdefault(parent, [])
+                insertion_index = min(index, len(siblings))
+                if insertion_index == len(siblings):
+                    self._tree.move(iid, parent, "end")
+                else:
+                    self._tree.move(iid, parent, insertion_index)
+                siblings.insert(insertion_index, iid)
+
+            if tree_item_exists and self._entry_rows.get(iid) != desired_rows[iid]:
+                text, values = desired_rows[iid]
+                self._tree.item(iid, text=text, values=values)
+
+        # A changed relative order is rare for path-sorted rows. When it occurs,
+        # reconcile only that parent's sequence and leave every other branch alone.
+        for parent in reordered_parents:
+            for index, iid in enumerate(desired_order[parent]):
+                if self._tree.index(iid) != index:
+                    self._tree.move(iid, parent, index)
+            working_orders[parent] = list(desired_order[parent])
+
+        self._entries = desired_entries
+        self._entry_parents = desired_parents
+        self._entry_rows = desired_rows
+        self._entry_sort_keys = desired_sort_keys
+        self._child_order = desired_order
+        self._path_iids = {self._current_directory: "asset-root"}
+        self._path_iids.update((entry.path, iid) for iid, entry in desired_entries.items())
+        self._last_render_key = render_key
+        self._last_input_entries = incoming
+        if selected_iid is not None and selected_iid in desired_entries:
+            self._selected_entry = desired_entries[selected_iid]
+            if self._tree.selection() != (selected_iid,):
+                self._tree.selection_set(selected_iid)
+        else:
+            self._selected_entry = None
+            current_selection = self._tree.selection()
+            if current_selection:
+                self._tree.selection_remove(current_selection)
 
     def _iid_for_path(self, path: Path) -> str:
         if path == self._current_directory:
@@ -183,6 +333,7 @@ class AssetBrowserPanel(tk.Frame):
         if self._current_directory == self._root_directory:
             return
         self._current_directory = self._current_directory.parent
+        self._path_iids = {self._current_directory: "asset-root"}
         self._path_var.set(str(self._current_directory))
         self.refresh()
 
@@ -217,6 +368,7 @@ class AssetBrowserPanel(tk.Frame):
             return "break"
         if entry.is_folder:
             self._current_directory = entry.path
+            self._path_iids = {self._current_directory: "asset-root"}
             self._path_var.set(str(self._current_directory))
             self.refresh()
         elif self._on_open is not None:

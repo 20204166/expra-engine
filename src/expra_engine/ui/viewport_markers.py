@@ -7,7 +7,6 @@ owns and passes in each frame; this module holds no state of its own.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -25,6 +24,7 @@ class MarkerEntry:
 
     kind: str  # "default" | "camera" | "camera_compact" | "player" | "player_compact"
     ids: list[int] = field(default_factory=list)  # all canvas IDs in draw order
+    screen_position: tuple[float, float] = (0.0, 0.0)
 
 
 def draw_entity_markers(
@@ -35,7 +35,6 @@ def draw_entity_markers(
     selected_id: str | None,
     camera: Any,
     entries: dict[str, MarkerEntry],
-    on_click: Callable[[str, Any], None],
 ) -> None:
     """Draw icon markers for non-visual entities; retain bindings across frames."""
     needed: dict[str, str] = {}  # entity_id -> kind
@@ -68,9 +67,7 @@ def draw_entity_markers(
         else:
             if existing is not None:
                 canvas.delete(f"entity:{eid}")
-            entries[eid] = _create_marker(
-                canvas, colors, entity, kind, ex, ey, is_selected, on_click
-            )
+            entries[eid] = _create_marker(canvas, colors, entity, kind, ex, ey, is_selected)
 
 
 def _update_marker_coords(
@@ -130,6 +127,7 @@ def _update_marker_coords(
         canvas.itemconfig(ids[5], fill=outline)
         canvas.coords(ids[6], ex, ey + r + 8)
         canvas.itemconfig(ids[6], fill=label_color)
+
     elif entry.kind == "player_compact":
         # [diamond_poly, label]
         marker_fill = c["player_active"] if is_selected else c["player"]
@@ -137,6 +135,8 @@ def _update_marker_coords(
         canvas.itemconfig(ids[0], fill=marker_fill, outline=outline)
         canvas.coords(ids[1], ex, ey + r + 8)
         canvas.itemconfig(ids[1], fill=label_color)
+
+    entry.screen_position = (ex, ey)
 
 
 def _create_marker(
@@ -147,7 +147,6 @@ def _create_marker(
     ex: float,
     ey: float,
     is_selected: bool,
-    on_click: Callable[[str, Any], None],
 ) -> MarkerEntry:
     """Create fresh canvas items for an entity marker; bind click handler once."""
     r = ENTITY_MARKER_RADIUS
@@ -288,9 +287,21 @@ def _create_marker(
             ex, ey + r + 8, text=entity.name, fill=label_color, font=("Helvetica", 9), tags=tag
         )
     )
-    canvas.tag_bind(
-        tag,
-        "<Button-1>",
-        lambda e, eid=entity.entity_id: on_click(eid, e),  # type: ignore[misc]
+    return MarkerEntry(kind=kind, ids=ids, screen_position=(ex, ey))
+
+
+def update_marker_selection(
+    canvas: Any,
+    colors: dict[str, str],
+    entry: MarkerEntry,
+    is_selected: bool,
+) -> None:
+    """Update one retained marker's colors without scanning scene entities."""
+    _update_marker_coords(
+        canvas,
+        colors,
+        entry,
+        entry.screen_position[0],
+        entry.screen_position[1],
+        is_selected,
     )
-    return MarkerEntry(kind=kind, ids=ids)

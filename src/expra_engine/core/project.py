@@ -31,12 +31,12 @@ from expra_engine.core.scene.document_codec import (
     DocumentCodecError,
     decode_json_payload,
     encode_protobuf,
-    from_json,
+    from_document_data,
     kind_for_document_path,
     parse_protobuf,
     protobuf_to_document_data,
 )
-from expra_engine.observability import ObservabilityWatcher
+from expra_engine.observability import ObservabilityWatcher, observe_stage
 
 if TYPE_CHECKING:
     from expra_engine.filesystem import ResourceService
@@ -47,22 +47,6 @@ CURRENT_SCHEMA_VERSION = 1
 
 class ProjectError(ValueError):
     """Raised when a project cannot be safely created or loaded."""
-
-
-@contextlib.contextmanager
-def _observe_stage(observer: ObservabilityWatcher | None, target: str):
-    """Record one bounded document-load stage when a host supplies a watcher."""
-    if observer is None:
-        yield
-        return
-    token = observer.begin(target)
-    try:
-        yield
-    except Exception as exc:
-        observer.finish(token, outcome="failure", detail=f"{type(exc).__name__}: {exc}")
-        raise
-    else:
-        observer.finish(token)
 
 
 def _apply_expected_document_kind(data: dict[str, Any], expected_kind: DocumentKind | None) -> None:
@@ -295,24 +279,28 @@ class Project:
         value = relative_path or self.entrypoint
         expected_kind = self._registered_document_kind(value)
         try:
-            with _observe_stage(observer, "document:load"):
-                with _observe_stage(observer, "document:read"):
+            with observe_stage(observer, "document:load"):
+                with observe_stage(observer, "document:read"):
                     payload = path.read_bytes()
                 if str(path).casefold().endswith(".pb"):
-                    with _observe_stage(observer, "document:decode"):
+                    with observe_stage(observer, "document:decode"):
                         envelope = parse_protobuf(payload)
-                    with _observe_stage(observer, "document:convert"):
+                    with observe_stage(observer, "document:convert"):
                         data = protobuf_to_document_data(envelope)
                         _apply_expected_document_kind(data, expected_kind)
                 else:
-                    with _observe_stage(observer, "document:decode"):
+                    with observe_stage(observer, "document:decode"):
                         data = decode_json_payload(payload)
                         _apply_expected_document_kind(data, expected_kind)
-                with _observe_stage(observer, "document:construct"):
-                    document = from_json(data)
+                with observe_stage(observer, "document:construct"):
+                    document = from_document_data(
+                        data,
+                        validate=not str(path).casefold().endswith(".pb"),
+                        observer=observer,
+                    )
 
                 current_chain = _chain | ({value} if value is not None else set())
-                with _observe_stage(observer, "scene:resolve_instances"):
+                with observe_stage(observer, "scene:resolve_instances"):
                     resolve_scene_instances(
                         document,
                         resolve_source=lambda source: self.load_scene(

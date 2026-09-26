@@ -10,7 +10,12 @@ import inspect
 import uuid
 from typing import TYPE_CHECKING, Any, TypeVar
 
-from expra_engine.core.component import Component, OpaqueComponent, component_from_dict
+from expra_engine.core.component import (
+    Component,
+    OpaqueComponent,
+    component_from_dict,
+    registered_component_types,
+)
 
 if TYPE_CHECKING:
     from expra_engine.runtime.behaviour import Behaviour, BehaviourFactory
@@ -195,7 +200,7 @@ class Entity:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> Entity:
+    def from_dict(cls, data: dict[str, Any], *, include_components: bool = True) -> Entity:
         entity = cls(
             name=str(data["name"]),
             entity_id=str(data["entity_id"]),
@@ -205,13 +210,28 @@ class Entity:
         )
         for tag in data.get("tags", []):
             entity.add_tag(str(tag))
-        for component_data in data.get("components", []):
-            try:
-                entity.add_component(component_from_dict(component_data))
-            except (ValueError, KeyError):
-                if isinstance(component_data, dict) and isinstance(component_data.get("type"), str):
-                    entity.add_component(OpaqueComponent(component_data))
+        if include_components:
+            entity._restore_components(data)
         return entity
+
+    def _restore_components(self, data: dict[str, Any]) -> None:
+        components = data.get("components", [])
+        if not isinstance(components, list):
+            raise ValueError("entity components must be a list")
+        for component_data in components:
+            if not isinstance(component_data, dict):
+                raise ValueError("entity component must be an object")
+            try:
+                self.add_component(component_from_dict(component_data))
+            except (TypeError, ValueError, KeyError):
+                component_type = component_data.get("type")
+                if not isinstance(component_type, str):
+                    raise
+                if component_type in {
+                    name for name, _component_cls in registered_component_types()
+                }:
+                    raise
+                self.add_component(OpaqueComponent(component_data))
 
     def __repr__(self) -> str:
         return f"Entity({self.name!r}, id={self.entity_id!r})"

@@ -3,6 +3,7 @@
 import unittest
 from dataclasses import dataclass
 
+import expra_engine.core.component as component_module
 from expra_engine.core.component import (
     Component,
     TransformComponent,
@@ -194,6 +195,27 @@ class TestTransformComponent(unittest.TestCase):
 
 
 class ComponentRegistryTests(unittest.TestCase):
+    def test_builtin_registry_initializes_once_during_repeated_deserialization(self) -> None:
+        previous = getattr(component_module, "_BUILTINS_REGISTERED", False)
+        original = component_module._register_builtin_components
+        calls = 0
+
+        def counted_registration() -> None:
+            nonlocal calls
+            calls += 1
+            original()
+
+        component_module._BUILTINS_REGISTERED = False
+        component_module._register_builtin_components = counted_registration
+        try:
+            component_from_dict({"type": "transform"})
+            component_from_dict({"type": "transform"})
+        finally:
+            component_module._register_builtin_components = original
+            component_module._BUILTINS_REGISTERED = previous
+
+        self.assertEqual(calls, 1)
+
     def test_registered_component_types_exposes_editor_choices(self) -> None:
         names = dict(registered_component_types())
         self.assertIs(names["transform"], TransformComponent)

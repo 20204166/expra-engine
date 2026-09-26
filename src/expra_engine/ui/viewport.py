@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import math
 import tkinter as tk
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from expra_engine.core.camera import Camera2D
@@ -39,7 +39,11 @@ from expra_engine.ui.viewport_camera import (
     compute_frame_fit,
 )
 from expra_engine.ui.viewport_camera_overlay import draw_camera_overlay
-from expra_engine.ui.viewport_markers import MarkerEntry, draw_entity_markers
+from expra_engine.ui.viewport_markers import (
+    MarkerEntry,
+    draw_entity_markers,
+    update_marker_selection,
+)
 from expra_engine.ui.viewport_overlays import draw_collider_overlays
 from expra_engine.ui.viewport_render_target import (
     ColliderOutline,
@@ -118,6 +122,7 @@ class ViewportPanel(tk.Frame):
         self._canvas_items: dict[str, _CanvasEntry] = {}  # retained visual-entity items
         self._marker_entries: dict[str, MarkerEntry] = {}  # retained icon-marker items
         self._entity_map: dict[str, Any] = {}  # built once per render() call; O(1) lookup
+        self._items_by_id: dict[str, RenderItem] = {}
 
         # Canvas fills the frame
         self._canvas = tk.Canvas(
@@ -236,8 +241,53 @@ class ViewportPanel(tk.Frame):
             animated_players=animated_players,
             observer=self._observer,
         )
+        self._items_by_id = {item.key: item for item in self._target.items}
         self._target_dirty = False
         self._redraw()
+
+    def update_selection(
+        self, selected_id: str | None, selected_ids: frozenset[str] = frozenset()
+    ) -> None:
+        """Update edit-mode selection overlays without rebuilding the scene frame."""
+        if not self._editor_overlays or self._scene is None:
+            self.render(self._scene, selected_id, selected_ids=selected_ids)
+            return
+        previous_id = self._selected_id
+        ids = selected_ids or (frozenset({selected_id}) if selected_id else frozenset())
+        if previous_id == selected_id and ids == self._selected_ids_set:
+            return
+
+        self._selected_id = selected_id
+        self._selected_ids_set = ids
+        self._target = replace(self._target, selected_id=selected_id)
+        self._canvas.delete("selection")
+
+        for entity_id in dict.fromkeys((previous_id, selected_id)):
+            if entity_id is None:
+                continue
+            marker = self._marker_entries.get(entity_id)
+            if marker is not None:
+                update_marker_selection(
+                    self._canvas,
+                    self._colors,
+                    marker,
+                    entity_id == selected_id,
+                )
+            item = self._items_by_id.get(entity_id)
+            entry = self._canvas_items.get(entity_id)
+            if item is None or entry is None:
+                continue
+            if entry.label is not None:
+                self._canvas.itemconfig(
+                    entry.label,
+                    fill=(
+                        self._colors["accent_ink"]
+                        if entity_id == selected_id
+                        else self._colors["ink_3"]
+                    ),
+                )
+            if entity_id == selected_id and self._editor_overlays:
+                self._draw_selection_outline(item)
 
     def set_resource_service(self, resource_service: Any | None) -> None:
         """Replace project resources and discard backend-owned decoded textures."""
@@ -363,6 +413,7 @@ class ViewportPanel(tk.Frame):
             animated_players=getattr(self, "_animated_players", None),
         )
         self._target_dirty = False
+        self._items_by_id = {item.key: item for item in self._target.items}
         self._schedule_redraw()
 
     def _refresh_target_if_dirty(self) -> None:
@@ -378,6 +429,7 @@ class ViewportPanel(tk.Frame):
             observer=self._observer,
             animated_players=getattr(self, "_animated_players", None),
         )
+        self._items_by_id = {item.key: item for item in self._target.items}
         self._target_dirty = False
 
     def _redraw(self) -> None:
@@ -482,7 +534,6 @@ class ViewportPanel(tk.Frame):
                 self._selected_id,
                 self._camera,
                 self._marker_entries,
-                self._click_entity,
             )
         else:
             for eid in list(self._marker_entries):
@@ -579,10 +630,6 @@ class ViewportPanel(tk.Frame):
                 body_id = self._canvas.create_oval(
                     ex - sx, ey - sy, ex + sx, ey + sy, fill=color, outline=outline, tags=tag
                 )
-                if editor_overlays:
-                    self._canvas.tag_bind(
-                        tag, "<Button-1>", lambda e, eid=item.key: self._click_entity(eid, e)
-                    )
         elif new_shape == "text":
             text_val = item.text.text if item.text else ""
             font_val = (item.text.font, round(item.text.size)) if item.text else "TkDefaultFont"
@@ -595,10 +642,6 @@ class ViewportPanel(tk.Frame):
                 body_id = self._canvas.create_text(
                     ex, ey, text=text_val, fill=color, font=font_val, tags=tag
                 )
-                if editor_overlays:
-                    self._canvas.tag_bind(
-                        tag, "<Button-1>", lambda e, eid=item.key: self._click_entity(eid, e)
-                    )
         elif new_shape == "poly":
             corners = self._projected_corners(item)
             if entry is not None:
@@ -610,10 +653,6 @@ class ViewportPanel(tk.Frame):
                 body_id = self._canvas.create_polygon(
                     *corners, fill=color, outline=outline, tags=tag
                 )
-                if editor_overlays:
-                    self._canvas.tag_bind(
-                        tag, "<Button-1>", lambda e, eid=item.key: self._click_entity(eid, e)
-                    )
         else:  # rect
             if entry is not None:
                 assert entry.body is not None
@@ -624,10 +663,6 @@ class ViewportPanel(tk.Frame):
                 body_id = self._canvas.create_rectangle(
                     ex - sx, ey - sy, ex + sx, ey + sy, fill=color, outline=outline, tags=tag
                 )
-                if editor_overlays:
-                    self._canvas.tag_bind(
-                        tag, "<Button-1>", lambda e, eid=item.key: self._click_entity(eid, e)
-                    )
 
         # Name label — update color/text/position in-place.
         entity = self._entity_map.get(item.key)
@@ -651,27 +686,32 @@ class ViewportPanel(tk.Frame):
                     font=("Helvetica", 9),
                     tags=tag,
                 )
-                if runtime_pixels:
-                    self._canvas.tag_bind(
-                        tag, "<Button-1>", lambda e, eid=item.key: self._click_entity(eid, e)
-                    )
         elif entry is not None and entry.label is not None:
             # Overlays turned off — remove stale label.
             self._canvas.delete(entry.label)
 
-        # Selection highlight — always recreated (at most 1 per frame, tag="selection").
-        if item.key == self._target.selected_id and editor_overlays:
-            self._canvas.create_rectangle(
-                ex - sx - 4,
-                ey - sy - 4,
-                ex + sx + 4,
-                ey + sy + 4,
-                outline=self._colors["accent"],
-                width=2,
-                tags="selection",
-            )
-
         self._canvas_items[item.key] = _CanvasEntry(shape=new_shape, body=body_id, label=label_id)
+
+        if item.key == self._target.selected_id and editor_overlays:
+            self._draw_selection_outline(item)
+
+    def _draw_selection_outline(self, item: RenderItem) -> None:
+        transform = (
+            item.sprite_transform if item.primitive.kind == "sprite" else item.world_transform
+        )
+        ex, ey = self._camera.project((transform.position[0], transform.position[1]))
+        ppu = self._camera._camera.pixel_ratio
+        sx = abs(item.primitive.size[0] * transform.scale[0]) * ppu / 2
+        sy = abs(item.primitive.size[1] * transform.scale[1]) * ppu / 2
+        self._canvas.create_rectangle(
+            ex - sx - 4,
+            ey - sy - 4,
+            ex + sx + 4,
+            ey + sy + 4,
+            outline=self._colors["accent"],
+            width=2,
+            tags="selection",
+        )
 
     def _projected_corners(self, item: RenderItem) -> tuple[float, ...]:
         transform = (
@@ -709,7 +749,9 @@ class ViewportPanel(tk.Frame):
         if not self._editor_overlays:
             return
         current_tags = self._canvas.gettags("current")
-        if any(tag.startswith("entity:") for tag in current_tags):
+        entity_tag = next((tag for tag in current_tags if tag.startswith("entity:")), None)
+        if entity_tag is not None:
+            self._click_entity(entity_tag.removeprefix("entity:"), event)
             return
         world = self._camera.unproject((float(event.x), float(event.y)))
         for item in reversed(self._target.items):

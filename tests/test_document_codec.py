@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from expra_engine.core.component import TransformComponent
-from expra_engine.core.scene import Level, LevelMetadata
+from expra_engine.core.scene import Level, LevelMetadata, document_codec
 from expra_engine.core.scene.document_codec import (
     DocumentCodecError,
     decode_protobuf,
@@ -120,6 +120,91 @@ def test_protobuf_document_requires_supported_version_and_logical_identity() -> 
     document = {"kind": "scene", "scene_id": "", "name": "", "entities": []}
     with pytest.raises(DocumentCodecError, match="scene_id"):
         decode_protobuf_document(encode_protobuf(document))
+
+
+def test_json_document_rejects_entity_missing_required_name() -> None:
+    document = {
+        "kind": "scene",
+        "scene_id": "scene-1",
+        "name": "Malformed",
+        "entities": [{"entity_id": "entity-1", "components": []}],
+    }
+
+    with pytest.raises(DocumentCodecError, match=r"entity.*name"):
+        from_json(document)
+
+
+def test_json_document_rejects_dangling_parent() -> None:
+    document = {
+        "kind": "scene",
+        "scene_id": "scene-1",
+        "name": "Malformed",
+        "entities": [{"entity_id": "entity-1", "name": "Child", "parent_id": "missing"}],
+    }
+
+    with pytest.raises(DocumentCodecError, match="parent"):
+        from_json(document)
+
+
+def test_json_document_rejects_hierarchy_cycle() -> None:
+    document = {
+        "kind": "scene",
+        "scene_id": "scene-1",
+        "name": "Malformed",
+        "entities": [
+            {"entity_id": "entity-1", "name": "One", "parent_id": "entity-2"},
+            {"entity_id": "entity-2", "name": "Two", "parent_id": "entity-1"},
+        ],
+    }
+
+    with pytest.raises(DocumentCodecError, match="cycle"):
+        from_json(document)
+
+
+def test_json_document_rejects_invalid_known_component_payload() -> None:
+    document = {
+        "kind": "scene",
+        "scene_id": "scene-1",
+        "name": "Malformed",
+        "entities": [
+            {
+                "entity_id": "entity-1",
+                "name": "Entity",
+                "components": [{"type": "transform", "x": "not-a-number"}],
+            }
+        ],
+    }
+
+    with pytest.raises(DocumentCodecError, match="invalid Scene document"):
+        from_json(document)
+
+
+def test_level_document_rejects_non_sequence_world_bounds() -> None:
+    document = {
+        "kind": "level",
+        "scene_id": "level-1",
+        "name": "Malformed",
+        "level_metadata": {"world_bounds": 42},
+        "entities": [],
+    }
+
+    with pytest.raises(DocumentCodecError, match="world_bounds"):
+        from_json(document)
+
+
+def test_owned_document_data_builder_does_not_copy_decoded_data(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    document = {"kind": "scene", "scene_id": "scene-1", "name": "Owned", "entities": []}
+
+    monkeypatch.setattr(
+        "expra_engine.core.scene.document_codec.deepcopy",
+        lambda _value: pytest.fail("owned decoded data must not be copied"),
+    )
+
+    loaded = document_codec.from_document_data(document)
+
+    assert loaded.scene_id == "scene-1"
 
 
 def test_document_path_kind_recognizes_typed_and_legacy_extensions() -> None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import tkinter as tk
+from bisect import bisect_left
 from collections.abc import Callable
 from tkinter import ttk
 from typing import Any
@@ -44,6 +45,8 @@ class HierarchyPanel(tk.Frame):
         self._on_delete = on_delete
         self._on_reparent = on_reparent
         self._entity_ids: list[str] = []
+        self._row_state: dict[str, tuple[str, str, tuple[str, ...]]] = {}
+        self._child_order: dict[str, tuple[str, ...]] = {}
         self._selected_ids: tuple[str, ...] = ()
         self._drag_start: tuple[int, int] | None = None
         self._drag_ids: tuple[str, ...] = ()
@@ -94,61 +97,168 @@ class HierarchyPanel(tk.Frame):
             delete_btn.configure(command=self._handle_delete)
 
     def render(self, scene: Scene | None) -> None:
-        """Refresh entities while retaining stable Treeview rows and state."""
+        """Reconcile only changed rows while retaining stable Treeview state."""
         selected = self._selected_ids
-        incoming: list[tuple[str, str, str, tuple[str, ...]]] = []
-        if scene is not None:
-            for entity in scene.roots():
-                self._collect_entity(scene, entity.entity_id, "", incoming)
-
+        incoming = self._collect_entities(scene)
         incoming_ids = {entity_id for entity_id, _parent, _text, _tags in incoming}
+        stale_ids = set(self._row_state) - incoming_ids
+
+        # Deleting a Treeview parent removes its full subtree. Delete only the
+        # stale subtree roots; descendants disappear with their parent.
         for entity_id in self._entity_ids:
-            if entity_id not in incoming_ids and self._tree.exists(entity_id):
+            previous = self._row_state.get(entity_id)
+            if (
+                entity_id in stale_ids
+                and previous is not None
+                and previous[0] not in stale_ids
+                and self._tree.exists(entity_id)
+            ):
                 self._tree.delete(entity_id)
 
+        desired_children: dict[str, list[str]] = {}
+        row_by_id: dict[str, tuple[str, str, tuple[str, ...]]] = {}
         for entity_id, parent, text, tags in incoming:
-            if self._tree.exists(entity_id):
+            desired_children.setdefault(parent, []).append(entity_id)
+            row_by_id[entity_id] = (parent, text, tags)
+        desired_order = {
+            parent: tuple(entity_ids) for parent, entity_ids in desired_children.items()
+        }
+        desired_indices = {
+            entity_id: index
+            for entity_ids in desired_order.values()
+            for index, entity_id in enumerate(entity_ids)
+        }
+        working_orders = {
+            parent: [
+                entity_id
+                for entity_id in old_order
+                if entity_id in row_by_id and row_by_id[entity_id][0] == parent
+            ]
+            for parent, old_order in self._child_order.items()
+        }
+
+        # Existing siblings only require reordering when their relative order
+        # actually changed. Adds/removes/reparents are positioned directly at
+        # their requested sibling index below.
+        reordered_parents: set[str] = set()
+        for parent, entity_ids in desired_order.items():
+            old_common = tuple(
+                entity_id
+                for entity_id in self._child_order.get(parent, ())
+                if entity_id in incoming_ids and row_by_id[entity_id][0] == parent
+            )
+            new_common = tuple(
+                entity_id
+                for entity_id in entity_ids
+                if self._row_state.get(entity_id, (None, "", ()))[0] == parent
+            )
+            if old_common != new_common:
+                reordered_parents.add(parent)
+
+        for entity_id, parent, text, tags in incoming:
+            previous = self._row_state.get(entity_id)
+            tree_item_exists = previous is not None and self._tree.exists(entity_id)
+            index = desired_indices[entity_id]
+            if not tree_item_exists:
+                siblings = working_orders.setdefault(parent, [])
+                insertion_index = min(index, len(siblings))
+                if insertion_index == len(siblings):
+                    self._tree.insert(parent, "end", iid=entity_id, text=text, tags=tags)
+                else:
+                    self._tree.insert(parent, insertion_index, iid=entity_id, text=text, tags=tags)
+                siblings.insert(insertion_index, entity_id)
+            elif previous is not None and previous[0] != parent:
+                siblings = working_orders.setdefault(parent, [])
+                insertion_index = min(index, len(siblings))
+                if insertion_index == len(siblings):
+                    self._tree.move(entity_id, parent, "end")
+                else:
+                    self._tree.move(entity_id, parent, insertion_index)
+                siblings.insert(insertion_index, entity_id)
+            elif previous is not None and parent not in reordered_parents:
+                # Unchanged row order is owned by this panel's cached snapshot;
+                # avoid a Tk round trip for a no-op move.
+                pass
+
+            if previous is not None and tree_item_exists and previous[1:] != (text, tags):
                 self._tree.item(entity_id, text=text, tags=tags)
-                self._tree.move(entity_id, parent, "end")
-            else:
-                self._tree.insert(parent, "end", iid=entity_id, text=text, tags=tags)
-        # Measured (Phase H): this used to rebuild self._entity_ids via an
-        # O(n) filter on every entity in `incoming` (O(n^2) overall, ~1/3 of
-        # render()'s own cost at 1000 entities) purely to end up equal to
-        # `incoming`'s own ids anyway -- the filtered result was discarded by
-        # the unconditional .extend() that followed. That also silently kept
-        # stale ids (already tree.delete()'d above) in this list forever
-        # across scene switches with disjoint entity sets -- unbounded
-        # growth, not just slow. One assignment replaces both bugs.
+
+        for parent in reordered_parents:
+            current_order = self._tree.get_children(parent)
+            current_positions = {entity_id: index for index, entity_id in enumerate(current_order)}
+            desired = desired_order[parent]
+            stable_ids = self._longest_stable_siblings(desired, current_positions)
+            for index, entity_id in enumerate(desired):
+                if entity_id not in stable_ids:
+                    self._tree.move(entity_id, parent, index)
+            working_orders[parent] = list(desired_order[parent])
+
+        self._row_state = row_by_id
+        self._child_order = desired_order
         self._entity_ids = [entity_id for entity_id, _parent, _text, _tags in incoming]
-        kept = tuple(entity_id for entity_id in selected if self._tree.exists(entity_id))
+        kept = tuple(entity_id for entity_id in selected if entity_id in incoming_ids)
         if kept:
             self.select_many(kept)
         else:
-            self._selected_ids = ()
+            self.select_many(())
 
-    def _collect_entity(
-        self,
-        scene: Scene,
-        entity_id: str,
-        parent: str,
-        incoming: list[tuple[str, str, str, tuple[str, ...]]],
-    ) -> None:
-        entity = scene.find_entity(entity_id)
-        if entity is None:
-            return
-        state = "disabled" if not entity.enabled else ""
-        kind = editor_entity_kind(entity.name)
-        label = (
-            f"[{EDITOR_ENTITY_MARKERS[kind]}] {entity.name}" if kind is not None else entity.name
-        )
-        if entity.get_component(SceneInstanceComponent) is not None:
-            label = f"[INST] {label}"
-        elif scene.is_instance_materialized(entity.entity_id):
-            label = f"[in] {label}"
-        incoming.append((entity.entity_id, parent, label, (state,) if state else ()))
-        for child in scene.children_of(entity.entity_id):
-            self._collect_entity(scene, child.entity_id, entity.entity_id, incoming)
+    def _collect_entities(self, scene: Scene | None) -> list[tuple[str, str, str, tuple[str, ...]]]:
+        """Flatten a scene in stable preorder without recursion depth limits."""
+        if scene is None:
+            return []
+        incoming: list[tuple[str, str, str, tuple[str, ...]]] = []
+        stack = [(entity, "") for entity in reversed(scene.roots())]
+        while stack:
+            entity, parent = stack.pop()
+            state = "disabled" if not entity.enabled else ""
+            kind = editor_entity_kind(entity.name)
+            label = (
+                f"[{EDITOR_ENTITY_MARKERS[kind]}] {entity.name}"
+                if kind is not None
+                else entity.name
+            )
+            if entity.get_component(SceneInstanceComponent) is not None:
+                label = f"[INST] {label}"
+            elif scene.is_instance_materialized(entity.entity_id):
+                label = f"[in] {label}"
+            incoming.append((entity.entity_id, parent, label, (state,) if state else ()))
+            children = scene.children_of(entity.entity_id)
+            stack.extend((child, entity.entity_id) for child in reversed(children))
+        return incoming
+
+    @staticmethod
+    def _longest_stable_siblings(
+        desired: tuple[str, ...], current_positions: dict[str, int]
+    ) -> set[str]:
+        """Return a longest in-order subset that can remain unmoved."""
+        sequence = [
+            (entity_id, current_positions[entity_id])
+            for entity_id in desired
+            if entity_id in current_positions
+        ]
+        if not sequence:
+            return set()
+
+        tails: list[int] = []
+        tail_indices: list[int] = []
+        previous = [-1] * len(sequence)
+        for index, (_entity_id, position) in enumerate(sequence):
+            slot = bisect_left(tails, position)
+            if slot:
+                previous[index] = tail_indices[slot - 1]
+            if slot == len(tails):
+                tails.append(position)
+                tail_indices.append(index)
+            else:
+                tails[slot] = position
+                tail_indices[slot] = index
+
+        stable: set[str] = set()
+        index = tail_indices[-1]
+        while index >= 0:
+            stable.add(sequence[index][0])
+            index = previous[index]
+        return stable
 
     def select(self, entity_id: str | None) -> None:
         """Select a single entity, or clear selection when ``None``."""

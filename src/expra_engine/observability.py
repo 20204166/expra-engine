@@ -6,6 +6,7 @@ implementation, no System Analyzer imports.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import statistics
 import threading
@@ -317,3 +318,19 @@ class ObservabilityWatcher:
             tuple(sorted(metric.counters.items())),
             tuple(sorted(metric.gauges.items())),
         )
+
+
+@contextlib.contextmanager
+def observe_stage(observer: ObservabilityWatcher | None, target: str):
+    """Record one bounded stage without changing the wrapped operation."""
+    if observer is None:
+        yield
+        return
+    token = observer.begin(target)
+    try:
+        yield
+    except Exception as exc:
+        observer.finish(token, outcome="failure", detail=f"{type(exc).__name__}: {exc}")
+        raise
+    else:
+        observer.finish(token)

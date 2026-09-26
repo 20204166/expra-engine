@@ -7,6 +7,7 @@ from typing import Any, cast
 
 from expra_engine.core.document_kind import DocumentKind
 from expra_engine.core.scene.scene import Scene
+from expra_engine.observability import ObservabilityWatcher
 
 __all__ = ("Level", "LevelMetadata")
 
@@ -76,7 +77,12 @@ class Level(Scene):
         return data
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> Level:
-        level = cast(Level, super().from_dict(data))
+    def from_dict(
+        cls,
+        data: dict[str, Any],
+        *,
+        observer: ObservabilityWatcher | None = None,
+    ) -> Level:
+        level = cast(Level, super().from_dict(data, observer=observer))
         level.level_metadata = LevelMetadata.from_dict(data.get("level_metadata", {}))
         return level

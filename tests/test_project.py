@@ -123,6 +123,32 @@ class TestProjectCreateAndSave(unittest.TestCase):
             with self.assertRaisesRegex(ProjectError, "corrupt protobuf"):
                 project.load_document("scenes/corrupt.scene.pb")
 
+    def test_failed_document_load_does_not_publish_partial_scene(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Project.create("Atomic Load", Path(tmp) / "project")
+            valid = Scene("Valid", scene_id="valid")
+            project.save_scene(valid, "scenes/valid.json")
+            project.load_document("scenes/valid.json")
+            active = project.active_scene
+            bad_path = project.path / "scenes" / "bad.json"
+            bad_path.write_text(
+                json.dumps(
+                    {
+                        "kind": "scene",
+                        "scene_id": "bad",
+                        "name": "Bad",
+                        "entities": [{"entity_id": "partial"}],
+                    }
+                )
+            )
+            project.register_scene_path("scenes/bad.json")
+
+            with self.assertRaises(ProjectError):
+                project.load_document("scenes/bad.json")
+
+            self.assertIs(project.active_scene, active)
+            self.assertEqual(active.scene_id if active else None, "valid")
+
     def test_explicit_migration_writes_pb_and_preserves_legacy_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project = Project.create("Migration", Path(tmp) / "project")

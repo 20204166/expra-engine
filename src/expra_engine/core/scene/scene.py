@@ -7,7 +7,6 @@ all entity IDs and component state.
 
 from __future__ import annotations
 
-import contextlib
 import copy
 import math
 import uuid
@@ -18,6 +17,7 @@ from expra_engine.core.document_kind import DocumentKind
 from expra_engine.core.entity import Entity
 from expra_engine.core.math_utils import compose_2d_pose
 from expra_engine.core.scene.camera import SceneCamera
+from expra_engine.observability import ObservabilityWatcher, observe_stage
 
 
 def _clone_components_and_tags(source: Entity, target: Entity) -> None:
@@ -319,17 +319,62 @@ class Scene:
         self._instance_children.pop(root_id, None)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> Scene:
+    def from_dict(
+        cls,
+        data: dict[str, Any],
+        *,
+        observer: ObservabilityWatcher | None = None,
+    ) -> Scene:
         camera = data.get("camera")
         scene = cls(
             name=str(data["name"]),
             scene_id=str(data["scene_id"]),
             camera=camera if isinstance(camera, dict) else None,
         )
-        for entity_data in data.get("entities", []):
-            with contextlib.suppress(KeyError, TypeError):
-                scene.add_entity(Entity.from_dict(entity_data))
+        entity_data_list = data.get("entities", [])
+        if not isinstance(entity_data_list, list):
+            raise ValueError("document entities must be a list")
+        staged: list[tuple[Entity, dict[str, Any]]] = []
+        with observe_stage(observer, "document:construct:entities"):
+            for entity_data in entity_data_list:
+                if not isinstance(entity_data, dict):
+                    raise ValueError("document entity must be an object")
+                try:
+                    staged.append(
+                        (Entity.from_dict(entity_data, include_components=False), entity_data)
+                    )
+                except (KeyError, TypeError, ValueError) as exc:
+                    raise ValueError(f"invalid entity: {exc}") from exc
+        with observe_stage(observer, "document:construct:components"):
+            for entity, entity_data in staged:
+                entity._restore_components(entity_data)
+        with observe_stage(observer, "document:construct:hierarchy"):
+            for entity, _entity_data in staged:
+                scene.add_entity(entity)
+            scene._validate_hierarchy()
         return scene
+
+    def _validate_hierarchy(self) -> None:
+        """Reject dangling parents and cycles before a loaded scene is exposed."""
+        entities = self._ensure_entity_index()
+        for entity in self._entities:
+            if entity.parent_id is not None and entity.parent_id not in entities:
+                raise ValueError(
+                    f"entity {entity.entity_id!r} has missing parent {entity.parent_id!r}"
+                )
+
+        state: dict[str, int] = {}
+        for start in entities:
+            current: str | None = start
+            trail: list[str] = []
+            while current is not None and state.get(current, 0) == 0:
+                state[current] = 1
+                trail.append(current)
+                current = entities[current].parent_id
+            if current is not None and state.get(current) == 1:
+                raise ValueError("entity hierarchy contains a cycle")
+            for entity_id in trail:
+                state[entity_id] = 2
 
     def __repr__(self) -> str:
         return f"Scene({self.name!r}, id={self.scene_id!r}, entities={len(self._entities)})"
@@ -347,12 +392,16 @@ class Scene:
         returns a fresh list, never the cached list itself, so callers can
         never mutate cached state.
         """
+        return list(self._ensure_children_index().get(parent_id, ()))
+
+    def _ensure_children_index(self) -> dict[str | None, list[Entity]]:
+        """Build the derived parent index once for internal and public reads."""
         if self._children_index is None:
             index: dict[str | None, list[Entity]] = {}
             for entity in self._entities:
                 index.setdefault(entity.parent_id, []).append(entity)
             self._children_index = index
-        return list(self._children_index.get(parent_id, ()))
+        return self._children_index
 
     def roots(self) -> list[Entity]:
         """Return top-level entities (those with no parent)."""
@@ -404,8 +453,6 @@ class Scene:
 
         Adapted from ppb/gomlib.py walk() (PursuedPyBear, Artistic License 2.0).
         """
-        from collections import deque
-
         result: list[Entity] = []
         if root_id is not None:
             root = self.find_entity(root_id)
@@ -415,12 +462,14 @@ class Scene:
         else:
             starts = self.roots()
 
-        queue: deque[Entity] = deque(starts)
-        while queue:
-            entity = queue.popleft()
+        children_index = self._ensure_children_index()
+        queue = list(starts)
+        cursor = 0
+        while cursor < len(queue):
+            entity = queue[cursor]
+            cursor += 1
             result.append(entity)
-            for child in self.children_of(entity.entity_id):
-                queue.append(child)
+            queue.extend(children_index.get(entity.entity_id, ()))
         return result
 
     # ------------------------------------------------------------------
