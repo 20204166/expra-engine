@@ -7,7 +7,7 @@ import subprocess
 import sys
 import uuid
 from dataclasses import replace
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from tkinter import filedialog, messagebox, simpledialog
 from typing import Any
 
@@ -15,6 +15,8 @@ from expra_engine.core.project import Project, ProjectError
 from expra_engine.core.scene import Level, Scene
 from expra_engine.runtime.input import ActionId, PhysicalInput
 from expra_engine.runtime.script_registry import ScriptRegistry
+
+_PROJECT_POLL_INTERVAL_MS = 100
 
 
 class ProjectWorkflow:
@@ -24,6 +26,7 @@ class ProjectWorkflow:
         self.window = window
         self._pending_restore: tuple[Any, Path | None] | None = None
         self._project_process: subprocess.Popen[bytes] | None = None
+        self._project_poll_id: str | None = None
 
     def new_project(self) -> None:
         window = self.window
@@ -155,6 +158,13 @@ class ProjectWorkflow:
     def open_loaded(self, project: Project) -> None:
         window = self.window
         scene = project.load_document(observer=window._observer)
+        self.stop_project()
+        runtime_preview = getattr(window, "_runtime_preview", None)
+        if runtime_preview is not None:
+            runtime_preview.stop()
+        run_state = getattr(window._engine, "run_state", None)
+        if getattr(run_state, "value", run_state) != "edit":
+            window._engine.stop()
         window._engine.set_project(project)
         window._engine.set_scene(scene)
         window._viewport.set_resource_service(project.resource_service(observer=window._observer))
@@ -262,21 +272,23 @@ class ProjectWorkflow:
         )
         if not path:
             return
-        window._last_save_path = Path(path)
+        target = Path(path)
         if project is None:
-            window._last_save_path.write_text(
-                json.dumps(scene.to_dict(), indent=2), encoding="utf-8"
-            )
-            window._console.log(f"[Editor] Scene saved as: {window._last_save_path}")
+            try:
+                target.write_text(json.dumps(scene.to_dict(), indent=2), encoding="utf-8")
+            except OSError as exc:
+                messagebox.showerror("Save Scene As", str(exc), parent=window._root)
+                return
+            window._last_save_path = target
+            window._console.log(f"[Editor] Scene saved as: {target}")
             return
         try:
-            relative = window._last_save_path.resolve().relative_to(project.path).as_posix()
-        except ValueError:
-            messagebox.showerror(
-                "Save Scene As", "Scene must be saved inside the project.", parent=window._root
-            )
+            relative = target.resolve().relative_to(project.path.resolve()).as_posix()
+            project.save_document(scene, relative)
+        except (OSError, ProjectError, ValueError) as exc:
+            messagebox.showerror("Save Scene As", str(exc), parent=window._root)
             return
-        project.save_document(scene, relative)
+        window._last_save_path = project.document_file(relative)
         window._root.title(self.window_title())
         window._console.log(f"[Editor] Scene saved as: {relative}")
 
@@ -365,18 +377,33 @@ class ProjectWorkflow:
         project = window._engine.project
         if project is None:
             return
-        if self._project_process is not None:
-            if self._project_process.poll() is None:
+        process = self._project_process
+        if process is not None:
+            try:
+                return_code = process.poll()
+            except OSError as exc:
+                window._console.log(
+                    f"[Editor] Could not check project process: {exc}", level="error"
+                )
                 return
-            self._project_process = None
-        script = project.path / project.script_entry_point
+            if return_code is None:
+                return
+            self._forget_project_process(process)
+            self._report_project_exit(return_code)
+        try:
+            script = self._script_entry_point_path(project)
+        except (OSError, ProjectError, ValueError) as exc:
+            messagebox.showerror("Run Project", str(exc), parent=window._root)
+            return
         if not script.is_file():
             messagebox.showerror(
-                "Run Project", f"Script entry point not found: {script}", parent=window._root
+                "Run Project",
+                f"Script entry point not found: {project.script_entry_point}",
+                parent=window._root,
             )
             return
         try:
-            self._project_process = subprocess.Popen(
+            process = subprocess.Popen(
                 [sys.executable, str(script)],
                 cwd=project.path,
                 stdin=subprocess.DEVNULL,
@@ -386,20 +413,159 @@ class ProjectWorkflow:
         except OSError as exc:
             messagebox.showerror("Run Project", str(exc), parent=window._root)
             return
+        self._project_process = process
+        if not self._schedule_project_poll(process):
+            try:
+                self.stop_project()
+            except (OSError, subprocess.TimeoutExpired) as stop_error:
+                detail = f"Could not monitor project process; stopping it also failed: {stop_error}"
+            else:
+                detail = "Could not monitor project process; it was stopped."
+            messagebox.showerror("Run Project", detail, parent=window._root)
+            return
         window._console.log(f"[Editor] Started project: {project.script_entry_point}")
+
+    @staticmethod
+    def _script_entry_point_path(project: Project) -> Path:
+        entry_point = project.script_entry_point
+        if not isinstance(entry_point, str) or not entry_point.strip():
+            raise ProjectError("project script entry point must be a non-empty relative path")
+        candidate = Path(entry_point)
+        windows_candidate = PureWindowsPath(entry_point)
+        if (
+            candidate.is_absolute()
+            or windows_candidate.is_absolute()
+            or windows_candidate.drive
+            or ".." in candidate.parts
+            or ".." in windows_candidate.parts
+        ):
+            raise ProjectError("project script entry point must remain inside the project")
+        project_root = project.path.resolve()
+        script = (project_root / candidate).resolve()
+        try:
+            script.relative_to(project_root)
+        except ValueError as error:
+            raise ProjectError("project script entry point escapes the project") from error
+        return script
+
+    def _schedule_project_poll(self, process: subprocess.Popen[bytes]) -> bool:
+        if self._project_process is not process:
+            return False
+        timer = getattr(self.window, "_timer", None)
+        if timer is None:
+            return False
+        try:
+            identifier = timer.schedule(
+                _PROJECT_POLL_INTERVAL_MS,
+                self._poll_project_process,
+                process,
+            )
+        except Exception:  # noqa: BLE001
+            return False
+        if identifier is None:
+            return False
+        self._project_poll_id = identifier
+        return True
+
+    def _poll_project_process(self, process: subprocess.Popen[bytes]) -> None:
+        if self._project_process is not process:
+            return
+        self._project_poll_id = None
+        try:
+            return_code = process.poll()
+        except OSError as error:
+            try:
+                self.stop_project()
+            except (OSError, subprocess.TimeoutExpired) as stop_error:
+                self.window._console.log(
+                    f"[Editor] Could not poll project process ({error}) or stop it ({stop_error}).",
+                    level="error",
+                )
+            else:
+                self.window._console.log(
+                    f"[Editor] Stopped project after process polling failed: {error}",
+                    level="error",
+                )
+            return
+        if return_code is not None:
+            self._forget_project_process(process)
+            self._report_project_exit(return_code)
+            return
+        if not self._schedule_project_poll(process):
+            try:
+                self.stop_project()
+            except (OSError, subprocess.TimeoutExpired) as error:
+                self.window._console.log(
+                    f"[Editor] Could not monitor or stop project process: {error}",
+                    level="error",
+                )
+            else:
+                self.window._console.log(
+                    "[Editor] Stopped project because process monitoring became unavailable.",
+                    level="error",
+                )
+
+    def _report_project_exit(self, return_code: int) -> None:
+        status = "exited" if return_code == 0 else f"exited with status {return_code}"
+        level = "info" if return_code == 0 else "error"
+        self.window._console.log(f"[Editor] Project {status}", level=level)
+
+    def _cancel_project_poll(self) -> None:
+        identifier = self._project_poll_id
+        self._project_poll_id = None
+        timer = getattr(self.window, "_timer", None)
+        if identifier is not None and timer is not None:
+            timer.cancel(identifier)
+
+    def _forget_project_process(self, process: subprocess.Popen[bytes]) -> None:
+        if self._project_process is not process:
+            return
+        self._project_process = None
+        self._cancel_project_poll()
+
+    @staticmethod
+    def _process_exited(process: subprocess.Popen[bytes]) -> bool:
+        try:
+            return process.poll() is not None
+        except OSError:
+            return False
 
     def stop_project(self) -> None:
         """Terminate a child launched by Run Project, if it is still alive."""
         process = self._project_process
-        self._project_process = None
-        if process is None or process.poll() is not None:
+        self._cancel_project_poll()
+        if process is None:
             return
-        process.terminate()
+        if self._process_exited(process):
+            self._forget_project_process(process)
+            return
+        try:
+            process.terminate()
+        except OSError:
+            if self._process_exited(process):
+                self._forget_project_process(process)
+                return
+            self._schedule_project_poll(process)
+            raise
         try:
             process.wait(timeout=2)
         except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=2)
+            try:
+                process.kill()
+                process.wait(timeout=2)
+            except (OSError, subprocess.TimeoutExpired):
+                if self._process_exited(process):
+                    self._forget_project_process(process)
+                    return
+                self._schedule_project_poll(process)
+                raise
+        except OSError:
+            if self._process_exited(process):
+                self._forget_project_process(process)
+                return
+            self._schedule_project_poll(process)
+            raise
+        self._forget_project_process(process)
 
     def restore_after_run_project(self) -> None:
         """Undo ``run_project``'s scene swap once the run has stopped."""

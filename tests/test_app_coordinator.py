@@ -55,14 +55,41 @@ class TestAppCoordinatorCoalescing(unittest.TestCase):
 
     def test_stale_result_rejected(self) -> None:
         coord = AppCoordinator(runner=FakeRunner())
-        gen1, _ = coord.begin("op")
-        _gen2, _ = coord.begin("op")  # coalesced, but...
-        # Manually force gen2 to claim a new run
-        coord.state("op").rerun_requested = False
-        _accepted1, _ = coord.finish("op", gen1, result="stale")
-        # gen1 is stale because gen moved on (it was coalesced so state gen is 1, gen1=1 too)
-        # Verify last_result only gets the non-stale completion
-        self.assertIn(coord.last_result("op"), ("stale", None))
+        gen1, started = coord.begin("op")
+        self.assertTrue(started)
+        self.assertTrue(coord.finish("op", gen1, result="first result")[0])
+        gen2, started = coord.begin("op")
+        self.assertTrue(started)
+
+        accepted_old_result, _rerun = coord.finish("op", gen1, result="stale")
+
+        self.assertGreater(gen2, gen1)
+        self.assertFalse(accepted_old_result)
+        self.assertEqual(coord.last_result("op"), "first result")
+        self.assertTrue(coord.in_flight("op"))
+
+    def test_clear_and_restart_rejects_stale_manual_finish(self) -> None:
+        coord = AppCoordinator(runner=FakeRunner())
+        old_generation, started = coord.begin("op")
+        self.assertTrue(started)
+
+        coord.clear("op")
+        new_generation, started = coord.begin("op")
+        self.assertTrue(started)
+        finished, _rerun = coord.finish("op", old_generation, result="old result")
+
+        self.assertGreater(new_generation, old_generation)
+        self.assertFalse(finished)
+        self.assertTrue(coord.in_flight("op"))
+        self.assertIsNone(coord.last_result("op"))
+
+    def test_generation_tokens_are_not_reused_after_clear(self) -> None:
+        coord = AppCoordinator(runner=FakeRunner())
+        first_generation, _started = coord.begin("first-key")
+        coord.clear("first-key")
+        next_generation, _started = coord.begin("second-key")
+
+        self.assertGreater(next_generation, first_generation)
 
 
 class TestAppCoordinatorRunDelivery(unittest.TestCase):
@@ -199,6 +226,31 @@ class TestAppCoordinatorCancellation(unittest.TestCase):
         blocker.set()
         coord.shutdown()
 
+    def test_shutdown_cancels_active_work_and_drops_queued_rerun(self) -> None:
+        runner = DeferredRunner()
+        coord = AppCoordinator(runner=runner, deliver=lambda callback: callback())
+        cancel_events: list[threading.Event] = []
+        results: list[str] = []
+
+        def active_task(cancel: threading.Event, _progress: Any) -> str:
+            cancel_events.append(cancel)
+            return "active result"
+
+        coord.run("work", active_task, on_result=lambda _key, value: results.append(value))
+        coord.run(
+            "work",
+            lambda _cancel, _progress: "rerun",
+            on_result=lambda _key, value: results.append(value),
+        )
+
+        coord.shutdown()
+        runner.run_next()
+
+        self.assertTrue(cancel_events[0].is_set())
+        self.assertEqual(runner.pending, 0)
+        self.assertEqual(results, [])
+        self.assertFalse(coord.has_pending_work)
+
 
 class TestAppCoordinatorSubscribers(unittest.TestCase):
     """subscribe/unsubscribe pattern."""
@@ -284,6 +336,78 @@ class TestAppCoordinatorObserver(unittest.TestCase):
         self.assertEqual(coord.last_result("project"), "loaded")
         self.assertEqual(observer.event_count("app:project", "cache_hit"), 1)
 
+    def test_resetting_observations_does_not_drop_worker_completion(self) -> None:
+        runner = DeferredRunner()
+        observer = ObservabilityWatcher()
+        results: list[str] = []
+        coord = AppCoordinator(
+            runner=runner,
+            deliver=lambda callback: callback(),
+            observer=observer,
+        )
+        coord.run(
+            "load", lambda _cancel, _progress: "loaded", on_result=lambda _k, v: results.append(v)
+        )
+
+        observer.reset()
+        worker_errors: list[Exception] = []
+        try:
+            runner.run_next()
+        except Exception as error:  # noqa: BLE001
+            worker_errors.append(error)
+
+        self.assertEqual(worker_errors, [])
+        self.assertEqual(results, ["loaded"])
+        self.assertFalse(coord.in_flight("load"))
+
+    def test_observer_target_limit_does_not_block_operation(self) -> None:
+        runner = DeferredRunner()
+        delivery = RecordingDelivery()
+        observer = ObservabilityWatcher()
+        results: list[str] = []
+        key = "k" * 157  # "app:" makes the observer target exceed its 160-char limit.
+        coord = AppCoordinator(runner=runner, deliver=delivery, observer=observer)
+        generation: int | None = None
+        run_error: Exception | None = None
+        try:
+            generation = coord.run(
+                key,
+                lambda _cancel, _progress: "loaded",
+                on_result=lambda _key, value: results.append(value),
+            )
+        except Exception as error:  # noqa: BLE001
+            run_error = error
+
+        self.assertIsNone(run_error)
+        self.assertEqual(generation, 1)
+        runner.run_next()
+        delivery.flush()
+        self.assertEqual(results, ["loaded"])
+        self.assertFalse(coord.in_flight(key))
+
+    def test_observer_event_failure_does_not_break_coalescing(self) -> None:
+        class RaisingEventWatcher(ObservabilityWatcher):
+            def record_event(self, target: str, event: Any) -> None:
+                raise RuntimeError("observer unavailable")
+
+        runner = DeferredRunner()
+        coord = AppCoordinator(
+            runner=runner,
+            deliver=lambda callback: callback(),
+            observer=RaisingEventWatcher(),
+        )
+        coord.run("load", lambda _cancel, _progress: "first")
+        run_error: Exception | None = None
+        coalesced_generation: int | None = 1
+        try:
+            coalesced_generation = coord.run("load", lambda _cancel, _progress: "second")
+        except Exception as error:  # noqa: BLE001
+            run_error = error
+
+        self.assertIsNone(run_error)
+        self.assertIsNone(coalesced_generation)
+        self.assertTrue(coord.state("load").rerun_requested)
+
 
 class TestAppCoordinatorResilience(unittest.TestCase):
     """Error, cancel, replay, and UI-crash resilience cases."""
@@ -322,6 +446,55 @@ class TestAppCoordinatorResilience(unittest.TestCase):
         )
         self.assertIn("executor closed", errors[0])
         self.assertFalse(coord.in_flight("export"))
+
+    def test_non_runtime_submission_failure_delivers_error_and_settles_run(self) -> None:
+        errors: list[str] = []
+
+        def reject(_worker: Any) -> None:
+            raise ValueError("invalid worker configuration")
+
+        coord = AppCoordinator(runner=reject, deliver=lambda callback: callback())
+        run_error: Exception | None = None
+        try:
+            coord.run(
+                "export",
+                lambda _cancel, _progress: "never",
+                on_error=lambda _key, message: errors.append(message),
+            )
+        except Exception as error:  # noqa: BLE001
+            run_error = error
+
+        self.assertIsNone(run_error)
+        self.assertEqual(errors, ["invalid worker configuration"])
+        self.assertFalse(coord.in_flight("export"))
+
+    def test_activity_hook_failure_does_not_strand_submitted_run(self) -> None:
+        runner = DeferredRunner()
+        results: list[str] = []
+
+        def broken_activity() -> None:
+            raise RuntimeError("activity observer unavailable")
+
+        coord = AppCoordinator(
+            runner=runner,
+            deliver=lambda callback: callback(),
+            on_activity=broken_activity,
+        )
+        run_error: Exception | None = None
+        try:
+            coord.run(
+                "load",
+                lambda _cancel, _progress: "loaded",
+                on_result=lambda _k, v: results.append(v),
+            )
+        except Exception as error:  # noqa: BLE001
+            run_error = error
+
+        self.assertIsNone(run_error)
+        self.assertEqual(runner.pending, 1)
+        runner.run_next()
+        self.assertEqual(results, ["loaded"])
+        self.assertFalse(coord.in_flight("load"))
 
     def test_repeated_failed_submissions_do_not_grow_state(self) -> None:
         coord = AppCoordinator(
@@ -383,6 +556,45 @@ class TestAppCoordinatorResilience(unittest.TestCase):
         self.assertEqual(runner.pending, 1)
         runner.run()  # execute the replay
         self.assertEqual(results, [("b", "task-b")])
+
+    def test_clear_and_restart_rejects_old_progress_and_result(self) -> None:
+        runner = DeferredRunner()
+        delivery = RecordingDelivery()
+        coord = AppCoordinator(runner=runner, deliver=delivery)
+        progress: list[str] = []
+        results: list[str] = []
+
+        def old_task(_cancel: Any, emit: Any) -> str:
+            emit("old progress")
+            return "old result"
+
+        def new_task(_cancel: Any, emit: Any) -> str:
+            emit("new progress")
+            return "new result"
+
+        coord.run(
+            "same-key",
+            old_task,
+            on_progress=lambda _key, message: progress.append(message),
+            on_result=lambda _key, result: results.append(result),
+        )
+        runner.run_next()
+        coord.clear("same-key")
+        coord.run(
+            "same-key",
+            new_task,
+            on_progress=lambda _key, message: progress.append(message),
+            on_result=lambda _key, result: results.append(result),
+        )
+
+        delivery.flush()
+        self.assertEqual((progress, results, coord.in_flight("same-key")), ([], [], True))
+
+        runner.run_next()
+        delivery.flush()
+        self.assertEqual(progress, ["new progress"])
+        self.assertEqual(results, ["new result"])
+        self.assertEqual(coord.last_result("same-key"), "new result")
 
     def test_finish_with_none_result_records_error_without_caching(self) -> None:
         coord = AppCoordinator()

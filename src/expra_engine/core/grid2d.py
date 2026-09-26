@@ -136,12 +136,16 @@ class Grid2D[T]:
                         f"({self._width}x{self._height})"
                     )
 
+        updates: list[tuple[int, int, T]] = []
         for (sx, sy), value in source_cells:
             tx, ty = dest_x + sx, dest_y + sy
             if not (0 <= tx < self._width and 0 <= ty < self._height):
                 if clip:
                     continue
-            self._cells[tx][ty] = copy.copy(value)
+            updates.append((tx, ty, copy.copy(value)))
+
+        for tx, ty, value in updates:
+            self._cells[tx][ty] = value
 
     def copy(self) -> Grid2D[T]:
         """Return a shallow copy with independent cell lists."""

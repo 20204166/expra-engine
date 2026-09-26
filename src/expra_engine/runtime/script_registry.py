@@ -89,6 +89,11 @@ class ScriptRegistry:
                 module = types.ModuleType(parent)
                 module.__path__ = [str(self.project_root / "/".join(parts[: index + 1]))]
                 sys.modules[parent] = module
+        cache_path = Path(importlib.util.cache_from_source(str(path)))
+        try:
+            cache_path.unlink(missing_ok=True)
+        except OSError as exc:
+            raise ScriptLoadError(f"could not invalidate script cache: {resource}") from exc
         module_name = f"{package}.{resource.path[:-3].replace('/', '.')}"
         spec = importlib.util.spec_from_file_location(module_name, path)
         if spec is None or spec.loader is None:

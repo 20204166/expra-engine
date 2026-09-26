@@ -108,6 +108,16 @@ class TestProjectCreateAndSave(unittest.TestCase):
             with self.assertRaisesRegex(ProjectError, "extension"):
                 project.save_document(scene, "levels/wrong.level.pb")
 
+    def test_pb_document_save_accepts_case_insensitive_typed_extension(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Project.create("PB Project", Path(tmp) / "project")
+            scene = Scene("Uppercase")
+
+            path = project.save_document(scene, "scenes/UPPER.SCENE.PB")
+
+            self.assertTrue(path.is_file())
+            self.assertEqual(project.load_document("scenes/UPPER.SCENE.PB").name, "Uppercase")
+
     def test_typed_pb_load_rejects_kind_mismatch_and_corruption(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project = Project.create("PB Project", Path(tmp) / "project")
@@ -203,6 +213,36 @@ class TestProjectCreateAndSave(unittest.TestCase):
             (root / "project.json").write_text(
                 json.dumps({"schema_version": 99, "name": "Future", "scenes": []})
             )
+            with self.assertRaises(ProjectError):
+                Project.load(root)
+
+    def test_load_wraps_invalid_schema_version_as_project_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "project.json").write_text(
+                json.dumps({"schema_version": None, "name": "Invalid", "scenes": []})
+            )
+
+            with self.assertRaises(ProjectError):
+                Project.load(root)
+
+    def test_load_rejects_empty_explicit_document_entrypoint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "project.json").write_text(
+                json.dumps({"name": "Invalid", "entrypoint": "", "scenes": []})
+            )
+
+            with self.assertRaises(ProjectError):
+                Project.load(root)
+
+    def test_load_rejects_empty_explicit_script_entrypoint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "project.json").write_text(
+                json.dumps({"name": "Invalid", "script_entry_point": "", "scenes": []})
+            )
+
             with self.assertRaises(ProjectError):
                 Project.load(root)
 

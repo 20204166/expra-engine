@@ -249,6 +249,66 @@ class MultiLevelWorkflowTests(unittest.TestCase):
             finally:
                 window._on_close()
 
+    def test_switching_projects_stops_the_current_run_project_child(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            window, current_project = self._window_with_project(root)
+            (current_project.path / "__main__.py").write_text(
+                "import time\ntime.sleep(30)\n", encoding="utf-8"
+            )
+            replacement = Project.create("Replacement", root / "Replacement")
+            try:
+                window._project_workflow.run_project()
+                process = window._project_workflow._project_process
+                self.assertIsNotNone(process)
+                assert process is not None
+
+                window._project_workflow.open_loaded(replacement)
+
+                self.assertIs(window._engine.project, replacement)
+                self.assertIsNotNone(process.poll())
+                self.assertIsNone(window._project_workflow._project_process)
+            finally:
+                window._on_close()
+
+    def test_close_project_stops_the_current_run_project_child(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            window, project = self._window_with_project(root)
+            (project.path / "__main__.py").write_text(
+                "import time\ntime.sleep(30)\n", encoding="utf-8"
+            )
+            try:
+                window._project_workflow.run_project()
+                process = window._project_workflow._project_process
+                self.assertIsNotNone(process)
+                assert process is not None
+
+                window._project_workflow.close_project()
+
+                self.assertIsNone(window._engine.project)
+                self.assertIsNotNone(process.poll())
+                self.assertIsNone(window._project_workflow._project_process)
+            finally:
+                window._on_close()
+
+    def test_switching_projects_stops_the_embedded_runtime_preview(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            window, _current_project = self._window_with_project(root)
+            replacement = Project.create("Replacement", root / "Replacement")
+            try:
+                window._act_play()
+                self.assertIsNotNone(window._runtime_preview._after_id)
+
+                window._project_workflow.open_loaded(replacement)
+
+                self.assertEqual(window._engine.run_state, EngineRunState.EDIT)
+                self.assertIsNone(window._runtime_preview._after_id)
+                self.assertIs(window._engine.project, replacement)
+            finally:
+                window._on_close()
+
 
 if __name__ == "__main__":
     unittest.main()

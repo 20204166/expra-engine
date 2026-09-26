@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import inspect
 from typing import Any, Literal
 
@@ -42,11 +43,18 @@ class BehaviourSystem(RuntimeSystem):
         self._start_scene(engine.active_scene)
 
     def stop(self) -> None:
+        cleanup_error: Exception | None = None
         for key in tuple(self._instances):
-            self._stop_entity(*key)
+            try:
+                self._stop_entity(*key)
+            except Exception as exc:  # noqa: BLE001 - stop every entity before raising
+                if cleanup_error is None:
+                    cleanup_error = exc
         self._started_scenes.clear()
         self.engine = None
         self._observer = None
+        if cleanup_error is not None:
+            raise cleanup_error
 
     def on_frame_update(self, event: FrameUpdate, signal: Any) -> None:
         for behaviour in self._active_behaviours():
@@ -125,37 +133,79 @@ class BehaviourSystem(RuntimeSystem):
                             except (AttributeError, TypeError, ValueError):
                                 continue
                     new.enabled = component.enabled
-                    new._bind_context(
-                        input_map=self.engine.input_map,
-                        engine=self.engine,
-                        scene=self.engine.active_scene,
-                        signal=self.engine._eq.signal if self.engine._eq is not None else None,
-                    )
-                    entity.add_behaviour(new, runtime_factory=cls)
                     try:
+                        entity.add_behaviour(new, runtime_factory=cls)
+                        new._bind_context(
+                            input_map=self.engine.input_map,
+                            engine=self.engine,
+                            scene=self.engine.active_scene,
+                            signal=self.engine._eq.signal if self.engine._eq is not None else None,
+                        )
                         new._set_started(True)
                         new.on_start()
                     except Exception:
-                        entity.remove_behaviour(new)
+                        self._discard_uncommitted(entity, new)
                         raise
                     pending.append((entity, new))
                     replacements.append((key, entity, old, new, component))
         except Exception:
             for entity, new in pending:
-                entity.remove_behaviour(new)
+                self._discard_uncommitted(entity, new)
             raise
+        retirement_error: Exception | None = None
         for key, entity, old, new, component in replacements:
             try:
                 old.on_stop()
-            finally:
-                old.on_destroy()
-                old._destroyed = True
-                old._set_started(False)
-            entity.remove_behaviour(old)
+            except Exception as exc:  # noqa: BLE001 - commit every staged replacement
+                if retirement_error is None:
+                    retirement_error = exc
+            if not old._destroyed:
+                try:
+                    old.on_destroy()
+                except Exception as exc:  # noqa: BLE001 - commit every staged replacement
+                    if retirement_error is None:
+                        retirement_error = exc
+                finally:
+                    old._destroyed = True
+            old._set_started(False)
+            try:
+                entity.remove_behaviour(old)
+            except Exception as exc:  # noqa: BLE001 - finish replacing this instance
+                if retirement_error is None:
+                    retirement_error = exc
             records = self._instances[key]
             index = next(i for i, item in enumerate(records) if item[1] is old)
             records[index] = (entity, new, component)
+        if retirement_error is not None:
+            raise retirement_error
         return generation
+
+    @staticmethod
+    def _discard_uncommitted(
+        entity: Entity, behaviour: Behaviour
+    ) -> Exception | None:
+        """Clean a staged Behaviour without publishing it as an instance."""
+        cleanup_error: Exception | None = None
+        if behaviour._started:
+            try:
+                behaviour.on_stop()
+            except Exception as exc:  # noqa: BLE001 - clean the staged instance
+                cleanup_error = exc
+        if not behaviour._destroyed:
+            try:
+                behaviour.on_destroy()
+            except Exception as exc:  # noqa: BLE001 - clean the staged instance
+                if cleanup_error is None:
+                    cleanup_error = exc
+            finally:
+                behaviour._destroyed = True
+        behaviour._set_started(False)
+        try:
+            entity.remove_behaviour(behaviour)
+        except Exception as exc:  # noqa: BLE001 - clean the staged instance
+            if cleanup_error is None:
+                cleanup_error = exc
+        return cleanup_error
 
     def _start_scene(self, scene: Any) -> None:
         if scene is None:
@@ -204,31 +254,35 @@ class BehaviourSystem(RuntimeSystem):
                     started.append(key)
         except Exception:
             for scene_id, entity_id in tuple(started):
-                self._stop_entity(scene_id, entity_id)
+                with contextlib.suppress(Exception):
+                    self._stop_entity(scene_id, entity_id)
             if "behaviour" in locals() and behaviour.entity is not None:
-                if not behaviour._destroyed:
-                    behaviour.on_destroy()
-                    behaviour._destroyed = True
-                entity.remove_behaviour(behaviour)
+                with contextlib.suppress(Exception):
+                    self._discard_uncommitted(entity, behaviour)
             self._started_scenes.discard(scene.scene_id)
             raise
 
     def _stop_scene(self, scene: Any) -> None:
         self._started_scenes.discard(scene.scene_id)
-        for entity in scene.entities:
-            self._stop_entity(scene.scene_id, entity.entity_id)
+        cleanup_error: Exception | None = None
+        for entity in tuple(scene.entities):
+            try:
+                self._stop_entity(scene.scene_id, entity.entity_id)
+            except Exception as exc:  # noqa: BLE001 - stop remaining entities
+                if cleanup_error is None:
+                    cleanup_error = exc
+        if cleanup_error is not None:
+            raise cleanup_error
 
     def _stop_entity(self, scene_id: str, entity_id: str) -> None:
         records = self._instances.pop((scene_id, entity_id), ())
+        cleanup_error: Exception | None = None
         for entity, behaviour, _ in reversed(records):
-            try:
-                behaviour.on_stop()
-            finally:
-                if not behaviour._destroyed:
-                    behaviour.on_destroy()
-                    behaviour._destroyed = True
-            behaviour._set_started(False)
-            entity.remove_behaviour(behaviour)
+            error = self._discard_uncommitted(entity, behaviour)
+            if cleanup_error is None:
+                cleanup_error = error
+        if cleanup_error is not None:
+            raise cleanup_error
 
     def _active_behaviours(self) -> tuple[Behaviour, ...]:
         active_scene = self.engine.active_scene if self.engine is not None else None

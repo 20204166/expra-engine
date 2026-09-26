@@ -5,8 +5,10 @@ behavior preserved: interval tracking, coalescing, pause/resume, due detection.
 """
 
 import unittest
+from math import nan
 
 from expra_engine.coordinators.refresh_scheduler import ComponentRefreshScheduler
+from expra_engine.observability import ObservabilityWatcher
 from tests.support.scheduling import FakeClock
 
 
@@ -22,6 +24,11 @@ def make_scheduler(
 
 
 class TestComponentRefreshSchedulerBasics(unittest.TestCase):
+    def test_constructor_rejects_non_integer_intervals(self) -> None:
+        for interval in (True, 1.5):
+            with self.subTest(interval=interval), self.assertRaises(TypeError):
+                ComponentRefreshScheduler({"cpu": interval})  # type: ignore[arg-type]
+
     def test_component_due_after_interval(self) -> None:
         sched, clock = make_scheduler({"hierarchy": 1000})
         clock.advance(1.1)
@@ -56,6 +63,13 @@ class TestComponentRefreshSchedulerBasics(unittest.TestCase):
         sched.begin("hierarchy", clock())
         sched.finish("hierarchy")
         self.assertFalse(sched.in_flight("hierarchy"))
+
+    def test_fractional_boundary_does_not_remain_due_after_claim(self) -> None:
+        sched, _clock = make_scheduler({"hierarchy": 100})
+        self.assertTrue(sched.begin("hierarchy", 1.0))
+        sched.finish("hierarchy")
+
+        self.assertNotIn("hierarchy", sched.due_keys(1.0))
 
 
 class TestComponentRefreshSchedulerPause(unittest.TestCase):
@@ -93,6 +107,43 @@ class TestComponentRefreshSchedulerRequestRefresh(unittest.TestCase):
         sched.finish("console")
         # Should be cleared
         self.assertFalse(sched._records["console"].refresh_requested)
+
+
+class TestComponentRefreshSchedulerFailureSafety(unittest.TestCase):
+    def test_observer_failure_does_not_break_coalescing(self) -> None:
+        class RaisingObserver(ObservabilityWatcher):
+            def record_event(self, _target: str, _event: str) -> None:
+                raise RuntimeError("observer unavailable")
+
+        sched = ComponentRefreshScheduler({"console": 5000}, observer=RaisingObserver())
+        self.assertTrue(sched.begin("console", 0.0))
+
+        self.assertFalse(sched.begin("console", 0.0))
+        self.assertTrue(sched.in_flight("console"))
+
+    def test_non_finite_times_are_rejected_without_poisoning_deadlines(self) -> None:
+        sched, _clock = make_scheduler({"console": 5000})
+        operations = (
+            lambda: sched.begin("console", nan),
+            lambda: sched.mark_all_refreshed(nan),
+            lambda: sched.due_keys(nan),
+            lambda: sched.collect_due(nan),
+            lambda: sched.next_deadline(nan),
+            lambda: sched.set_interval("console", 1000, nan),
+            lambda: sched.record_success("console", nan),
+        )
+
+        for operation in operations:
+            with self.subTest(operation=operation), self.assertRaises(ValueError):
+                operation()
+
+        self.assertEqual(sched.next_deadline(0.0), 0.0)
+
+    def test_non_finite_injected_clock_is_rejected(self) -> None:
+        sched = ComponentRefreshScheduler({"console": 5000}, clock=lambda: nan)
+
+        with self.assertRaises(ValueError):
+            sched.collect_due()
 
 
 class TestComponentRefreshSchedulerSetInterval(unittest.TestCase):

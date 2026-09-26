@@ -159,6 +159,209 @@ class TestEngineSystemLifecycle(unittest.TestCase):
         engine = Engine()
         engine.remove_system(_EventLog())  # must not raise
 
+    def test_failed_start_cleans_up_every_system_and_internal_runtime_state(self) -> None:
+        stopped: list[str] = []
+
+        class TrackingSystem(RuntimeSystem):
+            def start(self, engine: Engine) -> None:
+                pass
+
+            def stop(self) -> None:
+                stopped.append("tracking")
+
+        class FailingSystem(RuntimeSystem):
+            def start(self, engine: Engine) -> None:
+                raise RuntimeError("start failed")
+
+            def stop(self) -> None:
+                stopped.append("failing")
+                raise RuntimeError("stop failed")
+
+        engine = Engine()
+        engine.set_scene(Scene("Test"))
+        engine.add_system(TrackingSystem())
+        engine.add_system(FailingSystem())
+
+        with self.assertRaisesRegex(RuntimeError, "start failed"):
+            engine.play()
+
+        self.assertEqual(stopped, ["failing", "tracking"])
+        self.assertEqual(engine.run_state, EngineRunState.EDIT)
+        self.assertIsNone(engine._eq)
+        self.assertIsNone(engine._clock)
+        with self.assertRaisesRegex(RuntimeError, "not running"):
+            engine.signal(object())
+
+    def test_stop_failure_still_returns_engine_to_edit_state(self) -> None:
+        class FailingStopSystem(RuntimeSystem):
+            def stop(self) -> None:
+                raise RuntimeError("stop failed")
+
+        engine = Engine()
+        engine.set_scene(Scene("Test"))
+        engine.add_system(FailingStopSystem())
+        engine.play()
+
+        with self.assertRaisesRegex(RuntimeError, "stop failed"):
+            engine.stop()
+
+        self.assertEqual(engine.run_state, EngineRunState.EDIT)
+        self.assertIsNone(engine._eq)
+        self.assertIsNone(engine._clock)
+
+    def test_reentrant_stop_during_start_aborts_remaining_system_startup(self) -> None:
+        started: list[str] = []
+
+        class StopsDuringStart(RuntimeSystem):
+            def start(self, engine: Engine) -> None:
+                started.append("stopping")
+                engine.stop()
+
+        class MustNotStartAfterStop(RuntimeSystem):
+            def start(self, engine: Engine) -> None:
+                started.append("late")
+
+        engine = Engine()
+        engine.set_scene(Scene("Test"))
+        engine.add_system(StopsDuringStart())
+        engine.add_system(MustNotStartAfterStop())
+
+        changed = engine.play()
+
+        self.assertFalse(changed)
+        self.assertEqual(started, ["stopping"])
+        self.assertEqual(engine.run_state, EngineRunState.EDIT)
+        self.assertIsNone(engine._eq)
+        self.assertIsNone(engine._clock)
+
+    def test_behaviour_stop_failure_still_destroys_and_detaches_behaviour(self) -> None:
+        class StopFailsBehaviour(Behaviour):
+            def on_stop(self) -> None:
+                raise RuntimeError("behaviour stop failed")
+
+        scene = Scene("Test")
+        entity = scene.create_entity("Actor")
+        entity.add_behaviour(StopFailsBehaviour(), runtime_factory=StopFailsBehaviour)
+        engine = Engine()
+        engine.set_scene(scene)
+        engine.play()
+        runtime_entity = engine.active_scene.entities[0]  # type: ignore[union-attr]
+        runtime_behaviour = runtime_entity.behaviours[0]
+
+        with self.assertRaisesRegex(RuntimeError, "behaviour stop failed"):
+            engine.stop()
+
+        self.assertEqual(runtime_entity.behaviours, ())
+        self.assertIsNone(runtime_behaviour.entity)
+        self.assertTrue(runtime_behaviour._destroyed)
+        self.assertFalse(runtime_behaviour._started)
+        self.assertEqual(engine.run_state, EngineRunState.EDIT)
+
+    def test_reentrant_stop_during_behaviour_start_skips_later_behaviours(self) -> None:
+        started: list[str] = []
+
+        class StopsDuringStart(Behaviour):
+            def __init__(self, engine: Engine) -> None:
+                super().__init__()
+                self._engine_ref = engine
+
+            def on_start(self) -> None:
+                started.append("stopping")
+                self._engine_ref.stop()
+
+        class MustNotStartAfterStop(Behaviour):
+            def on_start(self) -> None:
+                started.append("late")
+
+        engine = Engine()
+        scene = Scene("Test")
+        entity = scene.create_entity("Actor")
+        entity.add_behaviour(
+            StopsDuringStart(engine),
+            runtime_factory=lambda: StopsDuringStart(engine),
+        )
+        entity.add_behaviour(
+            MustNotStartAfterStop(),
+            runtime_factory=MustNotStartAfterStop,
+        )
+        engine.set_scene(scene)
+
+        changed = engine.play()
+
+        self.assertFalse(changed)
+        self.assertEqual(started, ["stopping"])
+        self.assertEqual(engine.run_state, EngineRunState.EDIT)
+        self.assertIsNone(engine._eq)
+
+    def test_behaviour_removing_an_entity_during_stop_does_not_skip_cleanup(self) -> None:
+        class RemovesNextEntity(Behaviour):
+            def __init__(self, engine: Engine) -> None:
+                super().__init__()
+                self._engine_ref = engine
+
+            def on_stop(self) -> None:
+                active_scene = self._engine_ref.active_scene
+                assert active_scene is not None
+                active_scene.remove_entity("second")
+
+        class RecordingBehaviour(Behaviour):
+            def __init__(self, stopped: list[bool]) -> None:
+                super().__init__()
+                self._stopped = stopped
+
+            def on_stop(self) -> None:
+                self._stopped.append(True)
+
+        engine = Engine()
+        scene = Scene("Test")
+        first = scene.create_entity("First", entity_id="first")
+        second = scene.create_entity("Second", entity_id="second")
+        stopped: list[bool] = []
+        first.add_behaviour(
+            RemovesNextEntity(engine),
+            runtime_factory=lambda: RemovesNextEntity(engine),
+        )
+        second.add_behaviour(
+            RecordingBehaviour(stopped),
+            runtime_factory=lambda: RecordingBehaviour(stopped),
+        )
+        engine.set_scene(scene)
+        engine.play()
+        runtime_scene = engine.active_scene
+        assert runtime_scene is not None
+        runtime_second = runtime_scene.find_entity("second")
+        assert runtime_second is not None
+        runtime_behaviour = runtime_second.behaviours[0]
+
+        engine.stop()
+
+        self.assertEqual(stopped, [True])
+        self.assertIsNone(runtime_behaviour.entity)
+        self.assertFalse(runtime_behaviour._started)
+
+    def test_reentrant_stop_from_system_stop_does_not_repeat_teardown(self) -> None:
+        class ReentrantStopSystem(RuntimeSystem):
+            def __init__(self) -> None:
+                self.stop_calls = 0
+
+            def stop(self) -> None:
+                self.stop_calls += 1
+                if self.stop_calls > 1:
+                    raise RuntimeError("teardown re-entered")
+                engine.stop()
+
+        engine = Engine()
+        engine.set_scene(Scene("Test"))
+        system = ReentrantStopSystem()
+        engine.add_system(system)
+        engine.play()
+
+        engine.stop()
+
+        self.assertEqual(system.stop_calls, 1)
+        self.assertEqual(engine.run_state, EngineRunState.EDIT)
+        self.assertIsNone(engine._eq)
+
 
 class TestEngineSceneLifecycleEvents(unittest.TestCase):
     def test_scene_started_fires_on_play(self) -> None:

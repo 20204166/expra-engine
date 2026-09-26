@@ -64,6 +64,22 @@ class TestPendingTransition(unittest.TestCase):
         first_cb()  # fires the old callback
         self.assertNotIn("first", applied)
 
+    def test_callback_is_applied_at_most_once(self) -> None:
+        callbacks: list[Any] = []
+        applied: list[str] = []
+
+        def schedule(_delay: int, callback: Any) -> int:
+            callbacks.append(callback)
+            return len(callbacks)
+
+        t = PendingTransition(schedule, lambda _identifier: True)
+        t.start(100, lambda: applied.append("applied"))
+
+        callbacks[0]()
+        callbacks[0]()
+
+        self.assertEqual(applied, ["applied"])
+
     def test_cancel_prevents_fire(self) -> None:
         applied: list[str] = []
         callbacks: list[Any] = []
@@ -81,6 +97,61 @@ class TestPendingTransition(unittest.TestCase):
         if callbacks:
             callbacks[-1]()
         self.assertEqual(applied, [])
+
+    def test_cancel_invalidates_before_cancel_hook_runs(self) -> None:
+        applied: list[str] = []
+        callbacks: list[Any] = []
+
+        def schedule(_delay: int, callback: Any) -> int:
+            callbacks.append(callback)
+            return 1
+
+        def cancel(_identifier: Any) -> bool:
+            callbacks[0]()
+            return True
+
+        t = PendingTransition(schedule, cancel)
+        t.start(100, lambda: applied.append("applied"))
+        t.cancel()
+
+        self.assertEqual(applied, [])
+
+    def test_cancel_failure_leaves_transition_invalidated(self) -> None:
+        applied: list[str] = []
+        callbacks: list[Any] = []
+
+        def schedule(_delay: int, callback: Any) -> int:
+            callbacks.append(callback)
+            return 1
+
+        def cancel(_identifier: Any) -> bool:
+            raise RuntimeError("event loop is not running")
+
+        t = PendingTransition(schedule, cancel)
+        t.start(100, lambda: applied.append("applied"))
+        with self.assertRaises(RuntimeError):
+            t.cancel()
+
+        callbacks[0]()
+        self.assertEqual(applied, [])
+        self.assertIsNone(t.pending_id)
+
+    def test_supersede_failure_does_not_leave_old_pending_id(self) -> None:
+        callbacks: list[Any] = []
+
+        def schedule(_delay: int, callback: Any) -> int:
+            callbacks.append(callback)
+            return len(callbacks)
+
+        def cancel(_identifier: Any) -> bool:
+            raise RuntimeError("event loop is not running")
+
+        t = PendingTransition(schedule, cancel)
+        t.start(100, lambda: None)
+        with self.assertRaises(RuntimeError):
+            t.start(100, lambda: None)
+
+        self.assertIsNone(t.pending_id)
 
     def test_cancel_when_nothing_pending_safe(self) -> None:
         fake = FakeScheduler()

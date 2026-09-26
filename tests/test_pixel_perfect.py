@@ -18,6 +18,11 @@ class ConstructionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             PixelPerfectSettings(320, 180, pixels_per_unit=float("inf"))
 
+    def test_invalid_ppu_types_are_rejected_as_value_errors(self) -> None:
+        for value in ("1.0", True, 10**1000):
+            with self.subTest(value_type=type(value).__name__), self.assertRaises(ValueError):
+                PixelPerfectSettings(320, 180, pixels_per_unit=value)  # type: ignore[arg-type]
+
     def test_non_integral_reference_dimensions_are_rejected(self) -> None:
         with self.assertRaises(ValueError):
             PixelPerfectSettings(320.5, 180)  # type: ignore[arg-type]

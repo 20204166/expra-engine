@@ -12,6 +12,7 @@ APP COORDINATOR OWNS WORK. Background work never touches widgets.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import threading
 import time
@@ -21,7 +22,12 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from expra_engine.observability import EventKind, ObservabilityWatcher, ObservationToken
+from expra_engine.observability import (
+    EventKind,
+    ObservabilityWatcher,
+    ObservationToken,
+    Outcome,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -94,6 +100,7 @@ class AppCoordinator:
         )
         self._observer = observer
         self._states: dict[str, AppRunState] = {}
+        self._generation_counter = 0
         self._coalesced_generations: dict[str, int] = {}
         self._coalesced_callbacks: dict[str, Callable[[], None]] = {}
         self._coalesced_pending: set[str] = set()
@@ -126,7 +133,9 @@ class AppCoordinator:
 
     def _claim_run(self, state: AppRunState) -> int:
         state.in_flight = True
-        state.generation += 1
+        # Keep completion tokens unique across keys and cleared state recreation.
+        self._generation_counter += 1
+        state.generation = self._generation_counter
         state.rerun_requested = False
         state.cancelled = False
         state.cancel_event = threading.Event()
@@ -177,13 +186,14 @@ class AppCoordinator:
         generation = self._claim_run(state)
         cancel_event = state.cancel_event
         task_factory = state.task_factory
-        token: ObservationToken | None = (
-            self._observer.begin(f"app:{key}") if self._observer is not None else None
-        )
+        token = self._begin_observation(key)
         observer = self._observer
 
         def emit_progress(message: str) -> None:
-            self._deliver_progress(key, lambda: self._invoke_progress(key, generation, message))
+            self._deliver_progress(
+                key,
+                lambda: self._invoke_progress(key, generation, state, message),
+            )
 
         def worker() -> None:
             try:
@@ -191,44 +201,104 @@ class AppCoordinator:
             except Exception as error:  # noqa: BLE001
                 message = str(error)
                 if token is not None and observer is not None:
-                    observer.finish(token, outcome="failure", detail=type(error).__name__)
-                self._deliver(lambda: self._complete_run(key, generation, error=message))
+                    self._finish_observation(
+                        observer,
+                        token,
+                        outcome="failure",
+                        detail=type(error).__name__,
+                    )
+                self._deliver(
+                    lambda: self._complete_run(
+                        key,
+                        generation,
+                        run_state=state,
+                        error=message,
+                    )
+                )
             else:
                 if token is not None and observer is not None:
-                    observer.finish(
+                    self._finish_observation(
+                        observer,
                         token,
                         outcome="cancelled"
                         if cancel_event is not None and cancel_event.is_set()
                         else "success",
                     )
-                self._deliver(lambda: self._complete_run(key, generation, result=result))
+                self._deliver(
+                    lambda: self._complete_run(
+                        key,
+                        generation,
+                        run_state=state,
+                        result=result,
+                    )
+                )
 
         self._note_activity()
         try:
             submitted = self._runner(worker)
             if isinstance(submitted, Future):
                 state.future = submitted
-        except RuntimeError as error:
+        except Exception as error:  # noqa: BLE001
             message = str(error)
             if token is not None and observer is not None:
-                observer.finish(token, outcome="failure", detail=type(error).__name__)
+                self._finish_observation(
+                    observer,
+                    token,
+                    outcome="failure",
+                    detail=type(error).__name__,
+                )
             LOGGER.warning("Could not start operation %r: %s", key, message)
-            self._deliver(lambda: self._complete_run(key, generation, error=message))
+            self._deliver(
+                lambda: self._complete_run(
+                    key,
+                    generation,
+                    run_state=state,
+                    error=message,
+                )
+            )
         return generation
 
     def _note_activity(self) -> None:
         if self._on_activity is not None:
-            self._on_activity()
+            with contextlib.suppress(Exception):
+                self._on_activity()
 
     def _record_observer_event(self, key: str, event: EventKind) -> None:
         if self._observer is not None:
-            self._observer.record_event(f"app:{key}", event)
+            with contextlib.suppress(Exception):
+                self._observer.record_event(f"app:{key}", event)
 
-    def _invoke_progress(self, key: str, generation: int, message: str) -> None:
+    def _begin_observation(self, key: str) -> ObservationToken | None:
+        if self._observer is None:
+            return None
+        with contextlib.suppress(Exception):
+            return self._observer.begin(f"app:{key}")
+        # Observer target validation must not strand a run before submission.
+        return None
+
+    @staticmethod
+    def _finish_observation(
+        observer: ObservabilityWatcher,
+        token: ObservationToken,
+        *,
+        outcome: Outcome,
+        detail: str | None = None,
+    ) -> None:
+        with contextlib.suppress(Exception):
+            observer.finish(token, outcome=outcome, detail=detail)
+        # Reset or a faulty optional observer must not lose task completion.
+
+    def _invoke_progress(
+        self,
+        key: str,
+        generation: int,
+        run_state: AppRunState,
+        message: str,
+    ) -> None:
         state = self._states.get(key)
-        if state is None or generation != state.generation or state.cancelled:
+        if state is not run_state or generation != run_state.generation or run_state.cancelled:
             return
-        self._safe_invoke(state.on_progress, key, message)
+        self._safe_invoke(run_state.on_progress, key, message)
 
     def _settle_run(self, state: AppRunState) -> bool:
         state.in_flight = False
@@ -243,33 +313,34 @@ class AppCoordinator:
         key: str,
         generation: int,
         *,
+        run_state: AppRunState,
         result: Any = None,
         error: str | None = None,
     ) -> None:
         state = self._states.get(key)
-        if state is None or generation != state.generation or not state.in_flight:
+        if state is not run_state or generation != run_state.generation or not run_state.in_flight:
             self._record_observer_event(key, "stale")
             return
-        rerun_requested = self._settle_run(state)
-        if state.cancelled:
-            self._invoke_finished(key, state)
+        rerun_requested = self._settle_run(run_state)
+        if run_state.cancelled:
+            self._invoke_finished(key, run_state)
             if rerun_requested:
-                self._replay(key, state)
+                self._replay(key, run_state)
             return
         if error is None:
-            state.last_result = result
-            state.last_success = time.time()
-            state.last_error = None
-            self._notify_subscribers(state, key, result)
-            self._safe_invoke(state.on_result, key, result)
+            run_state.last_result = result
+            run_state.last_success = time.time()
+            run_state.last_error = None
+            self._notify_subscribers(run_state, key, result)
+            self._safe_invoke(run_state.on_result, key, result)
         else:
-            state.last_error = error[:160]
-            state.last_finished = time.time()
-            self._notify_subscribers(state, key, None)
-            self._safe_invoke(state.on_error, key, error)
-        self._invoke_finished(key, state)
+            run_state.last_error = error[:160]
+            run_state.last_finished = time.time()
+            self._notify_subscribers(run_state, key, None)
+            self._safe_invoke(run_state.on_error, key, error)
+        self._invoke_finished(key, run_state)
         if rerun_requested:
-            self._replay(key, state)
+            self._replay(key, run_state)
 
     @staticmethod
     def _invoke_finished(key: str, state: AppRunState) -> None:
@@ -349,7 +420,12 @@ class AppCoordinator:
             state.future = None
             if cancelled_before_start:
                 self._deliver(
-                    lambda: self._complete_run(key, state.generation, error=cancellation_message)
+                    lambda: self._complete_run(
+                        key,
+                        state.generation,
+                        run_state=state,
+                        error=cancellation_message,
+                    )
                 )
         if not already_cancelled:
             self._notify_subscribers(state, key, None)
@@ -367,6 +443,9 @@ class AppCoordinator:
 
     def shutdown(self) -> None:
         self._closed = True
+        for key, state in tuple(self._states.items()):
+            if state.in_flight:
+                self.cancel(key)
         if self._executor is not None:
             self._executor.shutdown(wait=False, cancel_futures=True)
             self._executor = None

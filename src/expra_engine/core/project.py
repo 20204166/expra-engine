@@ -6,7 +6,7 @@ A Project points to a directory on disk:
         scenes/
         assets/
 
-It does not own file I/O directly. ``ProjectIO`` handles reading and writing.
+Project-level writes use the shared atomic persistence primitives.
 """
 
 from __future__ import annotations
@@ -183,8 +183,14 @@ class Project:
             )
             os.close(descriptor)
             shutil.copy2(source, temporary)
-            os.replace(temporary, destination)
+            try:
+                os.link(temporary, destination)
+            except FileExistsError as exc:
+                raise ProjectError(f"asset already exists: {destination}") from exc
+            completed_temporary = temporary
             temporary = None
+            with contextlib.suppress(OSError):
+                os.unlink(completed_temporary)
         finally:
             if temporary is not None:
                 with contextlib.suppress(OSError):
@@ -358,9 +364,9 @@ class Project:
                 f"document extension declares {expected_kind.value}, but document is "
                 f"{actual_kind.value}"
             )
-        if expected_kind is DocumentKind.SCENE and not str(path).endswith(".scene.pb"):
+        if expected_kind is DocumentKind.SCENE and not str(path).casefold().endswith(".scene.pb"):
             raise ProjectError("Scene documents must use the .scene.pb extension")
-        if expected_kind is DocumentKind.LEVEL and not str(path).endswith(".level.pb"):
+        if expected_kind is DocumentKind.LEVEL and not str(path).casefold().endswith(".level.pb"):
             raise ProjectError("Level documents must use the .level.pb extension")
         path.parent.mkdir(parents=True, exist_ok=True)
         try:
@@ -418,7 +424,10 @@ class Project:
             raise ProjectError(f"could not read project manifest: {project_file}") from exc
         if not isinstance(data, dict):
             raise ProjectError("project manifest must contain an object")
-        schema_version = int(data.get("schema_version", 0))
+        try:
+            schema_version = int(data.get("schema_version", 0))
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ProjectError("project manifest has an invalid schema_version") from exc
         if schema_version > CURRENT_SCHEMA_VERSION:
             raise ProjectError(f"unsupported future project schema: {schema_version}")
         name = data.get("name")
@@ -437,7 +446,9 @@ class Project:
             and canonical_entrypoint != legacy_start_scene
         ):
             raise ProjectError("entrypoint conflicts with legacy start_scene")
-        start_scene = canonical_entrypoint or legacy_start_scene
+        start_scene = (
+            canonical_entrypoint if canonical_entrypoint is not None else legacy_start_scene
+        )
         if start_scene is not None:
             cls._validate_entrypoint(start_scene)
         input_settings = data.get("input", {})
@@ -457,9 +468,14 @@ class Project:
             and legacy_entry_point != script_entry_point_value
         ):
             raise ProjectError("script_entry_point conflicts with legacy entry_point")
-        entry_point = script_entry_point_value or legacy_entry_point or "__main__.py"
+        entry_point = script_entry_point_value
+        if entry_point is None:
+            entry_point = legacy_entry_point
+        if entry_point is None:
+            entry_point = "__main__.py"
         if (
             not isinstance(entry_point, str)
+            or not entry_point.strip()
             or Path(entry_point).is_absolute()
             or ".." in Path(entry_point).parts
         ):

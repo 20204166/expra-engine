@@ -50,6 +50,11 @@ class TestBadEventHandlerException(unittest.TestCase):
         exc = BadEventHandlerException(_FakeOwner(), "on_fake", _FakeEvent())
         self.assertIn("a", str(exc))
 
+    def test_empty_event_type_name_does_not_break_diagnostic(self) -> None:
+        event_type = type("", (), {})
+        exc = BadEventHandlerException(_FakeOwner(), "on_event", event_type())
+        self.assertIn("event object", str(exc))
+
 
 class TestBadChildException(unittest.TestCase):
     def test_is_exception(self) -> None:

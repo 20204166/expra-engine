@@ -78,6 +78,7 @@ class Engine:
 
     def __init__(self, *, observer: ObservabilityWatcher | None = None) -> None:
         self._state = EngineRunState.EDIT
+        self._stop_in_progress = False
         self._project: Project | None = None
         self._edit_scene: Scene | None = None
         self._runtime_scene: Scene | None = None
@@ -257,7 +258,7 @@ class Engine:
                 self._state = EngineRunState.EDIT
                 self._last_update = None
                 raise
-            return True
+            return self._state != EngineRunState.EDIT
         if self._state == EngineRunState.PAUSED:
             self._state = EngineRunState.PLAY
             if self._clock is not None:
@@ -280,12 +281,18 @@ class Engine:
     def stop(self) -> bool:
         """Return to EDIT state, restoring the original edit scene. Returns True if changed."""
         if self._state in (EngineRunState.PLAY, EngineRunState.PAUSED):
-            self._stop_runtime()
-            self._runtime_scene = None
-            self._scene_stack.clear()
-            self._state = EngineRunState.EDIT
-            self._last_update = None
-            self._quit_requested = False
+            if self._stop_in_progress:
+                return False
+            self._stop_in_progress = True
+            try:
+                self._stop_runtime()
+            finally:
+                self._runtime_scene = None
+                self._scene_stack.clear()
+                self._state = EngineRunState.EDIT
+                self._last_update = None
+                self._quit_requested = False
+                self._stop_in_progress = False
             return True
         return False
 
@@ -533,6 +540,8 @@ class Engine:
 
         for system in self._systems:
             system.start(self)
+            if self._state == EngineRunState.EDIT or self._eq is None:
+                return
 
         self._start_behaviours()
 
@@ -544,21 +553,41 @@ class Engine:
         """Flush events, signal SceneStopped, stop systems, teardown."""
         from expra_engine.runtime.events import SceneStopped
 
+        cleanup_error: Exception | None = None
         if self._eq and self._scene_stack:
-            self._eq.flush()
-            self._eq.signal(SceneStopped())
-            self._eq.drain()
+            try:
+                self._eq.flush()
+                self._eq.signal(SceneStopped())
+                self._eq.drain()
+            except Exception as exc:  # noqa: BLE001 - cleanup must continue after callback failure
+                cleanup_error = exc
 
-        self._stop_behaviours()
+        try:
+            self._stop_behaviours()
+        except Exception as exc:  # noqa: BLE001 - cleanup must continue after callback failure
+            if cleanup_error is None:
+                cleanup_error = exc
 
-        for system in reversed(self._systems):
-            system.stop()
+        for system in reversed(tuple(self._systems)):
+            try:
+                system.stop()
+            except Exception as exc:  # noqa: BLE001 - cleanup must continue after callback failure
+                if cleanup_error is None:
+                    cleanup_error = exc
 
-        if self._clock:
-            self._clock.reset()
-        self._transform_interpolator.clear()
-        self._eq = None
-        self._clock = None
+        try:
+            if self._clock:
+                self._clock.reset()
+            self._transform_interpolator.clear()
+        except Exception as exc:  # noqa: BLE001 - teardown must clear engine state
+            if cleanup_error is None:
+                cleanup_error = exc
+        finally:
+            self._eq = None
+            self._clock = None
+
+        if cleanup_error is not None:
+            raise cleanup_error
 
     def _capture_behaviour_factories(
         self,
@@ -627,23 +656,42 @@ class Engine:
             for behaviour in entity.behaviours:
                 behaviour._set_started(True)
                 behaviour.on_start()
+                if self._state == EngineRunState.EDIT or self._eq is None:
+                    return
 
     def _stop_behaviours(self) -> None:
         """Stop and detach behaviours before runtime teardown."""
         if self._runtime_scene is None:
             return
+        cleanup_error: Exception | None = None
         for entity in self._runtime_scene.entities:
             behaviours = tuple(entity.behaviours)
             for behaviour in behaviours:
                 try:
-                    behaviour.on_stop()
-                finally:
+                    if behaviour._started:
+                        behaviour.on_stop()
+                except Exception as exc:  # noqa: BLE001 - detach remaining behaviours
+                    if cleanup_error is None:
+                        cleanup_error = exc
+                try:
                     if not behaviour._destroyed:
-                        behaviour.on_destroy()
-                        behaviour._destroyed = True
-                behaviour._set_started(False)
+                        try:
+                            behaviour.on_destroy()
+                        finally:
+                            behaviour._destroyed = True
+                except Exception as exc:  # noqa: BLE001 - detach remaining behaviours
+                    if cleanup_error is None:
+                        cleanup_error = exc
+                finally:
+                    behaviour._set_started(False)
             for behaviour in behaviours:
-                entity.remove_behaviour(behaviour)
+                try:
+                    entity.remove_behaviour(behaviour)
+                except Exception as exc:  # noqa: BLE001 - detach remaining behaviours
+                    if cleanup_error is None:
+                        cleanup_error = exc
+        if cleanup_error is not None:
+            raise cleanup_error
 
     def _build_dispatch_root(self) -> object:
         """Build the object whose ``children`` tree receives broadcast events.

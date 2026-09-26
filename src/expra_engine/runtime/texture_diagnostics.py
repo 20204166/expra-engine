@@ -76,8 +76,8 @@ def diagnose_texture(
         if any(
             isinstance(component, SpriteComponent) and component.asset == logical_id
             for component in entity.components
-            )
         )
+    )
     stages: list[TextureDiagnosticStage] = []
     if not entity_ids:
         return _failed_report(
@@ -88,9 +88,7 @@ def diagnose_texture(
             "no SpriteComponent references the requested asset",
         )
     stages.append(
-        TextureDiagnosticStage(
-            "sprite_component", True, f"matched entities={','.join(entity_ids)}"
-        )
+        TextureDiagnosticStage("sprite_component", True, f"matched entities={','.join(entity_ids)}")
     )
 
     try:
@@ -170,10 +168,25 @@ def _probe_backend(
     byte_size: int,
     image_master: Any | None,
 ) -> TextureDiagnosticReport:
-    for subsystem in ("font", "image"):
-        initializer = getattr(getattr(pygame_module, subsystem, None), "init", None)
-        if callable(initializer):
+    font_initializer = getattr(getattr(pygame_module, "font", None), "init", None)
+    if callable(font_initializer):
+        font_initializer()
+    initializer = getattr(getattr(pygame_module, "image", None), "init", None)
+    if callable(initializer):
+        try:
             initializer()
+        except Exception as exc:  # noqa: BLE001 - backend setup becomes report data
+            return _failed_report(
+                asset_id,
+                entity_ids,
+                stages,
+                "decode",
+                f"image backend initialization failed: {exc}",
+                mount=mount,
+                physical_path=physical_path,
+                byte_size=byte_size,
+                cache_key=asset_id,
+            )
     provider = PygameResourceProvider(pygame_module, resources)
     texture = provider(asset_id)
     if texture is None:
@@ -359,16 +372,24 @@ def _editor_or_success(
             )
         width = cast(Callable[[], Any] | None, getattr(image, "width", None))
         height = cast(Callable[[], Any] | None, getattr(image, "height", None))
-        editor_image_size = (
-            (int(width()), int(height())) if callable(width) and callable(height) else None
-        )
+        detail = "editor image has no width and height methods"
+        if callable(width) and callable(height):
+            try:
+                editor_image_size = int(width()), int(height())
+            except Exception:  # noqa: BLE001 - presentation metadata becomes report data
+                editor_image_size = None
+                detail = "editor image dimensions are invalid"
+            else:
+                if any(value <= 0 for value in editor_image_size):
+                    editor_image_size = None
+                    detail = "editor image dimensions are invalid"
         if editor_image_size is None:
             return _failed_report(
                 asset_id,
                 entity_ids,
                 stages,
                 "editor_presentation",
-                "editor image has no width and height methods",
+                detail,
                 mount=mount,
                 physical_path=physical_path,
                 byte_size=byte_size,
@@ -377,7 +398,9 @@ def _editor_or_success(
                 texture_type=texture_type,
                 output_bounds=output_bounds,
             )
-        stages.append(TextureDiagnosticStage("editor_presentation", True, f"size={editor_image_size}"))
+        stages.append(
+            TextureDiagnosticStage("editor_presentation", True, f"size={editor_image_size}")
+        )
     return TextureDiagnosticReport(
         asset_id=asset_id,
         entity_ids=entity_ids,
@@ -400,11 +423,12 @@ def _texture_size(texture: Any) -> tuple[int, int] | None:
         return None
     try:
         width, height = cast(tuple[int, int], get_size())
+        width, height = int(width), int(height)
     except Exception:  # noqa: BLE001 - backend metadata is diagnostic input
         return None
-    if int(width) <= 0 or int(height) <= 0:
+    if width <= 0 or height <= 0:
         return None
-    return int(width), int(height)
+    return width, height
 
 
 def _surface_bounds(surface: Any) -> tuple[int, int, int, int] | None:

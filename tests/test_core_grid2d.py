@@ -156,6 +156,20 @@ class PasteTests(unittest.TestCase):
         dst.set(0, 0, 99)
         self.assertEqual(src.get(0, 0), 42)
 
+    def test_paste_copy_failure_does_not_partially_update_destination(self) -> None:
+        class CopyFails:
+            def __copy__(self) -> object:
+                raise RuntimeError("copy failed")
+
+        src = Grid2D(2, 1, data=[[42], [CopyFails()]])
+        dst = Grid2D(2, 1, data=[[1], [2]])
+
+        with self.assertRaisesRegex(RuntimeError, "copy failed"):
+            dst.paste(src, 0, 0)
+
+        self.assertEqual(dst.get(0, 0), 1)
+        self.assertEqual(dst.get(1, 0), 2)
+
     def test_paste_with_clip_negative_offset_skips_out_of_bounds(self) -> None:
         dst = Grid2D(3, 3, default_factory=int)
         src = Grid2D(2, 2, default_factory=lambda: 9)

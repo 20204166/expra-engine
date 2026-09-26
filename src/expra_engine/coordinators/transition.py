@@ -36,14 +36,17 @@ class PendingTransition:
     def start(self, delay: int, apply: Callable[[], None]) -> None:
         self._generation += 1
         generation = self._generation
-        if self._id is not None:
-            self._cancel(self._id)
-            self._id = None
+        identifier = self._id
+        self._id = None
+        if identifier is not None:
+            self._cancel(identifier)
         fired = False
         callback = self._run(apply, generation)
 
         def run() -> None:
             nonlocal fired
+            if fired:
+                return
             fired = True
             callback()
 
@@ -52,10 +55,12 @@ class PendingTransition:
             self._id = identifier
 
     def cancel(self) -> None:
-        if self._id is not None:
-            self._cancel(self._id)
-            self._id = None
-            self._generation += 1
+        identifier = self._id
+        if identifier is None:
+            return
+        self._id = None
+        self._generation += 1
+        self._cancel(identifier)
 
     def _run(self, apply: Callable[[], None], generation: int) -> Callable[[], None]:
         def run() -> None:

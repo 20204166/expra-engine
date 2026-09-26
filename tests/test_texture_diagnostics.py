@@ -239,6 +239,98 @@ def test_diagnose_reports_png_decode_failure(tmp_path: Path) -> None:
     assert result.failed_stage == "decode"
 
 
+def test_diagnose_reports_malformed_decoded_texture_size(tmp_path: Path, monkeypatch) -> None:
+    project, scene, asset_id = make_texture_project(tmp_path)
+
+    class MalformedTexture:
+        def get_size(self) -> tuple[object, object]:
+            return "wide", 2
+
+    class Provider:
+        last_failure = None
+
+        def __init__(self, _pygame_module, _resources) -> None:
+            pass
+
+        def __call__(self, _asset_id: str) -> MalformedTexture:
+            return MalformedTexture()
+
+    monkeypatch.setattr("expra_engine.runtime.texture_diagnostics.PygameResourceProvider", Provider)
+    backend = SimpleNamespace(
+        font=SimpleNamespace(init=lambda: None),
+        image=SimpleNamespace(init=lambda: None),
+    )
+
+    result = diagnose_texture(
+        project,
+        scene,
+        asset_id,
+        context=RenderContext(Viewport(0, 0, 160, 120)),
+        pygame_module=backend,
+    )
+
+    assert not result.ok
+    assert result.failed_stage == "decode"
+    assert result.failure_detail == "decoded texture has no valid size"
+
+
+def test_diagnose_reports_image_backend_initialization_failure(tmp_path: Path) -> None:
+    project, scene, asset_id = make_texture_project(tmp_path)
+
+    def fail_init() -> None:
+        raise RuntimeError("image backend unavailable")
+
+    backend = SimpleNamespace(
+        font=SimpleNamespace(init=lambda: None),
+        image=SimpleNamespace(init=fail_init),
+    )
+
+    result = diagnose_texture(
+        project,
+        scene,
+        asset_id,
+        context=RenderContext(Viewport(0, 0, 160, 120)),
+        pygame_module=backend,
+    )
+
+    assert not result.ok
+    assert result.failed_stage == "decode"
+    assert result.failure_detail == "image backend initialization failed: image backend unavailable"
+
+
+def test_diagnose_reports_malformed_editor_image_dimensions(tmp_path: Path, monkeypatch) -> None:
+    pygame = pytest.importorskip("pygame")
+    project, scene, asset_id = make_texture_project(tmp_path)
+
+    class Image:
+        def width(self) -> str:
+            return "wide"
+
+        def height(self) -> int:
+            return 120
+
+    monkeypatch.setattr(
+        "expra_engine.runtime.texture_diagnostics._render_editor_frame_to_tk_image",
+        lambda *_args, **_kwargs: Image(),
+    )
+    pygame.init()
+    try:
+        result = diagnose_texture(
+            project,
+            scene,
+            asset_id,
+            context=RenderContext(Viewport(0, 0, 160, 120)),
+            pygame_module=pygame,
+            image_master=object(),
+        )
+    finally:
+        pygame.quit()
+
+    assert not result.ok
+    assert result.failed_stage == "editor_presentation"
+    assert result.failure_detail == "editor image dimensions are invalid"
+
+
 def test_diagnose_reports_when_texture_renders_outside_the_context(tmp_path: Path) -> None:
     pygame = pytest.importorskip("pygame")
     project, scene, asset_id = make_texture_project(tmp_path)

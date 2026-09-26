@@ -49,7 +49,13 @@ class PixelPerfectSettings:
             raise ValueError("reference resolution dimensions must be integers")
         if self.reference_width <= 0 or self.reference_height <= 0:
             raise ValueError("reference resolution must have positive dimensions")
-        if not math.isfinite(self.pixels_per_unit) or self.pixels_per_unit <= 0.0:
+        if isinstance(self.pixels_per_unit, bool) or not isinstance(self.pixels_per_unit, (int, float)):
+            raise ValueError("pixels_per_unit must be finite and positive")
+        try:
+            finite_ppu = math.isfinite(self.pixels_per_unit)
+        except OverflowError:
+            finite_ppu = False
+        if not finite_ppu or self.pixels_per_unit <= 0.0:
             raise ValueError("pixels_per_unit must be finite and positive")
 
     def fit(self, target_width: int, target_height: int) -> ScaleResult:

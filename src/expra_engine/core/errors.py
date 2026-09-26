@@ -17,7 +17,7 @@ class BadEventHandlerException(TypeError):
         obj_type = type(instance)
         event_type = type(event)
         o_name = obj_type.__name__
-        e_name = event_type.__name__
+        e_name = event_type.__name__ or "event"
         article = "an" if e_name.lower()[0] in "aeiou" else "a"
         message = (
             f"\n{o_name}.{method}() signature incorrect; "
