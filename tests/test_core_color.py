@@ -60,6 +60,10 @@ class HexParsingTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             Color.from_hex("#ff")
 
+    def test_rejects_repeated_hash_prefix(self) -> None:
+        with self.assertRaises(ValueError):
+            Color.from_hex("##ffffff")
+
     def test_without_hash(self) -> None:
         c = Color.from_hex("ffffff")
         self.assertEqual(c.r, 1.0)

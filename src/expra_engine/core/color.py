@@ -86,8 +86,12 @@ class Color:
         Accepted forms: ``#RGB``, ``#RRGGBB``, ``#RGBA``, ``#RRGGBBAA``,
         each with or without the leading ``#``.
         """
-        raw = value.lstrip("#").strip()
+        raw = value.strip()
+        if raw.startswith("#"):
+            raw = raw[1:]
         length = len(raw)
+        if "#" in raw or any(c not in "0123456789abcdefABCDEF" for c in raw):
+            raise ValueError(f"invalid hex colour string: {value!r}")
         try:
             if length == 3:
                 r, g, b = (int(c * 2, 16) for c in raw)
