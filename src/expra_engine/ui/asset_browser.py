@@ -24,6 +24,7 @@ from expra_engine.ui.styles import (
     STYLE_NEUTRAL_BUTTON,
     STYLE_TREEVIEW,
 )
+from expra_engine.ui.tree_reconciliation import TreeRow, reconcile_treeview
 
 _DRAG_THRESHOLD_SQ = 16  # 4px, squared -- avoids a sqrt on every motion event
 
@@ -56,10 +57,8 @@ class AssetBrowserPanel(tk.Frame):
         self._generation = 0
         self._selected_entry: AssetEntry | None = None
         self._entries: dict[str, AssetEntry] = {}
-        self._entry_parents: dict[str, str] = {}
-        self._entry_rows: dict[str, tuple[str, tuple[str, str]]] = {}
+        self._row_state: dict[str, TreeRow] = {}
         self._entry_sort_keys: dict[str, tuple[int, str, bool]] = {}
-        self._child_order: dict[str, tuple[str, ...]] = {}
         self._path_iids: dict[Path, str] = {self._current_directory: "asset-root"}
         self._last_render_key: tuple[Path, Path] | None = None
         self._last_input_entries: tuple[AssetEntry, ...] | None = None
@@ -192,16 +191,15 @@ class AssetBrowserPanel(tk.Frame):
             decorated.append((sort_key, iid, entry))
         decorated.sort(key=lambda value: value[0])
         desired_entries: dict[str, AssetEntry] = {}
-        desired_parents: dict[str, str] = {}
-        desired_rows: dict[str, tuple[str, tuple[str, str]]] = {}
+        desired_rows: dict[str, TreeRow] = {}
         desired_sort_keys: dict[str, tuple[int, str, bool]] = {}
-        children_by_parent: dict[str, list[str]] = {}
         for sort_key, iid, entry in decorated:
-            previous_parent = (
-                self._entry_parents.get(iid)
+            previous_row = (
+                self._row_state.get(iid)
                 if render_key == self._last_render_key and iid in self._entries
                 else None
             )
+            previous_parent = previous_row.parent if previous_row is not None else None
             parent_iid = (
                 "asset-root"
                 if previous_parent == ""
@@ -212,104 +210,20 @@ class AssetBrowserPanel(tk.Frame):
             if parent_iid != "asset-root" and parent_iid not in desired_entries:
                 continue
             parent = "" if parent_iid == "asset-root" else parent_iid
-            row = self._entry_rows.get(iid) if self._entries.get(iid) == entry else None
-            values = row[1] if row is not None else (entry.kind, str(entry.logical_id or ""))
+            values = (entry.kind, str(entry.logical_id or ""))
             desired_entries[iid] = entry
-            desired_parents[iid] = parent
-            desired_rows[iid] = row if row is not None else (entry.name, values)
+            desired_rows[iid] = TreeRow(parent=parent, text=entry.name, values=values)
             desired_sort_keys[iid] = sort_key
-            children_by_parent.setdefault(parent, []).append(iid)
 
-        desired_order = {parent: tuple(children) for parent, children in children_by_parent.items()}
-        desired_indices = {
-            iid: index for children in desired_order.values() for index, iid in enumerate(children)
-        }
-        desired_ids = set(desired_entries)
-        stale_ids = set(self._entries) - desired_ids
         selected = self._tree.selection()
         selected_iid = selected[0] if selected else None
-
-        # Treeview.delete() removes a subtree. Delete only stale subtree roots;
-        # descendants are removed with the parent and are skipped in this loop.
-        for iid in self._entries:
-            if (
-                iid in stale_ids
-                and self._entry_parents.get(iid, "") not in stale_ids
-                and self._tree.exists(iid)
-            ):
-                self._tree.delete(iid)
-
-        working_orders = {
-            parent: [
-                iid for iid in old_order if iid in desired_ids and desired_parents[iid] == parent
-            ]
-            for parent, old_order in self._child_order.items()
-        }
-        reordered_parents: set[str] = set()
-        for parent, children in desired_order.items():
-            old_common = tuple(
-                iid
-                for iid in self._child_order.get(parent, ())
-                if iid in desired_ids and desired_parents[iid] == parent
-            )
-            new_common = tuple(
-                iid
-                for iid in children
-                if iid in self._entries and self._entry_parents.get(iid) == parent
-            )
-            if old_common != new_common:
-                reordered_parents.add(parent)
-
-        for _sort_key, iid, entry in decorated:
-            if iid not in desired_entries:
-                continue
-            parent = desired_parents[iid]
-            index = desired_indices[iid]
-            previous = self._entries.get(iid)
-            previous_parent = self._entry_parents.get(iid)
-            tree_item_exists = previous is not None and self._tree.exists(iid)
-            if not tree_item_exists:
-                siblings = working_orders.setdefault(parent, [])
-                insertion_index = min(index, len(siblings))
-                if insertion_index == len(siblings):
-                    self._tree.insert(
-                        parent, "end", iid=iid, text=entry.name, values=desired_rows[iid][1]
-                    )
-                else:
-                    self._tree.insert(
-                        parent,
-                        insertion_index,
-                        iid=iid,
-                        text=entry.name,
-                        values=desired_rows[iid][1],
-                    )
-                siblings.insert(insertion_index, iid)
-            elif previous_parent != parent:
-                siblings = working_orders.setdefault(parent, [])
-                insertion_index = min(index, len(siblings))
-                if insertion_index == len(siblings):
-                    self._tree.move(iid, parent, "end")
-                else:
-                    self._tree.move(iid, parent, insertion_index)
-                siblings.insert(insertion_index, iid)
-
-            if tree_item_exists and self._entry_rows.get(iid) != desired_rows[iid]:
-                text, values = desired_rows[iid]
-                self._tree.item(iid, text=text, values=values)
-
-        # A changed relative order is rare for path-sorted rows. When it occurs,
-        # reconcile only that parent's sequence and leave every other branch alone.
-        for parent in reordered_parents:
-            for index, iid in enumerate(desired_order[parent]):
-                if self._tree.index(iid) != index:
-                    self._tree.move(iid, parent, index)
-            working_orders[parent] = list(desired_order[parent])
+        desired_tree_rows = tuple(
+            (iid, desired_rows[iid]) for _sort_key, iid, _entry in decorated if iid in desired_rows
+        )
+        self._row_state = reconcile_treeview(self._tree, self._row_state, desired_tree_rows)
 
         self._entries = desired_entries
-        self._entry_parents = desired_parents
-        self._entry_rows = desired_rows
         self._entry_sort_keys = desired_sort_keys
-        self._child_order = desired_order
         self._path_iids = {self._current_directory: "asset-root"}
         self._path_iids.update((entry.path, iid) for iid, entry in desired_entries.items())
         self._last_render_key = render_key

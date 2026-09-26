@@ -102,6 +102,46 @@ def test_render_frame_culls_items_outside_viewport_and_keeps_boundary() -> None:
     assert [item.key for item in frame.visible_items(context)] == ["boundary", "inside"]
 
 
+def test_textured_visual_transform_uses_sprite_offset_for_any_primitive() -> None:
+    item = RenderItem(
+        "textured-rectangle",
+        PrimitiveDescriptor("rectangle", size=(2.0, 2.0)),
+        Transform(position=(6.0, 0.0, 0.0)),
+        material=MaterialDescriptor(texture_id="assets://shape.png"),
+        sprite_offset=(-2.0, 0.0),
+    )
+
+    assert item.visual_transform.position == (4.0, 0.0, 0.0)
+    assert item.world_transform.position == (6.0, 0.0, 0.0)
+    assert item.sprite_transform.position == (4.0, 0.0, 0.0)
+
+
+def test_untextured_visual_transform_uses_world_transform() -> None:
+    item = RenderItem(
+        "untextured-sprite",
+        PrimitiveDescriptor("sprite", size=(2.0, 2.0)),
+        Transform(position=(6.0, 0.0, 0.0)),
+        sprite_offset=(-2.0, 0.0),
+    )
+
+    assert item.visual_transform == item.world_transform
+    assert item.visual_transform.position == (6.0, 0.0, 0.0)
+    assert item.sprite_transform.position == (4.0, 0.0, 0.0)
+
+
+def test_textured_non_sprite_is_culled_using_visual_transform() -> None:
+    context = RenderContext(Viewport(0, 0, 100, 100), OrthographicCamera(width=10, height=10))
+    item = RenderItem(
+        "textured-rectangle",
+        PrimitiveDescriptor("rectangle", size=(1.0, 1.0)),
+        Transform(position=(6.0, 0.0, 0.0)),
+        material=MaterialDescriptor(texture_id="assets://shape.png"),
+        sprite_offset=(-2.0, 0.0),
+    )
+
+    assert item.is_visible(context)
+
+
 def test_rotated_item_remains_visible_when_unrotated_bounds_miss_edge() -> None:
     context = RenderContext(Viewport(0, 0, 100, 100), OrthographicCamera(width=10, height=10))
     item = RenderItem(

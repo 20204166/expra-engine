@@ -303,10 +303,15 @@ class RenderItem:
             scale=transform.scale,
         )
 
-    def _projected_bounds(self, context: RenderContext) -> tuple[float, float, float, float]:
-        transform = (
-            self.sprite_transform if self.primitive.kind == "sprite" else self.world_transform
+    @property
+    def visual_transform(self) -> Transform:
+        """Return the transform used to place this item in rendered space."""
+        return (
+            self.sprite_transform if self.material.texture_id is not None else self.world_transform
         )
+
+    def _projected_bounds(self, context: RenderContext) -> tuple[float, float, float, float]:
+        transform = self.visual_transform
         center = context.camera.project(transform.position, context.viewport)
         # ``radius`` is overloaded: for circle/point it is the full extent of
         # the shape, but for rounded_rectangle it is only a corner radius --

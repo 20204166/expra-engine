@@ -246,9 +246,7 @@ class PygameRenderer(LegacyPygameRenderMixin):
         modulation: Color,
         context: RenderContext,
     ) -> None:
-        transform = (
-            item.sprite_transform if item.material.texture_id is not None else item.world_transform
-        )
+        transform = item.visual_transform
         center = context.camera.project(
             (transform.position[0], transform.position[1]), context.viewport
         )

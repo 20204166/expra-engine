@@ -3,6 +3,7 @@
 import unittest
 from math import radians
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
@@ -1012,6 +1013,31 @@ class TestPygameRenderer(unittest.TestCase):
             RenderContext(Viewport(0, 0, 100, 100)).viewport,
         )
         self.assertEqual(destination.center, (round(expected[0]), round(expected[1])))
+
+    def test_textured_non_sprite_draws_at_its_visual_transform(self) -> None:
+        texture = _FakeTexture()
+        pygame = _FakePygame(_FakeFont())
+        cast(Any, pygame).transform = SimpleNamespace(smoothscale=lambda value, _size: value)
+        surface = _FakeSurface()
+        camera = OrthographicCamera(width=10, height=10)
+        context = RenderContext(Viewport(0, 0, 100, 100), camera)
+        renderer = PygameRenderer(pygame, surface, resource_provider=lambda _: texture)
+        renderer.start(context)
+        item = RenderItem(
+            "textured-rectangle",
+            PrimitiveDescriptor("rectangle", size=(2.0, 1.0)),
+            Transform(),
+            material=MaterialDescriptor(texture_id="assets://shape.png"),
+            sprite_offset=(2.0, 0.0),
+        )
+
+        renderer.render(RenderContractFrame((item,)))
+
+        expected = camera.project(
+            (item.visual_transform.position[0], item.visual_transform.position[1]),
+            context.viewport,
+        )
+        assert cast(Any, surface.blits[0][1]).center == (round(expected[0]), round(expected[1]))
 
     def test_texture_modulation_uses_copy_and_preserves_source_texture(self) -> None:
         texture = _TintableTexture()

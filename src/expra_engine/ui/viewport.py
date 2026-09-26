@@ -581,9 +581,7 @@ class ViewportPanel(tk.Frame):
         editor_overlays: bool = True,
         runtime_pixels: bool = False,
     ) -> None:
-        transform = (
-            item.sprite_transform if item.primitive.kind == "sprite" else item.world_transform
-        )
+        transform = item.visual_transform
         ex, ey = self._camera.project((transform.position[0], transform.position[1]))
         ppu = self._camera._camera.pixel_ratio
         sx = abs(item.primitive.size[0] * transform.scale[0]) * ppu / 2
@@ -696,9 +694,7 @@ class ViewportPanel(tk.Frame):
             self._draw_selection_outline(item)
 
     def _draw_selection_outline(self, item: RenderItem) -> None:
-        transform = (
-            item.sprite_transform if item.primitive.kind == "sprite" else item.world_transform
-        )
+        transform = item.visual_transform
         ex, ey = self._camera.project((transform.position[0], transform.position[1]))
         ppu = self._camera._camera.pixel_ratio
         sx = abs(item.primitive.size[0] * transform.scale[0]) * ppu / 2
@@ -714,9 +710,7 @@ class ViewportPanel(tk.Frame):
         )
 
     def _projected_corners(self, item: RenderItem) -> tuple[float, ...]:
-        transform = (
-            item.sprite_transform if item.primitive.kind == "sprite" else item.world_transform
-        )
+        transform = item.visual_transform
         half_width = abs(item.primitive.size[0] * transform.scale[0]) / 2
         half_height = abs(item.primitive.size[1] * transform.scale[1]) / 2
         angle = math.radians(transform.rotation)
@@ -755,9 +749,7 @@ class ViewportPanel(tk.Frame):
             return
         world = self._camera.unproject((float(event.x), float(event.y)))
         for item in reversed(self._target.items):
-            transform = (
-                item.sprite_transform if item.primitive.kind == "sprite" else item.world_transform
-            )
+            transform = item.visual_transform
             half_width = abs(item.primitive.size[0] * transform.scale[0]) / 2
             half_height = abs(item.primitive.size[1] * transform.scale[1]) / 2
             if (

@@ -772,6 +772,7 @@ def test_sprite_offset_is_used_by_viewport_hit_testing() -> None:
         key="ship",
         primitive=PrimitiveDescriptor("sprite", (2.0, 2.0)),
         transform=Transform(),
+        material=MaterialDescriptor(texture_id="assets://ship.png"),
         sprite_offset=(5.0, 0.0),
     )
     clicked: list[tuple[tuple[str, ...], bool]] = []
@@ -788,6 +789,65 @@ def test_sprite_offset_is_used_by_viewport_hit_testing() -> None:
     panel._on_click(SimpleNamespace(x=x, y=y, state=0))
 
     assert clicked == [(("ship",), False)]
+
+
+def test_textured_non_sprite_offset_is_used_by_viewport_hit_testing() -> None:
+    item = RenderItem(
+        key="textured-rectangle",
+        primitive=PrimitiveDescriptor("rectangle", (2.0, 2.0)),
+        transform=Transform(),
+        material=MaterialDescriptor(texture_id="assets://shape.png"),
+        sprite_offset=(5.0, 0.0),
+    )
+    clicked: list[tuple[tuple[str, ...], bool]] = []
+    panel = ViewportPanel.__new__(ViewportPanel)
+    panel._editor_overlays = True
+    panel._space_held = False
+    panel._canvas = cast(Any, SimpleNamespace(gettags=lambda _current: ()))
+    panel._camera = ViewportCamera((400, 300))
+    panel._target = EditorRenderTarget(RenderFrame((item,)), (item,), None)
+    panel._on_entity_click = lambda ids, extend: clicked.append((ids, extend))
+    panel._spatial_edit = cast(Any, SimpleNamespace(begin_drag_on_entity=lambda *_a, **_k: None))
+    x, y = panel._camera.project((5.0, 0.0))
+
+    panel._on_click(SimpleNamespace(x=x, y=y, state=0))
+
+    assert clicked == [(("textured-rectangle",), False)]
+
+
+def test_textured_non_sprite_viewport_geometry_uses_visual_transform() -> None:
+    item = RenderItem(
+        key="textured-rectangle",
+        primitive=PrimitiveDescriptor("rectangle", (2.0, 2.0)),
+        transform=Transform(),
+        material=MaterialDescriptor(texture_id="assets://shape.png"),
+        sprite_offset=(5.0, 0.0),
+    )
+
+    class Canvas:
+        def __init__(self) -> None:
+            self.rectangles: list[tuple[tuple[float, ...], dict[str, object]]] = []
+
+        def create_rectangle(self, *coords: float, **options: object) -> int:
+            self.rectangles.append((coords, options))
+            return len(self.rectangles)
+
+    panel = ViewportPanel.__new__(ViewportPanel)
+    panel._camera = ViewportCamera((400, 300))
+    canvas = Canvas()
+    panel._canvas = cast(Any, canvas)
+    panel._canvas_items = {}
+    panel._entity_map = {}
+    panel._colors = {"accent": "#00f", "accent_ink": "#fff", "ink_3": "#aaa"}
+    panel._target = EditorRenderTarget(RenderFrame((item,)), (item,), "another")
+
+    panel._draw_render_item(item)
+    corners = panel._projected_corners(item)
+    panel._draw_selection_outline(item)
+
+    assert canvas.rectangles[0][0] == pytest.approx((360.0, 110.0, 440.0, 190.0))
+    assert corners == pytest.approx((360.0, 190.0, 360.0, 110.0, 440.0, 110.0, 440.0, 190.0))
+    assert canvas.rectangles[1][0] == pytest.approx((356.0, 106.0, 444.0, 194.0))
 
 
 def test_inspector_tuple_values_use_parser_friendly_text() -> None:
