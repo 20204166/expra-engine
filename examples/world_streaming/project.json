@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "name": "World Streaming Demo",
+  "game_version": "0.1.0",
+  "scenes": [],
+  "entrypoint": "worlds/overworld.world.pb",
+  "levels": [
+    "levels/town.level.pb",
+    "levels/cave.level.pb"
+  ],
+  "worlds": [
+    "worlds/overworld.world.pb"
+  ],
+  "input": {
+    "move_left": "keyboard:a",
+    "move_right": "keyboard:d",
+    "move_left_alt": "keyboard:left",
+    "move_right_alt": "keyboard:right"
+  }
+}

@@ -248,6 +248,43 @@ def op_expra_inspect(req: dict) -> dict:
             ),
         }
 
+    if action == "world":
+        project = _load_project(expra_root, req["project"])
+        world_path = req.get("world")
+        if world_path is None:
+            registered = list(project.world_paths())
+            if not registered:
+                raise LookupError(
+                    "project has no registered World documents; pass 'world' explicitly "
+                    "(e.g. 'worlds/main.world.pb')"
+                )
+            world_path = registered[0]
+        world = project.load_document(world_path)
+        kind_value = getattr(getattr(world, "document_kind", None), "value", None)
+        if kind_value != "world":
+            raise LookupError(
+                f"document at {world_path!r} is not a World (document_kind={kind_value!r})"
+            )
+        return {
+            "action": action,
+            "executed_project_code": False,
+            "world_path": world_path,
+            "registered_world_paths": list(project.world_paths()),
+            "world": {
+                "name": world.name,
+                "world_id": world.world_id,
+                "initial_level_id": world.initial_level_id,
+                "initial_entrance_id": world.initial_entrance_id,
+                "primary_anchor_id": world.primary_anchor_id,
+                "level_count": len(world.levels),
+                "connection_count": len(world.connections),
+                "levels": [level.to_dict() for level in world.levels],
+                "connections": [conn.to_dict() for conn in world.connections],
+                "streaming": world.streaming.to_dict(),
+                "metadata": dict(world.metadata),
+            },
+        }
+
     raise ValueError(f"unknown expra_inspect action: {action!r}")
 
 

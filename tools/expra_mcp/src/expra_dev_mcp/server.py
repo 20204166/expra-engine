@@ -353,15 +353,19 @@ def build_server(cfg: ExpraMcpConfig) -> MCPServer:
     @server.tool(
         name="expra_inspect",
         description=(
-            "Domain-specific static inspector for an Expra project/scene, action-dispatched: "
-            "project, scene, entity, component, component_schema, systems, input_map, camera, "
-            "lifecycle. NEVER executes project-authored Python -- confirmed by reading the real "
-            "source: Project.load/Scene.from_dict/Entity.from_dict are pure JSON parsing, and "
-            "the 'script' component type only stores script_id/behaviour_class as data, never "
-            "imports the module -- so every result reports executed_project_code=false. "
-            "'systems' and 'lifecycle' have no static data and report "
-            "available_statically=false, pointing to runtime_probe/editor_session (later "
-            "phases) instead of guessing."
+            "Domain-specific static inspector for an Expra project/scene/world, "
+            "action-dispatched: project, scene, entity, component, component_schema, "
+            "systems, input_map, camera, lifecycle, world. NEVER executes "
+            "project-authored Python -- confirmed by reading the real source: "
+            "Project.load/Scene.from_dict/Entity.from_dict/World.from_dict are pure "
+            "data parsing, and the 'script' component type only stores "
+            "script_id/behaviour_class as data, never imports the module -- so every "
+            "result reports executed_project_code=false. 'systems' and 'lifecycle' "
+            "have no static data and report available_statically=false. "
+            "'world' reads a .world.pb document and returns its LevelDescriptors, "
+            "WorldConnections, streaming settings, and entrypoint IDs without running "
+            "any project code; pass 'world' (e.g. 'worlds/main.world.pb') or omit it "
+            "to auto-select the project's first registered world."
         ),
         annotations=ToolAnnotations(
             title="Expra Inspect",
@@ -381,13 +385,15 @@ def build_server(cfg: ExpraMcpConfig) -> MCPServer:
             "input_map",
             "camera",
             "lifecycle",
+            "world",
         ],
         project: str | None = None,
         scene: str | None = None,
+        world: str | None = None,
         entity: str | None = None,
         component_type: str | None = None,
     ) -> ActionInspectResult:
-        if action in {"project", "scene", "entity", "component", "input_map", "camera"} and not project:
+        if action in {"project", "scene", "entity", "component", "input_map", "camera", "world"} and not project:
             raise ValueError(f"action={action!r} requires 'project' (e.g. 'examples/blacksite_relay')")
         if action in {"entity", "component"} and not entity:
             raise ValueError(f"action={action!r} requires 'entity' (an entity_id or entity name)")
@@ -400,6 +406,8 @@ def build_server(cfg: ExpraMcpConfig) -> MCPServer:
             request["project"] = project
         if scene:
             request["scene"] = scene
+        if world:
+            request["world"] = world
         if entity:
             request["entity"] = entity
         if component_type:

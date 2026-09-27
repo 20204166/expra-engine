@@ -273,6 +273,7 @@ _RUNTIME_CORE_MODULES = (
     "scene/scene_instance.py",
     "string_utils.py",
     "utils.py",
+    "world.py",
 )
 
 
