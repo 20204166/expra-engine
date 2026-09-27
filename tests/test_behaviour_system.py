@@ -381,6 +381,34 @@ class BrokenBehaviour(Behaviour):
             self.assertEqual(engine.behaviour_system.instances, ())
             self.assertEqual(engine.behaviour_system._started_scenes, set())
 
+    def test_failed_scene_push_does_not_leave_scene_marked_started(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "scripts").mkdir()
+            (root / "scripts" / "broken.py").write_text(
+                "from expra_engine.runtime.behaviour import Behaviour\n"
+                "class BrokenBehaviour(Behaviour):\n"
+                "    def on_start(self): raise RuntimeError('start failed')\n",
+                encoding="utf-8",
+            )
+            registry = ScriptRegistry(root)
+            engine = Engine()
+            first = Scene("First")
+            first.create_entity("Base")
+            engine.set_scene(first)
+            engine.set_script_registry(registry)
+            engine.play()
+            system = engine.behaviour_system
+
+            broken = Scene("Broken")
+            broken.create_entity("Actor").add_component(
+                ScriptComponent("project://scripts/broken.py", "BrokenBehaviour")
+            )
+            with self.assertRaisesRegex(RuntimeError, "start failed"):
+                engine.push_scene(broken)
+
+            self.assertNotIn(broken.scene_id, system._started_scenes)
+
     def test_stop_failure_still_detaches_other_instances_for_same_entity(self) -> None:
         script = """from expra_engine.runtime.behaviour import Behaviour
 class FirstBehaviour(Behaviour):

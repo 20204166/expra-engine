@@ -239,7 +239,11 @@ class BehaviourSystem(RuntimeSystem):
         if scene is None or scene.scene_id in self._started_scenes:
             return
         self._started_scenes.add(scene.scene_id)
-        self._start_entities(scene, scene.entities)
+        try:
+            self._start_entities(scene, scene.entities)
+        except Exception:
+            self._started_scenes.discard(scene.scene_id)
+            raise
 
     def _start_entities(self, scene: Any, entities: Any) -> None:
         started: list[tuple[str, str]] = []
