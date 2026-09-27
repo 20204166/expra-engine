@@ -249,11 +249,16 @@ Expra-specific thresholds classify shell/core structure as `minor`, while
 editor panels, styles, design tokens, and runtime feature surfaces classify as
 `feature`; routine internals remain `patch`.
 The script builds but does not install or silently update a user's editor.
-`scripts/install-user.sh` is the explicit installation path: it selects the
-base system interpreter rather than
-the repository `.venv`, verifies the wheel, installs it into the user site (or
-system site with `--system`), and confirms the installed version. There is no
-silent background updater.
+`scripts/install-user.sh` selects the requested local wheel, verifies it, then
+delegates to `scripts/install-common.sh`, the shared wheel installer.
+`scripts/install-online.sh` downloads and checksum-verifies the published wheel
+before delegating to the same shared installer. The shared installer owns mode
+validation, environment creation, pip invocation, launcher management, and
+installed-version verification: a normal install places a version-specific venv
+under `~/.local/share/expra-engine/versions/<version>` with a `current` pointer
+and a `~/.local/bin/expra-editor` launcher, while `--system` performs an
+elevated system install with `--break-system-packages`. There is no silent
+background updater.
 
 ---
 

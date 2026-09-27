@@ -187,10 +187,18 @@ Install the latest built wheel outside the repository virtual environment:
 ./scripts/install-user.sh
 ```
 
-Use `./scripts/install-user.sh --system` for a machine-wide install, or
-`EXPRA_SYSTEM_PYTHON=/path/to/python` to select a specific system interpreter.
-The install script verifies the wheel before installation and confirms the
-installed `expra-editor` version afterward.
+The default install is a per-user, version-specific virtual environment under
+`~/.local/share/expra-engine/versions/<version>`, selected through a `current`
+pointer. A launcher is placed at `~/.local/bin/expra-editor` and added to your
+existing launcher only when it is Expra-generated. This avoids PEP 668
+`externally-managed-environment` errors and keeps the system Python untouched.
+
+Use `./scripts/install-user.sh --system` for a machine-wide install. This
+requires `sudo`, targets the system site with `--break-system-packages`, and
+warns if a per-user launcher shadows the system one. Use
+`EXPRA_SYSTEM_PYTHON=/path/to/python` to select a specific interpreter, or
+`EXPRA_ENGINE_INSTALL_ROOT` and `EXPRA_ENGINE_BIN_DIR` to override the default
+user install root and launcher directory.
 
 Install the latest published wheel directly from GitHub, with mandatory
 SHA-256 verification:
@@ -215,11 +223,9 @@ bootstraps Python 3.12 through `winget` when needed, installs for the current
 user, and verifies the installed version. Use `-System` with a downloaded copy
 for a machine-wide install.
 
-On Linux, the online installer uses an existing Python 3.12+ interpreter when
-available. If none is available, it bootstraps `uv`, creates a managed Python
-3.12 environment under `~/.local/share/expra-engine`, installs the verified
-wheel there, and prints the launcher path. `--system` intentionally requires an
-existing system Python.
+On Linux, both installers share one install path. A normal install needs a
+Python 3.12+ interpreter with `venv` support; `--system` needs an existing
+system Python outside a virtual environment.
 
 ## Threading invariant
 
