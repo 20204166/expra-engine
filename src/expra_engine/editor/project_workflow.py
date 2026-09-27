@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import subprocess
 import sys
 import uuid
@@ -11,8 +12,12 @@ from pathlib import Path, PureWindowsPath
 from tkinter import filedialog, messagebox, simpledialog
 from typing import Any
 
+from expra_engine.core.document_kind import DocumentKind
 from expra_engine.core.project import Project, ProjectError
 from expra_engine.core.scene import Level, Scene
+from expra_engine.core.scene.document_codec import canonical_pb_path
+from expra_engine.core.world import World
+from expra_engine.editor.commands import ReplaceWorldDocumentCommand
 from expra_engine.runtime.input import ActionId, PhysicalInput
 from expra_engine.runtime.script_registry import ScriptRegistry
 
@@ -128,6 +133,9 @@ class ProjectWorkflow:
         self._pending_restore = None
         window._engine.set_project(None)
         window._engine.set_scene(None)
+        active_document = getattr(window, "_active_document", None)
+        if active_document is not None:
+            active_document.open(None)
         window._viewport.set_resource_service(None)
         window._editor_context = replace(window._editor_context, project=None)
         window._command_stack.clear()
@@ -142,7 +150,13 @@ class ProjectWorkflow:
     def _confirm_switch(self) -> bool:
         """Guard project transitions when the command history has edits."""
         window = self.window
-        if not window._command_stack.can_undo:
+        active_document = getattr(window, "_active_document", None)
+        dirty = (
+            active_document.is_dirty
+            if active_document is not None
+            else getattr(window._command_stack, "is_dirty", window._command_stack.can_undo)
+        )
+        if not dirty:
             return True
         decision = messagebox.askyesnocancel(
             "Unsaved Changes",
@@ -157,7 +171,7 @@ class ProjectWorkflow:
 
     def open_loaded(self, project: Project) -> None:
         window = self.window
-        scene = project.load_document(observer=window._observer)
+        document = project.load_document(observer=window._observer)
         self.stop_project()
         runtime_preview = getattr(window, "_runtime_preview", None)
         if runtime_preview is not None:
@@ -166,7 +180,20 @@ class ProjectWorkflow:
         if getattr(run_state, "value", run_state) != "edit":
             window._engine.stop()
         window._engine.set_project(project)
-        window._engine.set_scene(scene)
+        if isinstance(document, World):
+            window._engine.set_scene(None)
+            window._engine.set_world(
+                document,
+                project=project,
+                world_resource_path=project.entrypoint,
+            )
+        elif isinstance(document, Scene):
+            window._engine.set_scene(document)
+        else:
+            raise ProjectError("project entrypoint must resolve to a Scene, Level, or World")
+        active_document = getattr(window, "_active_document", None)
+        if active_document is not None:
+            active_document.open(document, project.document_file())
         window._viewport.set_resource_service(project.resource_service(observer=window._observer))
         window._engine.set_script_registry(ScriptRegistry(project.path))
         window._editor_context = replace(window._editor_context, project=project)
@@ -198,30 +225,37 @@ class ProjectWorkflow:
             return None
 
     def window_title(self) -> str:
-        """Expose the project's main scene and currently-edited scene (spec §22)."""
+        """Expose both the active resource path and its authored Expra semantics."""
         window = self.window
         project = window._engine.project
         if project is None:
             return "Expra Editor"
+        document = _active_document_value(window)
+        kind = document.document_kind.value.upper() if document is not None else "DOCUMENT"
         relative = self._current_relative_path(project)
         if relative is None:
-            return f"{project.name} — Expra Editor"
+            return f"{project.name} — {kind} — Expra Editor"
         suffix = " (main)" if relative == project.entrypoint else ""
-        return f"{project.name} — {relative}{suffix} — Expra Editor"
+        return f"{project.name} — {relative}{suffix} — {kind} — Expra Editor"
 
     def open_scene(self, relative_path: str | None = None) -> None:
-        """Switch the edit scene to another scene already registered in the project."""
+        """Compatibility wrapper for opening a typed project document."""
+        self.open_document(relative_path)
+
+    def open_document(self, relative_path: str | None = None) -> None:
+        """Open a Scene, Level, or World through the canonical Project codec."""
         window = self.window
         project = window._engine.project
         if project is None:
             return
         if relative_path is None:
             selected = filedialog.askopenfilename(
-                title="Open Scene",
-                initialdir=str(project.scenes_dir),
+                title="Open Document",
+                initialdir=str(project.path),
                 filetypes=[
                     ("Scene documents", "*.scene.pb"),
                     ("Level documents", "*.level.pb"),
+                    ("World documents", "*.world.pb"),
                     ("Legacy JSON", "*.json"),
                 ],
             )
@@ -231,72 +265,458 @@ class ProjectWorkflow:
                 relative_path = Path(selected).resolve().relative_to(project.path).as_posix()
             except ValueError:
                 messagebox.showerror(
-                    "Open Scene", "Scene must be inside the project.", parent=window._root
+                    "Open Document", "Document must be inside the project.", parent=window._root
                 )
                 return
         if not self._confirm_switch():
             return
         try:
-            scene = project.load_document(relative_path, observer=window._observer)
+            document = project.load_document(relative_path, observer=window._observer)
         except ProjectError as exc:
-            messagebox.showerror("Open Scene", str(exc), parent=window._root)
+            messagebox.showerror("Open Document", str(exc), parent=window._root)
             return
-        window._engine.set_scene(scene)
-        window._last_save_path = project.document_file(relative_path)
+        if isinstance(document, World):
+            window._engine.set_scene(None)
+            window._engine.set_world(
+                document,
+                project=project,
+                world_resource_path=relative_path,
+            )
+        elif isinstance(document, Scene):
+            window._engine.set_scene(document)
+        else:
+            messagebox.showerror("Open Document", "Unsupported document kind.", parent=window._root)
+            return
+        document_path = project.document_file(relative_path)
+        active_document = getattr(window, "_active_document", None)
+        if active_document is not None:
+            active_document.open(document, document_path)
+        window._last_save_path = document_path
         window._selected_ids = ()
         window._root.title(self.window_title())
-        window._console.log(f"[Editor] Opened scene: {relative_path}")
+        window._console.log(f"[Editor] Opened document: {relative_path}")
         window._present_all()
 
-    def save_scene_as(self) -> None:
-        """Save the current edit scene to a new path, then keep editing it there."""
+    def new_world(self, name: str | None = None) -> None:
+        """Compatibility wrapper for the canonical typed New Document workflow."""
+        self.new_document(DocumentKind.WORLD, name)
+
+    def new_level(self, name: str | None = None) -> None:
+        """Compatibility wrapper for the canonical typed New Document workflow."""
+        self.new_document(DocumentKind.LEVEL, name)
+
+    def new_document(
+        self,
+        kind: DocumentKind | str,
+        name: str | None = None,
+    ) -> None:
+        """Create and open a Scene, Level, or World through one typed workflow."""
         window = self.window
-        scene = window._engine.edit_scene
-        if scene is None:
-            messagebox.showwarning("Save Scene As", "No scene to save.", parent=window._root)
+        project = window._engine.project
+        try:
+            document_kind = (
+                DocumentKind(kind.strip().casefold())
+                if isinstance(kind, str)
+                else DocumentKind(kind)
+            )
+        except (TypeError, ValueError):
+            messagebox.showerror(
+                "New Document", "Choose Scene, Level, or World.", parent=window._root
+            )
+            return
+        if document_kind not in {DocumentKind.SCENE, DocumentKind.LEVEL, DocumentKind.WORLD}:
+            messagebox.showerror(
+                "New Document", "Choose Scene, Level, or World.", parent=window._root
+            )
+            return
+        if project is None and document_kind is not DocumentKind.SCENE:
+            messagebox.showwarning(
+                "New Document",
+                "Open a project before creating a Level or World.",
+                parent=window._root,
+            )
+            return
+        if not self._confirm_switch():
+            return
+        if name is None:
+            name = simpledialog.askstring(
+                "New Document", f"{document_kind.value.title()} name:", parent=window._root
+            )
+        if not name or not name.strip():
+            return
+        normalized_name = name.strip()
+        if document_kind is DocumentKind.SCENE:
+            document: Scene | World = Scene(normalized_name, scene_id=str(uuid.uuid4()))
+            relative_path = (
+                f"scenes/{canonical_pb_path(Path(normalized_name).name, DocumentKind.SCENE)}"
+            )
+        elif document_kind is DocumentKind.LEVEL:
+            document = Level(normalized_name, scene_id=str(uuid.uuid4()))
+            relative_path = (
+                f"levels/{canonical_pb_path(Path(normalized_name).name, DocumentKind.LEVEL)}"
+            )
+        else:
+            document = World(normalized_name, world_id=str(uuid.uuid4()))
+            relative_path = (
+                f"worlds/{canonical_pb_path(Path(normalized_name).name, DocumentKind.WORLD)}"
+            )
+        if project is not None:
+            try:
+                target = project.document_file(relative_path)
+                if target.exists():
+                    raise ProjectError(f"Document already exists: {relative_path}")
+                project.save_document(document, relative_path)
+            except (OSError, ProjectError, ValueError) as error:
+                messagebox.showerror("New Document", str(error), parent=window._root)
+                return
+        if isinstance(document, World):
+            window._engine.set_scene(None)
+            window._engine.set_world(
+                document,
+                project=project,
+                world_resource_path=relative_path,
+            )
+        else:
+            window._engine.set_scene(document)
+        document_path = project.document_file(relative_path) if project is not None else None
+        active_document = getattr(window, "_active_document", None)
+        if active_document is not None:
+            active_document.open(document, document_path)
+        window._last_save_path = document_path
+        window._selected_ids = ()
+        window._root.title(self.window_title())
+        window._console.log(
+            f"[Editor] Created {document_kind.value.title()}: "
+            f"{relative_path if project is not None else normalized_name}"
+        )
+        window._present_all()
+
+    def add_level_to_world(
+        self,
+        relative_path: str,
+        *,
+        origin: tuple[float, float] = (0.0, 0.0),
+    ) -> None:
+        """Add a typed Level reference; the Level graph remains independently owned."""
+        from expra_engine.core.scene import Level
+        from expra_engine.core.world import LevelDescriptor
+
+        window = self.window
+        project = window._engine.project
+        world = _active_document_value(window)
+        if project is None or not isinstance(world, World):
+            raise ProjectError("Add Level requires an active World document")
+        project.document_file(relative_path)
+        source = project.read_document(relative_path, observer=window._observer)
+        if not isinstance(source, Level):
+            raise ProjectError(f"document is not a Level: {relative_path}")
+        project.register_level_path(relative_path)
+        stem = Path(relative_path).name.removesuffix(".level.pb")
+        instance_id = stem
+        suffix = 2
+        existing = {item.instance_id for item in world.levels}
+        while instance_id in existing:
+            instance_id = f"{stem}-{suffix}"
+            suffix += 1
+        descriptor = LevelDescriptor(instance_id, relative_path, origin=origin)
+        updated = replace(
+            world,
+            levels=(*world.levels, descriptor),
+            initial_level_id=world.initial_level_id or instance_id,
+        )
+        self._commit_world_change(world, updated, f"Add Level {instance_id}")
+        window._console.log(f"[World] Added Level reference: {relative_path}")
+        window._present_all()
+
+    def update_level_placement(self, instance_id: str, origin: tuple[float, float]) -> None:
+        """Update World placement and translate optional World-space bounds."""
+        window = self.window
+        world = _active_document_value(window)
+        if not isinstance(world, World):
+            raise ProjectError("Level placement requires an active World document")
+        descriptor = next((item for item in world.levels if item.instance_id == instance_id), None)
+        if descriptor is None:
+            raise ProjectError(f"World Level instance does not exist: {instance_id}")
+        updated_descriptor = replace(descriptor, origin=origin)
+        if updated_descriptor == descriptor:
+            return
+        bounds = descriptor.bounds
+        if bounds is not None:
+            dx = updated_descriptor.origin[0] - descriptor.origin[0]
+            dy = updated_descriptor.origin[1] - descriptor.origin[1]
+            updated_descriptor = replace(
+                updated_descriptor,
+                bounds=(bounds[0] + dx, bounds[1] + dy, bounds[2], bounds[3]),
+            )
+        updated = replace(
+            world,
+            levels=tuple(
+                updated_descriptor if item.instance_id == instance_id else item
+                for item in world.levels
+            ),
+        )
+        self._commit_world_change(world, updated, f"Place Level {instance_id}")
+        window._present_all()
+
+    def set_initial_level(self, instance_id: str, entrance_id: str | None = None) -> None:
+        window = self.window
+        world = _active_document_value(window)
+        if not isinstance(world, World):
+            raise ProjectError("Set Initial Level requires an active World document")
+        descriptor = next((item for item in world.levels if item.instance_id == instance_id), None)
+        if descriptor is None:
+            raise ProjectError(f"World Level instance does not exist: {instance_id}")
+        if entrance_id is None and instance_id != world.initial_level_id:
+            entrance_id = None
+        elif entrance_id is None:
+            entrance_id = world.initial_entrance_id
+        if entrance_id is not None:
+            project = window._engine.project
+            if project is None:
+                raise ProjectError("Initial entrance validation requires an active Project")
+            from expra_engine.core.scene import Level
+            from expra_engine.runtime.level_anchor import LevelAnchorKind
+
+            level = project.read_document(descriptor.resource_path, observer=window._observer)
+            anchor = level.find_anchor(entrance_id) if isinstance(level, Level) else None
+            if anchor is None or anchor[1].kind not in {
+                LevelAnchorKind.ENTRANCE,
+                LevelAnchorKind.BOTH,
+            }:
+                raise ProjectError(f"initial entrance is not an entrance anchor: {entrance_id}")
+        updated = replace(
+            world,
+            initial_level_id=instance_id,
+            initial_entrance_id=entrance_id,
+        )
+        self._commit_world_change(world, updated, f"Set Initial Level {instance_id}")
+        window._present_all()
+
+    def add_world_connection(
+        self,
+        connection: Any,
+        *,
+        create_reverse: bool = False,
+    ) -> None:
+        """Validate named Level anchors and add a directed World connection."""
+        from expra_engine.core.scene import Level
+        from expra_engine.core.world import TransitionMode, WorldConnection
+        from expra_engine.runtime.level_anchor import LevelAnchorKind
+
+        window = self.window
+        project = window._engine.project
+        world = _active_document_value(window)
+        if project is None or not isinstance(world, World):
+            raise ProjectError("Create Connection requires an active World document")
+        if not isinstance(connection, WorldConnection):
+            raise TypeError("connection must be a WorldConnection")
+        if connection.bidirectional:
+            raise ProjectError(
+                "Create an explicit reverse connection instead of bidirectional mode"
+            )
+        descriptors = {item.instance_id: item for item in world.levels}
+        routes = [connection]
+        if create_reverse:
+            reverse = replace(
+                connection,
+                connection_id=f"{connection.connection_id}:reverse",
+                source_level_id=connection.destination_level_id,
+                source_anchor_id=connection.destination_anchor_id,
+                destination_level_id=connection.source_level_id,
+                destination_anchor_id=connection.source_anchor_id,
+            )
+            routes.append(reverse)
+        for route in routes:
+            source_descriptor = descriptors.get(route.source_level_id)
+            destination_descriptor = descriptors.get(route.destination_level_id)
+            if source_descriptor is None or destination_descriptor is None:
+                raise ProjectError(f"connection {route.connection_id!r} references a missing Level")
+            source_level = project.read_document(
+                source_descriptor.resource_path, observer=window._observer
+            )
+            destination_level = project.read_document(
+                destination_descriptor.resource_path, observer=window._observer
+            )
+            if not isinstance(source_level, Level) or not isinstance(destination_level, Level):
+                raise ProjectError("World connections must reference Level documents")
+            source_anchor = source_level.find_anchor(route.source_anchor_id)
+            destination_anchor = destination_level.find_anchor(route.destination_anchor_id)
+            if source_anchor is None or destination_anchor is None:
+                raise ProjectError(
+                    f"connection {route.connection_id!r} references a missing anchor"
+                )
+            if source_anchor[1].kind not in {LevelAnchorKind.EXIT, LevelAnchorKind.BOTH}:
+                raise ProjectError("connection source anchor must be an exit or both-way anchor")
+            if destination_anchor[1].kind not in {
+                LevelAnchorKind.ENTRANCE,
+                LevelAnchorKind.BOTH,
+            }:
+                raise ProjectError(
+                    "connection destination anchor must be an entrance or both-way anchor"
+                )
+            if route.transition is TransitionMode.SEAMLESS:
+                source_pose = source_level.world_transform(source_anchor[0].entity_id)
+                destination_pose = destination_level.world_transform(
+                    destination_anchor[0].entity_id
+                )
+                source_position = (
+                    source_descriptor.origin[0] + source_pose.position[0],
+                    source_descriptor.origin[1] + source_pose.position[1],
+                )
+                destination_position = (
+                    destination_descriptor.origin[0] + destination_pose.position[0],
+                    destination_descriptor.origin[1] + destination_pose.position[1],
+                )
+                if math.dist(source_position, destination_position) > 0.01:
+                    raise ProjectError(
+                        f"seamless connection {route.connection_id!r} endpoints are not adjacent"
+                    )
+        updated = replace(world, connections=(*world.connections, *routes))
+        description = f"Create Connection {connection.connection_id}"
+        self._commit_world_change(world, updated, description)
+        window._present_all()
+
+    def remove_world_connection(self, connection_id: str) -> None:
+        window = self.window
+        world = _active_document_value(window)
+        if not isinstance(world, World):
+            raise ProjectError("Remove Connection requires an active World document")
+        if not any(item.connection_id == connection_id for item in world.connections):
+            raise ProjectError(f"World connection does not exist: {connection_id}")
+        updated = replace(
+            world,
+            connections=tuple(
+                item for item in world.connections if item.connection_id != connection_id
+            ),
+        )
+        self._commit_world_change(world, updated, f"Remove Connection {connection_id}")
+        window._present_all()
+
+    def remove_level_from_world(self, instance_id: str) -> None:
+        window = self.window
+        world = _active_document_value(window)
+        if not isinstance(world, World):
+            raise ProjectError("Remove Level requires an active World document")
+        if not any(item.instance_id == instance_id for item in world.levels):
+            raise ProjectError(f"World Level instance does not exist: {instance_id}")
+        if any(
+            item.source_level_id == instance_id or item.destination_level_id == instance_id
+            for item in world.connections
+        ):
+            raise ProjectError(
+                f"remove connections referencing Level {instance_id!r} before removing it"
+            )
+        levels = tuple(item for item in world.levels if item.instance_id != instance_id)
+        initial_level_id = world.initial_level_id
+        if initial_level_id == instance_id:
+            initial_level_id = levels[0].instance_id if levels else None
+        initial_entrance_id = world.initial_entrance_id if initial_level_id else None
+        updated = replace(
+            world,
+            levels=levels,
+            initial_level_id=initial_level_id,
+            initial_entrance_id=initial_entrance_id,
+        )
+        self._commit_world_change(world, updated, f"Remove Level {instance_id}")
+        window._present_all()
+
+    def _commit_world_change(self, before: World, after: World, description: str) -> None:
+        window = self.window
+        window._command_stack.push(
+            ReplaceWorldDocumentCommand(self._install_world_document, before, after, description)
+        )
+        window._update_undo_redo_state()
+
+    def _install_world_document(self, world: World) -> None:
+        window = self.window
+        project = window._engine.project
+        if project is None:
+            raise ProjectError("World authoring requires an active Project")
+        window._active_document.document = world
+        window._engine.set_world(
+            world,
+            project=project,
+            world_resource_path=self._current_relative_path(project),
+        )
+        window._root.title(self.window_title())
+
+    def save_scene_as(self) -> None:
+        """Compatibility wrapper for typed active-document Save As."""
+        self.save_active_document_as()
+
+    def save_active_document_as(self) -> None:
+        """Save the active typed document to a new path, then keep editing it there."""
+        window = self.window
+        document = _active_document_value(window)
+        if document is None:
+            messagebox.showwarning("Save As", "No document to save.", parent=window._root)
             return
         project = window._engine.project
-        is_level = isinstance(scene, Level)
-        extension = ".level.pb" if is_level else ".scene.pb"
-        file_type = "Level documents" if is_level else "Scene documents"
+        is_world = isinstance(document, World)
+        is_level = isinstance(document, Level)
+        extension = ".world.pb" if is_world else ".level.pb" if is_level else ".scene.pb"
+        file_type = (
+            "World documents" if is_world else "Level documents" if is_level else "Scene documents"
+        )
         initial_dir = (
-            (project.levels_dir if is_level else project.scenes_dir)
+            (
+                project.worlds_dir
+                if is_world
+                else project.levels_dir
+                if is_level
+                else project.scenes_dir
+            )
             if project is not None
             else None
         )
+        document_label = "World" if is_world else "Level" if is_level else "Scene"
         path = filedialog.asksaveasfilename(
-            title="Save Scene As",
+            title=f"Save {document_label} As",
             defaultextension=extension,
-            filetypes=[(file_type, f"*{extension}"), ("Legacy JSON", "*.json")],
+            filetypes=[(file_type, f"*{extension}")]
+            + ([] if is_world else [("Legacy JSON", "*.json")]),
             initialdir=str(initial_dir) if initial_dir is not None else None,
         )
         if not path:
             return
         target = Path(path)
         if project is None:
+            if is_world:
+                messagebox.showerror(
+                    "Save World As",
+                    "World documents must be saved inside a project.",
+                    parent=window._root,
+                )
+                return
             try:
-                target.write_text(json.dumps(scene.to_dict(), indent=2), encoding="utf-8")
+                target.write_text(json.dumps(document.to_dict(), indent=2), encoding="utf-8")
             except OSError as exc:
                 messagebox.showerror("Save Scene As", str(exc), parent=window._root)
                 return
             window._last_save_path = target
+            _mark_active_document_saved(window, target)
             window._console.log(f"[Editor] Scene saved as: {target}")
             return
         try:
             relative = target.resolve().relative_to(project.path.resolve()).as_posix()
-            project.save_document(scene, relative)
+            project.save_document(document, relative)
         except (OSError, ProjectError, ValueError) as exc:
             messagebox.showerror("Save Scene As", str(exc), parent=window._root)
             return
         window._last_save_path = project.document_file(relative)
+        _mark_active_document_saved(window, window._last_save_path)
         window._root.title(self.window_title())
         window._console.log(f"[Editor] Scene saved as: {relative}")
 
     def save_scene(self) -> None:
+        """Compatibility wrapper for the active typed-document Save action."""
+        self.save_active_document()
+
+    def save_active_document(self) -> None:
         window = self.window
-        scene = window._engine.edit_scene
-        if scene is None:
-            messagebox.showwarning("Save Scene", "No scene to save.")
+        document = _active_document_value(window)
+        if document is None:
+            messagebox.showwarning("Save Document", "No document to save.")
             return
         project = window._engine.project
         if project is not None and window._last_save_path is not None:
@@ -306,7 +726,8 @@ class ProjectWorkflow:
                 relative = Path(mapping.get(relative.as_posix(), relative.as_posix()))
                 window._last_save_path = project.document_file(relative.as_posix())
                 window._console.log("[Editor] Migrated legacy JSON documents to canonical PB")
-            project.save_document(scene, relative.as_posix())
+            project.save_document(document, relative.as_posix())
+            _mark_active_document_saved(window, window._last_save_path)
             window._console.log(f"[Editor] Scene saved: {window._last_save_path}")
             return
         path = filedialog.asksaveasfilename(
@@ -320,16 +741,23 @@ class ProjectWorkflow:
             window._console.log(f"[Editor] Scene saved: {path}")
 
     def save_scene_silent(self) -> None:
+        """Compatibility wrapper for typed-document autosave/save prompts."""
+        self.save_active_document_silent()
+
+    def save_active_document_silent(self) -> None:
         """Save to the last selected path without opening a dialog."""
         window = self.window
-        if window._last_save_path is None or window._engine.edit_scene is None:
+        document = _active_document_value(window)
+        if window._last_save_path is None or document is None:
             return
-        scene = window._engine.edit_scene
         project = window._engine.project
         if project is None:
+            if isinstance(document, World):
+                raise ProjectError("World documents must be saved through their Project")
             window._last_save_path.write_text(
-                json.dumps(scene.to_dict(), indent=2), encoding="utf-8"
+                json.dumps(document.to_dict(), indent=2), encoding="utf-8"
             )
+            _mark_active_document_saved(window, window._last_save_path)
             return
         relative = window._last_save_path.resolve().relative_to(project.path).as_posix()
         if relative.casefold().endswith(".json"):
@@ -337,35 +765,60 @@ class ProjectWorkflow:
             relative = mapping.get(relative, relative)
             window._last_save_path = project.document_file(relative)
             window._console.log("[Editor] Migrated legacy JSON documents to canonical PB")
-        project.save_document(scene, relative)
+        project.save_document(document, relative)
+        _mark_active_document_saved(window, window._last_save_path)
 
     def duplicate_scene(self, name: str | None = None) -> None:
-        """Copy the current edit scene into a new, independent scene file."""
+        """Compatibility wrapper for typed active-document duplication."""
+        self.duplicate_document(name)
+
+    def duplicate_document(self, name: str | None = None) -> None:
+        """Duplicate the active document while preserving referenced Level paths."""
         window = self.window
         project = window._engine.project
-        scene = window._engine.edit_scene
-        if project is None or scene is None:
+        document = _active_document_value(window)
+        if project is None or document is None:
             return
         if name is None:
-            name = simpledialog.askstring("Duplicate Scene", "New scene name:", parent=window._root)
+            name = simpledialog.askstring("Duplicate Document", "New name:", parent=window._root)
         if not name:
             return
-        if isinstance(scene, Level):
-            relative = f"levels/{Path(name).stem}.level.pb"
+        if isinstance(document, World):
+            relative = f"worlds/{canonical_pb_path(Path(name).name, DocumentKind.WORLD)}"
+        elif isinstance(document, Level):
+            relative = f"levels/{canonical_pb_path(Path(name).name, DocumentKind.LEVEL)}"
         else:
-            relative = f"scenes/{Path(name).stem}.scene.pb"
+            relative = f"scenes/{canonical_pb_path(Path(name).name, DocumentKind.SCENE)}"
         if project.document_file(relative).exists():
             messagebox.showerror(
-                "Duplicate Scene", f"Scene already exists: {relative}", parent=window._root
+                "Duplicate Document", f"Document already exists: {relative}", parent=window._root
             )
             return
-        data = scene.to_dict()
-        data["scene_id"] = str(uuid.uuid4())
+        data = document.to_dict()
+        data["world_id" if isinstance(document, World) else "scene_id"] = str(uuid.uuid4())
         data["name"] = name
-        duplicate = Level.from_dict(data) if isinstance(scene, Level) else Scene.from_dict(data)
+        duplicate = (
+            World.from_dict(data)
+            if isinstance(document, World)
+            else Level.from_dict(data)
+            if isinstance(document, Level)
+            else Scene.from_dict(data)
+        )
         project.save_document(duplicate, relative)
-        window._engine.set_scene(duplicate)
-        window._last_save_path = project.document_file(relative)
+        if isinstance(duplicate, World):
+            window._engine.set_scene(None)
+            window._engine.set_world(
+                duplicate,
+                project=project,
+                world_resource_path=relative,
+            )
+        else:
+            window._engine.set_scene(duplicate)
+        document_path = project.document_file(relative)
+        active_document = getattr(window, "_active_document", None)
+        if active_document is not None:
+            active_document.open(duplicate, document_path)
+        window._last_save_path = document_path
         window._selected_ids = ()
         window._root.title(self.window_title())
         window._console.log(f"[Editor] Duplicated scene as: {relative}")
@@ -579,3 +1032,22 @@ class ProjectWorkflow:
         window._root.title(self.window_title())
         window._console.log("[Editor] Restored previous scene after Run Project")
         window._present_all()
+
+
+def _active_document_value(window: Any) -> Scene | World | None:
+    session = getattr(window, "_active_document", None)
+    if session is not None:
+        return session.document
+    return getattr(window._engine, "edit_scene", None)
+
+
+def _mark_active_document_saved(window: Any, path: Path | None) -> None:
+    session = getattr(window, "_active_document", None)
+    if session is not None:
+        session.mark_saved(path)
+        return
+    command_stack = getattr(window, "_command_stack", None)
+    if command_stack is not None:
+        mark_clean = getattr(command_stack, "mark_clean", None)
+        if callable(mark_clean):
+            mark_clean()

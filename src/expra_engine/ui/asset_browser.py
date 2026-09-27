@@ -14,6 +14,7 @@ from expra_engine.editor.assets import (
     AssetScanRequest,
     AssetScanResult,
     accept_scan_result,
+    iter_project_paths,
     scan_directory,
 )
 from expra_engine.observability import ObservabilityWatcher, observe_stage
@@ -291,4 +292,4 @@ class AssetBrowserPanel(tk.Frame):
 
 
 def _iter_directory(directory: Path) -> tuple[Path, ...]:
-    return tuple(directory.rglob("*"))
+    return iter_project_paths(directory)

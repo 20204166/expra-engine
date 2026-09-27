@@ -10,9 +10,11 @@ from pathlib import Path
 import pytest
 
 from expra_engine.core.component import TransformComponent
+from expra_engine.core.document_kind import DocumentKind
 from expra_engine.core.scene import Level, LevelMetadata, document_codec
 from expra_engine.core.scene.document_codec import (
     DocumentCodecError,
+    canonical_pb_path,
     decode_protobuf,
     decode_protobuf_document,
     encode_protobuf,
@@ -213,3 +215,138 @@ def test_document_path_kind_recognizes_typed_and_legacy_extensions() -> None:
     assert kind_for_document_path("scenes/door.json") is None
     with pytest.raises(DocumentCodecError, match="typed"):
         kind_for_document_path("data/document.pb")
+
+
+# ---------------------------------------------------------------------------
+# canonical_pb_path — typed suffix normalisation
+# ---------------------------------------------------------------------------
+
+
+class TestCanonicalPbPathScene:
+    def test_bare_name(self) -> None:
+        assert canonical_pb_path("enemy", DocumentKind.SCENE) == "enemy.scene.pb"
+
+    def test_bare_kind_suffix(self) -> None:
+        assert canonical_pb_path("enemy.scene", DocumentKind.SCENE) == "enemy.scene.pb"
+
+    def test_typed_json(self) -> None:
+        assert canonical_pb_path("enemy.scene.json", DocumentKind.SCENE) == "enemy.scene.pb"
+
+    def test_canonical_pb_idempotent(self) -> None:
+        assert canonical_pb_path("enemy.scene.pb", DocumentKind.SCENE) == "enemy.scene.pb"
+
+    def test_generic_json(self) -> None:
+        assert canonical_pb_path("enemy.json", DocumentKind.SCENE) == "enemy.scene.pb"
+
+    def test_preserves_directory(self) -> None:
+        assert (
+            canonical_pb_path("scenes/enemy.scene.json", DocumentKind.SCENE)
+            == "scenes/enemy.scene.pb"
+        )
+
+    def test_no_doubled_suffix_from_typed_json(self) -> None:
+        result = canonical_pb_path("enemy.scene.json", DocumentKind.SCENE)
+        assert result == "enemy.scene.pb"
+        assert "scene.scene" not in result
+
+    def test_no_doubled_suffix_from_bare_kind(self) -> None:
+        result = canonical_pb_path("enemy.scene", DocumentKind.SCENE)
+        assert "scene.scene" not in result
+
+    def test_repeated_application_stable(self) -> None:
+        first = canonical_pb_path("enemy.scene.json", DocumentKind.SCENE)
+        second = canonical_pb_path(first, DocumentKind.SCENE)
+        assert first == second == "enemy.scene.pb"
+
+
+class TestCanonicalPbPathLevel:
+    def test_bare_name(self) -> None:
+        assert canonical_pb_path("forest", DocumentKind.LEVEL) == "forest.level.pb"
+
+    def test_bare_kind_suffix(self) -> None:
+        assert canonical_pb_path("forest.level", DocumentKind.LEVEL) == "forest.level.pb"
+
+    def test_typed_json(self) -> None:
+        assert canonical_pb_path("forest.level.json", DocumentKind.LEVEL) == "forest.level.pb"
+
+    def test_canonical_pb_idempotent(self) -> None:
+        assert canonical_pb_path("forest.level.pb", DocumentKind.LEVEL) == "forest.level.pb"
+
+    def test_generic_json(self) -> None:
+        assert canonical_pb_path("forest.json", DocumentKind.LEVEL) == "forest.level.pb"
+
+    def test_preserves_directory(self) -> None:
+        assert (
+            canonical_pb_path("levels/chapter_one.level.json", DocumentKind.LEVEL)
+            == "levels/chapter_one.level.pb"
+        )
+
+    def test_no_doubled_suffix_from_typed_json(self) -> None:
+        result = canonical_pb_path("forest.level.json", DocumentKind.LEVEL)
+        assert result == "forest.level.pb"
+        assert "level.level" not in result
+
+    def test_no_doubled_suffix_from_bare_kind(self) -> None:
+        result = canonical_pb_path("forest.level", DocumentKind.LEVEL)
+        assert "level.level" not in result
+
+    def test_repeated_application_stable(self) -> None:
+        first = canonical_pb_path("forest.level.json", DocumentKind.LEVEL)
+        second = canonical_pb_path(first, DocumentKind.LEVEL)
+        assert first == second == "forest.level.pb"
+
+
+class TestCanonicalPbPathWorld:
+    def test_bare_name(self) -> None:
+        assert canonical_pb_path("main", DocumentKind.WORLD) == "main.world.pb"
+
+    def test_bare_kind_suffix(self) -> None:
+        assert canonical_pb_path("main.world", DocumentKind.WORLD) == "main.world.pb"
+
+    def test_typed_json(self) -> None:
+        assert canonical_pb_path("main.world.json", DocumentKind.WORLD) == "main.world.pb"
+
+    def test_canonical_pb_idempotent(self) -> None:
+        assert canonical_pb_path("main.world.pb", DocumentKind.WORLD) == "main.world.pb"
+
+    def test_generic_json(self) -> None:
+        assert canonical_pb_path("main.json", DocumentKind.WORLD) == "main.world.pb"
+
+    def test_preserves_directory(self) -> None:
+        assert (
+            canonical_pb_path("worlds/main.world.json", DocumentKind.WORLD)
+            == "worlds/main.world.pb"
+        )
+
+    def test_no_doubled_suffix_from_typed_json(self) -> None:
+        result = canonical_pb_path("main.world.json", DocumentKind.WORLD)
+        assert result == "main.world.pb"
+        assert "world.world" not in result
+
+    def test_no_doubled_suffix_from_bare_kind(self) -> None:
+        result = canonical_pb_path("main.world", DocumentKind.WORLD)
+        assert "world.world" not in result
+
+    def test_repeated_application_stable(self) -> None:
+        first = canonical_pb_path("main.world.json", DocumentKind.WORLD)
+        second = canonical_pb_path(first, DocumentKind.WORLD)
+        assert first == second == "main.world.pb"
+
+
+class TestCanonicalPbPathNegative:
+    """Assert that no operation through canonical_pb_path produces doubled type suffixes."""
+
+    def test_scene_never_produces_doubled_suffix(self) -> None:
+        for name in ("x.scene", "x.scene.json", "x.scene.pb", "x"):
+            result = canonical_pb_path(name, DocumentKind.SCENE)
+            assert "scene.scene" not in result, f"doubled suffix in {result!r} from {name!r}"
+
+    def test_level_never_produces_doubled_suffix(self) -> None:
+        for name in ("x.level", "x.level.json", "x.level.pb", "x"):
+            result = canonical_pb_path(name, DocumentKind.LEVEL)
+            assert "level.level" not in result, f"doubled suffix in {result!r} from {name!r}"
+
+    def test_world_never_produces_doubled_suffix(self) -> None:
+        for name in ("x.world", "x.world.json", "x.world.pb", "x"):
+            result = canonical_pb_path(name, DocumentKind.WORLD)
+            assert "world.world" not in result, f"doubled suffix in {result!r} from {name!r}"

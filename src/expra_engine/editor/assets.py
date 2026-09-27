@@ -3,6 +3,23 @@
 Filesystem enumeration is deliberately injected.  A caller can run
 ``scan_directory`` in ``AppCoordinator`` and deliver its result through
 ``TkDeliveryQueue`` without this module owning either lifecycle.
+
+Asset Browser ignore policy
+---------------------------
+The browser intentionally hides generated development/cache content so
+the project tree shows only game resources.  The built-in ignore set
+covers Python caches, VCS internals, IDE metadata, common virtual-
+environment roots, OS metadata, and temporary editor files.
+
+Standard project directories such as ``tests/``, ``docs/``, ``tools/``,
+``scripts/``, or ``schemas/`` are NOT hidden — they may contain authored
+game content depending on how the developer structures their project.
+
+The ``build/`` and ``dist/`` directories are also kept visible because they
+could contain game-specific output artifacts a developer wants to inspect.
+
+This policy is NOT derived from ``.gitignore``.  Version-control exclusions
+and authoring visibility serve different purposes and must remain independent.
 """
 
 from __future__ import annotations
@@ -13,6 +30,120 @@ from enum import Enum
 from pathlib import Path
 
 from expra_engine.filesystem import ResourceId
+
+# ---------------------------------------------------------------------------
+# Asset Browser ignore policy — ONE canonical owner
+# ---------------------------------------------------------------------------
+
+# Directory names that are pruned at the boundary (contents never visited).
+_IGNORED_DIRS: frozenset[str] = frozenset(
+    {
+        # Python tooling caches
+        "__pycache__",
+        ".pytest_cache",
+        ".mypy_cache",
+        ".ruff_cache",
+        ".pyright",
+        ".pyre",
+        ".tox",
+        ".nox",
+        "htmlcov",
+        # VCS internals
+        ".git",
+        ".hg",
+        ".svn",
+        # IDE / editor metadata
+        ".idea",
+        ".vscode",
+        # Python virtual environments (common unambiguous names)
+        ".venv",
+        "venv",
+        # JavaScript dependency store
+        "node_modules",
+    }
+)
+
+# Exact filenames always excluded.
+_IGNORED_FILE_NAMES: frozenset[str] = frozenset(
+    {
+        ".DS_Store",  # macOS Finder metadata
+        "Thumbs.db",  # Windows thumbnail cache
+        "desktop.ini",  # Windows folder configuration
+        ".coverage",  # Python coverage data file
+    }
+)
+
+# File suffixes always excluded (compared lower-cased).
+_IGNORED_FILE_SUFFIXES: frozenset[str] = frozenset(
+    {
+        ".pyc",  # Python bytecode
+        ".pyo",  # Python optimised bytecode
+        ".swp",  # Vim swap file
+        ".swo",  # Vim swap file (alternate)
+        ".tmp",  # Generic temporary file
+    }
+)
+
+
+def is_project_asset(path: Path, *, is_dir: bool | None = None) -> bool:
+    """Return ``True`` when *path* should appear in the Asset Browser.
+
+    For directories this controls whether the tree is entered at all — a
+    ``False`` result prunes the entire subtree before any recursion.
+    For files this excludes generated or OS-noise entries individually.
+
+    The optional *is_dir* parameter overrides filesystem detection; pass it
+    in unit tests to avoid requiring a real directory on disk.
+    """
+    name = path.name
+    directory = path.is_dir() if is_dir is None else is_dir
+    if directory:
+        return name not in _IGNORED_DIRS
+    if name in _IGNORED_FILE_NAMES:
+        return False
+    suffix = Path(name).suffix.casefold()
+    if suffix in _IGNORED_FILE_SUFFIXES:
+        return False
+    # Backup/autosave files ending with ~ (e.g. ``file.py~``)
+    if name.endswith("~"):
+        return False
+    # Python coverage variant files: .coverage.HOST.PID.RANDOM
+    return not name.startswith(".coverage.")
+
+
+def iter_project_paths(directory: Path) -> tuple[Path, ...]:
+    """Return all asset paths under *directory*, pruning ignored subtrees.
+
+    Directories matching the built-in ignore policy are rejected at the
+    boundary — their contents are never visited.  Symlink cycles are
+    avoided by tracking resolved real paths.
+    """
+    results: list[Path] = []
+    try:
+        root_real = directory.resolve()
+    except OSError:
+        return ()
+    _collect_project_paths(directory, results, seen={root_real})
+    return tuple(results)
+
+
+def _collect_project_paths(directory: Path, results: list[Path], seen: set[Path]) -> None:
+    try:
+        children = sorted(directory.iterdir())
+    except (PermissionError, OSError):
+        return
+    for child in children:
+        if not is_project_asset(child):
+            continue
+        results.append(child)
+        if child.is_dir():
+            try:
+                real = child.resolve()
+            except OSError:
+                continue
+            if real not in seen:
+                seen.add(real)
+                _collect_project_paths(child, results, seen)
 
 
 class AssetMode(Enum):
@@ -62,6 +193,8 @@ class AssetEntry:
         if suffix in {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"}:
             return "Image"
         if suffix in {".json", ".pb"} and self.logical_id is not None:
+            if name.endswith(".world.pb") or (parts and parts[0] == "worlds"):
+                return "World"
             if name.endswith((".level.json", ".level.pb")) or (parts and parts[0] == "levels"):
                 return "Level"
             if name.endswith((".scene.json", ".scene.pb")) or (

@@ -188,6 +188,64 @@ class TestProjectCreateAndSave(unittest.TestCase):
             assert component is not None
             self.assertEqual(component.source_path, "scenes/door.scene.pb")
 
+    def test_typed_json_migration_scene_produces_canonical_pb_path(self) -> None:
+        """Migrating a .scene.json file must produce .scene.pb, never .scene.scene.pb."""
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Project.create("Typed", Path(tmp) / "project")
+            scene = Scene("Room", scene_id="room")
+            # Write typed .scene.json directly (legacy typed format)
+            scene_path = project.path / "scenes" / "room.scene.json"
+            scene_path.write_text(json.dumps(scene.to_dict()))
+            project.register_scene_path("scenes/room.scene.json")
+            project.save()
+
+            mapping = project.migrate_to_protobuf()
+
+            self.assertEqual(mapping["scenes/room.scene.json"], "scenes/room.scene.pb")
+            self.assertNotIn("scene.scene", mapping["scenes/room.scene.json"])
+
+    def test_typed_json_migration_level_produces_canonical_pb_path(self) -> None:
+        """Migrating a .level.json file must produce .level.pb, never .level.level.pb."""
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Project.create("LevelTyped", Path(tmp) / "project")
+            level = Level("Forest", scene_id="forest")
+            # Write typed .level.json directly (legacy typed format)
+            level_path = project.path / "levels" / "forest.level.json"
+            level_path.parent.mkdir(exist_ok=True)
+            level_path.write_text(json.dumps(level.to_dict()))
+            project.register_level_path("levels/forest.level.json")
+            project._entrypoint = "levels/forest.level.json"
+            project.save()
+
+            mapping = project.migrate_to_protobuf()
+
+            self.assertEqual(mapping["levels/forest.level.json"], "levels/forest.level.pb")
+            self.assertNotIn("level.level", mapping["levels/forest.level.json"])
+            self.assertEqual(project.entrypoint, "levels/forest.level.pb")
+            self.assertIn("levels/forest.level.pb", project.level_paths())
+
+    def test_typed_json_migration_does_not_double_suffix_on_repeated_runs(self) -> None:
+        """Second migrate call on an already-canonical PB project must be a no-op."""
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Project.create("Idempotent", Path(tmp) / "project")
+            level = Level("Chapter", scene_id="ch1")
+            # Write typed .level.json directly (legacy typed format)
+            level_path = project.path / "levels" / "chapter.level.json"
+            level_path.parent.mkdir(exist_ok=True)
+            level_path.write_text(json.dumps(level.to_dict()))
+            project.register_level_path("levels/chapter.level.json")
+            project._entrypoint = "levels/chapter.level.json"
+            project.save()
+
+            project.migrate_to_protobuf()
+            self.assertEqual(project.entrypoint, "levels/chapter.level.pb")
+
+            # Second migration should be a no-op (no JSON left to migrate)
+            mapping2 = project.migrate_to_protobuf()
+            self.assertEqual(mapping2, {})
+            self.assertEqual(project.entrypoint, "levels/chapter.level.pb")
+            self.assertFalse((project.path / "levels/chapter.level.level.pb").exists())
+
     def test_create_rejects_non_empty_destination_without_touching_it(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             destination = Path(tmp) / "existing"

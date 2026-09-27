@@ -29,6 +29,7 @@ from expra_engine.core.scene import (
 )
 from expra_engine.core.scene.document_codec import (
     DocumentCodecError,
+    canonical_pb_path,
     decode_json_payload,
     encode_protobuf,
     from_document_data,
@@ -36,6 +37,7 @@ from expra_engine.core.scene.document_codec import (
     parse_protobuf,
     protobuf_to_document_data,
 )
+from expra_engine.core.world import World
 from expra_engine.observability import ObservabilityWatcher, observe_stage
 
 if TYPE_CHECKING:
@@ -81,6 +83,7 @@ class Project:
         entrypoint: str | None = None,
         script_entry_point: str | None = None,
         level_paths: list[str] | None = None,
+        world_paths: list[str] | None = None,
     ) -> None:
         self.name = str(name)
         self.path = path.resolve()
@@ -95,6 +98,7 @@ class Project:
         )
         self._scene_paths: list[str] = []
         self._level_paths: list[str] = list(level_paths or [])
+        self._world_paths: list[str] = list(world_paths or [])
         self._active_scene: Scene | None = None
 
     @property
@@ -110,6 +114,10 @@ class Project:
     @property
     def levels_dir(self) -> Path:
         return self.path / "levels"
+
+    @property
+    def worlds_dir(self) -> Path:
+        return self.path / "worlds"
 
     @property
     def assets_dir(self) -> Path:
@@ -142,7 +150,11 @@ class Project:
         self.script_entry_point = value
 
     def set_start_scene(self, relative_path: str) -> None:
-        self._validate_scene_path(relative_path)
+        self.set_entrypoint(relative_path)
+
+    def set_entrypoint(self, relative_path: str) -> None:
+        """Set the project document entrypoint (Scene, Level, or World)."""
+        self._validate_entrypoint(relative_path)
         self._entrypoint = relative_path
 
     def asset_id(self, path: str | Path) -> ResourceId:
@@ -247,6 +259,14 @@ class Project:
     def level_paths(self) -> tuple[str, ...]:
         return tuple(self._level_paths)
 
+    def register_world_path(self, relative_path: str) -> None:
+        self._validate_world_path(relative_path)
+        if relative_path not in self._world_paths:
+            self._world_paths.append(relative_path)
+
+    def world_paths(self) -> tuple[str, ...]:
+        return tuple(self._world_paths)
+
     def scene_file(self, relative_path: str | None = None) -> Path:
         """Return a validated Scene resource path (legacy JSON or typed PB)."""
         value = relative_path or self.start_scene
@@ -261,7 +281,7 @@ class Project:
         return path
 
     def document_file(self, relative_path: str | None = None) -> Path:
-        """Return a validated project-owned Scene/Level document path."""
+        """Return a validated project-owned Scene, Level, or World document path."""
         value = relative_path or self.entrypoint
         if value is None:
             raise ProjectError("project has no document entrypoint")
@@ -273,14 +293,18 @@ class Project:
             raise ProjectError(f"document escapes project: {value!r}") from exc
         return path
 
-    def load_document(
+    def read_document(
         self,
         relative_path: str | None = None,
         *,
         _chain: frozenset[str] = frozenset(),
         observer: ObservabilityWatcher | None = None,
-    ) -> Scene:
-        """Load typed protobuf or legacy JSON into the shared Scene/Level model."""
+    ) -> Scene | World:
+        """Construct a document without publishing it as Project.active_scene.
+
+        Safe for worker-side immutable Level preparation: recursive Scene
+        Instance reads use this same non-publishing path.
+        """
         path = self.document_file(relative_path)
         value = relative_path or self.entrypoint
         expected_kind = self._registered_document_kind(value)
@@ -305,18 +329,40 @@ class Project:
                         observer=observer,
                     )
 
-                current_chain = _chain | ({value} if value is not None else set())
-                with observe_stage(observer, "scene:resolve_instances"):
-                    resolve_scene_instances(
-                        document,
-                        resolve_source=lambda source: self.load_scene(
-                            source, _chain=current_chain, observer=observer
-                        ),
-                        chain=current_chain,
-                    )
+                if isinstance(document, Scene):
+                    current_chain = _chain | ({value} if value is not None else set())
+                    with observe_stage(observer, "scene:resolve_instances"):
+                        resolve_scene_instances(
+                            document,
+                            resolve_source=lambda source: self.read_document(
+                                source, _chain=current_chain, observer=observer
+                            ),
+                            chain=current_chain,
+                        )
         except (OSError, DocumentCodecError) as exc:
             raise ProjectError(str(exc)) from exc
-        self.set_active_scene(document)
+        return document
+
+    def load_document(
+        self,
+        relative_path: str | None = None,
+        *,
+        _chain: frozenset[str] = frozenset(),
+        observer: ObservabilityWatcher | None = None,
+    ) -> Scene | World:
+        """Load a document and publish Scene/Level as the editor-active scene."""
+        document = self.read_document(relative_path, _chain=_chain, observer=observer)
+        if isinstance(document, Scene):
+            self.set_active_scene(document)
+        return document
+
+    def load_world(
+        self, relative_path: str | None = None, *, observer: ObservabilityWatcher | None = None
+    ) -> World:
+        """Load one lightweight World document without loading its Level files."""
+        document = self.load_document(relative_path, observer=observer)
+        if not isinstance(document, World):
+            raise ProjectError("document is not a World")
         return document
 
     def load_scene(
@@ -329,7 +375,10 @@ class Project:
         # Compatibility API: Level is a Scene subtype and can still be loaded
         # by older runtime callers. SceneInstance resolution separately rejects
         # Level sources before materialization.
-        return self.load_document(relative_path, _chain=_chain, observer=observer)
+        document = self.load_document(relative_path, _chain=_chain, observer=observer)
+        if not isinstance(document, Scene):
+            raise ProjectError("document is not a Scene or Level")
+        return document
 
     def save_scene(self, scene: Scene, relative_path: str | None = None) -> Path:
         """Write a legacy JSON Scene for compatibility/import tooling.
@@ -349,7 +398,7 @@ class Project:
             self.register_scene_path(value)
         return path
 
-    def save_document(self, document: Scene, relative_path: str | None = None) -> Path:
+    def save_document(self, document: Scene | World, relative_path: str | None = None) -> Path:
         """Save one canonical typed protobuf document, never a JSON sidecar."""
         path = self.document_file(relative_path)
         expected_kind = kind_for_document_path(path)
@@ -368,21 +417,41 @@ class Project:
             raise ProjectError("Scene documents must use the .scene.pb extension")
         if expected_kind is DocumentKind.LEVEL and not str(path).casefold().endswith(".level.pb"):
             raise ProjectError("Level documents must use the .level.pb extension")
+        if expected_kind is DocumentKind.WORLD and not str(path).casefold().endswith(".world.pb"):
+            raise ProjectError("World documents must use the .world.pb extension")
+        value = relative_path or self.entrypoint
+        if expected_kind is DocumentKind.WORLD:
+            self._validate_world_path(value or "")
+        elif expected_kind is DocumentKind.LEVEL:
+            self._validate_level_path(value or "")
+        else:
+            self._validate_scene_path(value or "")
         path.parent.mkdir(parents=True, exist_ok=True)
         try:
             atomic_write_bytes(
                 path,
-                encode_protobuf(document.to_dict(include_instance_content=False)),
+                encode_protobuf(
+                    document.to_dict(include_instance_content=False)
+                    if isinstance(document, Scene)
+                    else document.to_dict()
+                ),
             )
         except DocumentCodecError as exc:
             raise ProjectError(str(exc)) from exc
-        value = relative_path or self.entrypoint
         if value is not None:
-            if isinstance(document, Level):
+            if isinstance(document, World):
+                self.register_world_path(value)
+            elif isinstance(document, Level):
                 self.register_level_path(value)
             else:
                 self.register_scene_path(value)
         return path
+
+    def save_world(self, world: World, relative_path: str | None = None) -> Path:
+        """Save a typed World document without publishing runtime state."""
+        if not isinstance(world, World):
+            raise ProjectError("save_world requires a World document")
+        return self.save_document(world, relative_path)
 
     def scene_paths(self) -> tuple[str, ...]:
         return tuple(self._scene_paths)
@@ -398,6 +467,8 @@ class Project:
             data["entrypoint"] = self._entrypoint
         if self._level_paths:
             data["levels"] = list(self._level_paths)
+        if self._world_paths:
+            data["worlds"] = list(self._world_paths)
         if self.input_settings:
             data["input"] = dict(self.input_settings)
         if self.script_entry_point != "__main__.py":
@@ -409,6 +480,7 @@ class Project:
         self.path.mkdir(parents=True, exist_ok=True)
         self.scenes_dir.mkdir(exist_ok=True)
         self.levels_dir.mkdir(exist_ok=True)
+        self.worlds_dir.mkdir(exist_ok=True)
         self.assets_dir.mkdir(exist_ok=True)
         self.scripts_dir.mkdir(exist_ok=True)
         atomic_write_text(self.project_file, json.dumps(self.to_dict(), indent=2))
@@ -501,18 +573,37 @@ class Project:
             raise ProjectError("project level paths must be strings")
         for level_path in levels:
             project.register_level_path(level_path)
+        worlds = data.get("worlds", [])
+        if not isinstance(worlds, list) or not all(isinstance(value, str) for value in worlds):
+            raise ProjectError("project world paths must be strings")
+        for world_path in worlds:
+            project.register_world_path(world_path)
         if project.start_scene is not None:
             project._validate_entrypoint(project.start_scene)
-            if (
-                project.entrypoint in project.level_paths()
-                and project.entrypoint in project.scene_paths()
-            ):
-                raise ProjectError("project entrypoint is registered as both a Scene and Level")
+            registrations = sum(
+                project.entrypoint in paths
+                for paths in (project.scene_paths(), project.level_paths(), project.world_paths())
+            )
+            if registrations > 1:
+                raise ProjectError("project entrypoint is registered as multiple document kinds")
+            expected = project._registered_document_kind(project.entrypoint)
+            registered = (
+                DocumentKind.WORLD
+                if project.entrypoint in project.world_paths()
+                else DocumentKind.LEVEL
+                if project.entrypoint in project.level_paths()
+                else DocumentKind.SCENE
+                if project.entrypoint in project.scene_paths()
+                else None
+            )
+            if expected is not None and registered is not None and expected is not registered:
+                raise ProjectError("project entrypoint conflicts with its registered document kind")
         if project.start_scene is None and project.scene_paths():
             project._entrypoint = project.scene_paths()[0]
         for directory in (
             project.scenes_dir,
             project.levels_dir,
+            project.worlds_dir,
             project.assets_dir,
             project.scripts_dir,
         ):
@@ -579,15 +670,31 @@ class Project:
             kind = kind_for_document_path(relative_path)
         except DocumentCodecError as exc:
             raise ProjectError(str(exc)) from exc
-        if kind is DocumentKind.LEVEL:
-            raise ProjectError(f"Scene registry path has a Level extension: {relative_path!r}")
+        if kind in {DocumentKind.LEVEL, DocumentKind.WORLD}:
+            raise ProjectError(f"Scene registry path has a non-Scene extension: {relative_path!r}")
 
     @staticmethod
     def _validate_level_path(relative_path: str) -> None:
         Project._validate_entrypoint(relative_path)
         kind = kind_for_document_path(relative_path)
-        if kind is DocumentKind.SCENE:
-            raise ProjectError(f"Level registry path has a Scene extension: {relative_path!r}")
+        if kind in {DocumentKind.SCENE, DocumentKind.WORLD}:
+            raise ProjectError(f"Level registry path has a non-Level extension: {relative_path!r}")
+
+    @staticmethod
+    def _validate_world_path(relative_path: str) -> None:
+        candidate = Path(relative_path)
+        if (
+            candidate.is_absolute()
+            or ".." in candidate.parts
+            or not relative_path.startswith("worlds/")
+        ):
+            raise ProjectError(f"World must be project-relative under worlds/: {relative_path!r}")
+        try:
+            kind = kind_for_document_path(relative_path)
+        except DocumentCodecError as exc:
+            raise ProjectError(str(exc)) from exc
+        if kind is not DocumentKind.WORLD:
+            raise ProjectError(f"World registry path must use .world.pb: {relative_path!r}")
 
     @staticmethod
     def _validate_entrypoint(relative_path: str) -> None:
@@ -612,6 +719,10 @@ class Project:
                 raise ProjectError(
                     f"Scene registry conflicts with document extension: {relative_path}"
                 )
+            if relative_path in self._world_paths and extension_kind is not DocumentKind.WORLD:
+                raise ProjectError(
+                    f"World registry conflicts with document extension: {relative_path}"
+                )
         elif relative_path in self._level_paths:
             return DocumentKind.LEVEL
         return extension_kind
@@ -632,11 +743,8 @@ class Project:
         for source in legacy_paths:
             document = self.load_document(source)
             documents[source] = document
-            if isinstance(document, Level):
-                target = f"levels/{Path(source).stem}.level.pb"
-            else:
-                target = f"scenes/{Path(source).stem}.scene.pb"
-            mapping[source] = target
+            kind = DocumentKind.LEVEL if isinstance(document, Level) else DocumentKind.SCENE
+            mapping[source] = canonical_pb_path(source, kind)
 
         for document in documents.values():
             self._rewrite_scene_instance_sources(document, mapping)

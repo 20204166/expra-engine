@@ -11,6 +11,7 @@ from google.protobuf.message import DecodeError
 
 from expra_engine.core.document_kind import DocumentKind
 from expra_engine.core.scene import Level, Scene
+from expra_engine.core.world import World
 from expra_engine.observability import ObservabilityWatcher
 from expra_engine.schema.generated import common_pb2, level_pb2
 
@@ -25,6 +26,7 @@ def kind_for_document_path(path: str | Path) -> DocumentKind | None:
     """Infer kind only from explicit typed extensions; legacy JSON stays untyped."""
     value = str(path).casefold()
     for suffix, kind in (
+        (".world.pb", DocumentKind.WORLD),
         (".scene.pb", DocumentKind.SCENE),
         (".scene.json", DocumentKind.SCENE),
         (".level.pb", DocumentKind.LEVEL),
@@ -34,20 +36,44 @@ def kind_for_document_path(path: str | Path) -> DocumentKind | None:
             return kind
     if value.endswith(".pb"):
         raise DocumentCodecError(
-            "protobuf document path must use a typed .scene.pb or .level.pb extension"
+            "protobuf document path must use a typed .world.pb, .scene.pb, or .level.pb extension"
         )
     if value.endswith(".json"):
         return None
     raise DocumentCodecError(f"unsupported Scene/Level document extension: {path!s}")
 
 
-def to_json(document: Scene | dict[str, Any]) -> dict[str, Any]:
+def canonical_pb_path(source: str | Path, kind: DocumentKind) -> str:
+    """Return the canonical PB path for a document, preserving the parent directory.
+
+    Strips any existing typed suffix for *kind* (.pb, typed .json, bare kind suffix,
+    or generic .json) from the filename, then appends ``.<kind>.pb``.  Idempotent.
+
+    Examples for ``DocumentKind.LEVEL``::
+
+        "levels/chapter_one.level.json"  ->  "levels/chapter_one.level.pb"
+        "forest.level"                   ->  "forest.level.pb"
+        "forest.level.pb"                ->  "forest.level.pb"
+        "forest"                         ->  "forest.level.pb"
+        "forest.level.json"              ->  "forest.level.pb"
+    """
+    path = Path(source)
+    name = path.name
+    type_suffix = f".{kind.value}"
+    for old in (f"{type_suffix}.pb", f"{type_suffix}.json", type_suffix, ".json"):
+        if name.casefold().endswith(old):
+            name = name[: len(name) - len(old)]
+            break
+    return (path.parent / f"{name}{type_suffix}.pb").as_posix()
+
+
+def to_json(document: Scene | World | dict[str, Any]) -> dict[str, Any]:
     """Return the stable, JSON-friendly authoring representation."""
-    data = document.to_dict() if isinstance(document, Scene) else deepcopy(document)
+    data = document.to_dict() if isinstance(document, (Scene, World)) else deepcopy(document)
     return json.loads(json.dumps(data, sort_keys=True, separators=(",", ":")))
 
 
-def from_json(document: str | dict[str, Any]) -> Scene:
+def from_json(document: str | dict[str, Any]) -> Scene | World:
     """Load a Scene or Level from the canonical JSON representation."""
     try:
         data = json.loads(document) if isinstance(document, str) else document
@@ -62,8 +88,8 @@ def from_document_data(
     validate: bool = True,
     copy_data: bool = False,
     observer: ObservabilityWatcher | None = None,
-) -> Scene:
-    """Construct a Scene/Level from owned decoded data through one path."""
+) -> Scene | World:
+    """Construct a Scene, Level, or World from owned decoded data through one path."""
     if not isinstance(data, dict):
         raise DocumentCodecError("document must contain a JSON object")
     working = deepcopy(data) if copy_data else data
@@ -72,6 +98,11 @@ def from_document_data(
         raise DocumentCodecError("document kind must be a string")
     if validate:
         _validate_document_data(working, kind)
+    if kind == DocumentKind.WORLD.value:
+        try:
+            return World.from_dict(working)
+        except (TypeError, KeyError, ValueError) as exc:
+            raise DocumentCodecError(f"invalid World document: {exc}") from exc
     if kind not in {DocumentKind.LEVEL.value, DocumentKind.SCENE.value}:
         raise DocumentCodecError(f"unsupported document kind: {kind!r}")
     try:
@@ -114,13 +145,15 @@ def protobuf_to_document_data(envelope: Any) -> dict[str, Any]:
         data = _level_to_dict(envelope.level)
     elif document_field == "scene":
         data = _scene_to_dict(envelope.scene)
+    elif document_field == "world":
+        data = _world_to_dict(envelope.world)
     else:
         raise DocumentCodecError("protobuf document envelope is empty")
     _validate_document_data(data, data.get("kind", "scene"))
     return data
 
 
-def encode_protobuf(document: Scene | dict[str, Any]) -> bytes:
+def encode_protobuf(document: Scene | World | dict[str, Any]) -> bytes:
     """Encode a document deterministically using the checked-in schema."""
     data = to_json(document)
     kind = data.get("kind", DocumentKind.SCENE.value)
@@ -130,6 +163,8 @@ def encode_protobuf(document: Scene | dict[str, Any]) -> bytes:
         _fill_level(envelope.level, data)
     elif kind == DocumentKind.SCENE.value:
         _fill_scene(envelope.scene, data)
+    elif kind == DocumentKind.WORLD.value:
+        _fill_world(envelope.world, data)
     else:
         raise ValueError(f"unsupported document kind: {kind!r}")
     return envelope.SerializeToString(deterministic=True)
@@ -142,7 +177,7 @@ def decode_protobuf(payload: bytes) -> dict[str, Any]:
 
 def decode_protobuf_document(
     payload: bytes, *, expected_kind: DocumentKind | str | None = None
-) -> Scene:
+) -> Scene | World:
     """Decode, validate a typed kind, and construct the canonical model."""
     data = decode_protobuf(payload)
     actual_kind = DocumentKind(data["kind"])
@@ -153,7 +188,7 @@ def decode_protobuf_document(
     return from_document_data(data, validate=False)
 
 
-def document_to_protobuf(document: Scene) -> bytes:
+def document_to_protobuf(document: Scene | World) -> bytes:
     """Serialize the model directly to its canonical deterministic PB bytes."""
     return encode_protobuf(document)
 
@@ -163,7 +198,7 @@ def document_from_path_bytes(
     path: str | Path,
     *,
     expected_kind: DocumentKind | str | None = None,
-) -> Scene:
+) -> Scene | World:
     """Decode typed PB or compatibility JSON bytes, validating typed suffixes."""
     extension_kind = kind_for_document_path(path)
     expected = DocumentKind(expected_kind) if expected_kind is not None else extension_kind
@@ -187,6 +222,12 @@ def document_from_path_bytes(
 
 
 def _validate_document_data(data: dict[str, Any], kind: str) -> None:
+    if kind == DocumentKind.WORLD.value:
+        try:
+            World.from_dict(data)
+        except (TypeError, KeyError, ValueError) as exc:
+            raise DocumentCodecError(f"invalid World document: {exc}") from exc
+        return
     if kind not in {DocumentKind.SCENE.value, DocumentKind.LEVEL.value}:
         raise DocumentCodecError(f"unsupported document kind: {kind!r}")
     if not isinstance(data.get("scene_id"), str) or not data["scene_id"].strip():
@@ -279,6 +320,45 @@ def _fill_level(message: Any, data: dict[str, Any]) -> None:
     message.metadata.tags.extend(str(tag) for tag in metadata.get("tags", []))
 
 
+def _fill_world(message: Any, data: dict[str, Any]) -> None:
+    message.schema_version = int(data.get("schema_version", 1))
+    message.document_kind = DocumentKind.WORLD.value
+    message.world_id = str(data["world_id"])
+    message.name = str(data["name"])
+    for level in data.get("levels", []):
+        target = message.levels.add()
+        target.instance_id = str(level["instance_id"])
+        target.resource_path = str(level["resource_path"])
+        target.origin.extend(float(value) for value in level.get("origin", (0.0, 0.0)))
+        if level.get("bounds") is not None:
+            target.bounds.extend(float(value) for value in level["bounds"])
+        target.tags.extend(str(value) for value in level.get("tags", ()))
+        target.always_loaded = bool(level.get("always_loaded", False))
+        target.priority = int(level.get("priority", 0))
+        target.metadata.CopyFrom(_object(level.get("metadata", {})))
+    for connection in data.get("connections", []):
+        target = message.connections.add()
+        target.connection_id = str(connection["connection_id"])
+        target.source_level_id = str(connection["source_level_id"])
+        target.source_anchor_id = str(connection["source_anchor_id"])
+        target.destination_level_id = str(connection["destination_level_id"])
+        target.destination_anchor_id = str(connection["destination_anchor_id"])
+        target.bidirectional = bool(connection.get("bidirectional", False))
+        target.transition = str(connection.get("transition", "seamless"))
+        target.preload_distance = float(connection.get("preload_distance", 24.0))
+        target.unload_distance = float(connection.get("unload_distance", 48.0))
+    if data.get("initial_level_id") is not None:
+        message.initial_level_id = str(data["initial_level_id"])
+    if data.get("initial_entrance_id") is not None:
+        message.initial_entrance_id = str(data["initial_entrance_id"])
+    if data.get("primary_anchor_id") is not None:
+        message.primary_anchor_id = str(data["primary_anchor_id"])
+    streaming = data.get("streaming", {})
+    message.streaming.max_concurrent_loads = int(streaming.get("max_concurrent_loads", 2))
+    message.streaming.max_loaded_levels = int(streaming.get("max_loaded_levels", 8))
+    message.metadata.CopyFrom(_object(data.get("metadata", {})))
+
+
 def _fill_entity(message: Any, data: dict[str, Any]) -> None:
     message.entity_id = str(data["entity_id"])
     message.name = str(data["name"])
@@ -337,6 +417,62 @@ def _level_to_dict(message: Any) -> dict[str, Any]:
     if message.metadata.tags:
         metadata["tags"] = list(message.metadata.tags)
     data["level_metadata"] = metadata
+    return data
+
+
+def _world_to_dict(message: Any) -> dict[str, Any]:
+    if message.document_kind != DocumentKind.WORLD.value:
+        raise DocumentCodecError(
+            f"WorldDocument declares incompatible kind {message.document_kind!r}"
+        )
+    data: dict[str, Any] = {
+        "kind": DocumentKind.WORLD.value,
+        "schema_version": message.schema_version,
+        "world_id": message.world_id,
+        "name": message.name,
+        "levels": [
+            {
+                "instance_id": item.instance_id,
+                "resource_path": item.resource_path,
+                "origin": list(item.origin),
+                "bounds": list(item.bounds) if item.bounds else None,
+                "tags": list(item.tags),
+                "always_loaded": item.always_loaded,
+                "priority": item.priority,
+                "metadata": _object_to_dict(item.metadata),
+            }
+            for item in message.levels
+        ],
+        "connections": [
+            {
+                "connection_id": item.connection_id,
+                "source_level_id": item.source_level_id,
+                "source_anchor_id": item.source_anchor_id,
+                "destination_level_id": item.destination_level_id,
+                "destination_anchor_id": item.destination_anchor_id,
+                "bidirectional": item.bidirectional,
+                "transition": item.transition,
+                "preload_distance": item.preload_distance,
+                "unload_distance": item.unload_distance,
+            }
+            for item in message.connections
+        ],
+        "initial_level_id": (
+            message.initial_level_id if message.HasField("initial_level_id") else None
+        ),
+        "initial_entrance_id": (
+            message.initial_entrance_id if message.HasField("initial_entrance_id") else None
+        ),
+        "primary_anchor_id": (
+            message.primary_anchor_id if message.HasField("primary_anchor_id") else None
+        ),
+        "metadata": _object_to_dict(message.metadata),
+    }
+    if message.HasField("streaming"):
+        data["streaming"] = {
+            "max_concurrent_loads": message.streaming.max_concurrent_loads,
+            "max_loaded_levels": message.streaming.max_loaded_levels,
+        }
     return data
 
 
