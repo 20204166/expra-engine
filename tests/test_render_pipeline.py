@@ -13,6 +13,7 @@ from expra_engine.runtime.render_pipeline import (
 )
 from expra_engine.runtime.rendering import (
     PrimitiveDescriptor,
+    RenderFrame,
     RenderItem,
     RenderPhase,
     Transform,
@@ -55,6 +56,27 @@ def test_plan_preserves_existing_draw_order_contract():
         "earlier",
         "later",
     ]
+
+
+def test_render_order_key_matches_frame_ordered_items():
+    items = (
+        item("b", phase=RenderPhase.TRANSPARENT, layer=0, z=-1.0),
+        item("a", layer=1, z=2.0),
+        item("c", layer=0, z=0.0),
+        item("d", layer=0, z=0.0),
+    )
+
+    frame_order = [it.key for it in RenderFrame(items).ordered_items()]
+
+    plan_order = [
+        it.key
+        for _, it in sorted(
+            enumerate(items),
+            key=lambda pair: RenderOrder.from_item(pair[1], pair[0]),
+        )
+    ]
+
+    assert plan_order == frame_order
 
 
 def test_explicit_capture_is_interleaved_between_draws():

@@ -30,6 +30,7 @@ __all__ = (
     "TextDescriptor",
     "Transform",
     "Viewport",
+    "render_item_order_key",
 )
 
 Vec2 = tuple[float, float]
@@ -450,6 +451,24 @@ class RenderItem:
         )
 
 
+def render_item_order_key(
+    item: RenderItem, insertion_index: int
+) -> tuple[int, int, float, int]:
+    """Return the canonical draw-item sort key shared by the frame and the planner.
+
+    Draw order — phase, then layer, then world depth, then insertion order — is
+    a single responsibility. Keeping it here prevents ``RenderFrame.ordered_items``
+    and ``RenderOrder.from_item`` from encoding the same rule independently and
+    drifting apart.
+    """
+    return (
+        item.phase.value,
+        item.layer,
+        item.world_transform.position[2],
+        insertion_index,
+    )
+
+
 @dataclass(frozen=True)
 class RenderFrame:
     items: tuple[RenderItem, ...] = ()
@@ -477,12 +496,7 @@ class RenderFrame:
             item
             for _, item in sorted(
                 enumerate(self.items),
-                key=lambda pair: (
-                    pair[1].phase.value,
-                    pair[1].layer,
-                    pair[1].world_transform.position[2],
-                    pair[0],
-                ),
+                key=lambda pair: render_item_order_key(pair[1], pair[0]),
             )
         )
 

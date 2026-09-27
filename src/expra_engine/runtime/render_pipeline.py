@@ -27,6 +27,7 @@ from expra_engine.runtime.rendering import (
     RenderItem,
     RenderPhase,
     Transform,
+    render_item_order_key,
 )
 from expra_engine.runtime.screen_texture import (
     BackBufferCopyMode,
@@ -69,12 +70,7 @@ class RenderOrder:
     def from_item(cls, item: RenderItem, insertion_index: int) -> "RenderOrder":
         if not isinstance(item, RenderItem):
             raise TypeError("item must be RenderItem")
-        return cls(
-            item.phase.value,
-            item.layer,
-            item.world_transform.position[2],
-            insertion_index,
-        )
+        return cls(*render_item_order_key(item, insertion_index))
 
     @classmethod
     def from_effect(
