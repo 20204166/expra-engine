@@ -474,6 +474,22 @@ class SecondBehaviour(Behaviour):
         self.assertEqual(transform.x, 0.25)
         self.assertEqual(len(engine.behaviour_system.errors), 1)
 
+    def test_missing_script_errors_are_bounded(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            scene = Scene("Level")
+            for index in range(100):
+                scene.create_entity(f"broken-{index}").add_component(
+                    ScriptComponent("project://scripts/missing.py", "Missing")
+                )
+            engine = Engine()
+            engine.set_scene(scene)
+            engine.set_script_registry(ScriptRegistry(root))
+            engine.play()
+
+            self.assertLessEqual(len(engine.behaviour_system.errors), 64)
+            engine.stop()
+
 
 if __name__ == "__main__":
     unittest.main()

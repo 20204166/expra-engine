@@ -265,6 +265,7 @@ class BehaviourSystem(RuntimeSystem):
                         cls = self.registry.resolve(component.script_id, component.behaviour_class)
                     except ScriptLoadError as exc:
                         self._errors.append(exc)
+                        del self._errors[:-64]
                         continue
                     behaviour = cls()
                     behaviour._system_owned = True
