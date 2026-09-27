@@ -10,6 +10,7 @@ from expra_engine.editor.contributions import (
     MenuContribution,
     ShortcutContribution,
     ToolbarContribution,
+    ToolbarMenuItem,
 )
 
 
@@ -43,10 +44,35 @@ def build_builtin_features(window: Any) -> tuple[EditorFeatureSpec, ...]:
                 EditorActionSpec("close_project", window._act_close_project, enabled=False),
                 EditorActionSpec("import_asset", window._act_import_asset, enabled=False),
                 EditorActionSpec("configure_input", window._act_configure_input, enabled=False),
-                EditorActionSpec("new_scene", window._act_new_scene),
+                EditorActionSpec(
+                    "new_scene_document",
+                    lambda: window._act_create_typed_document("scene"),
+                ),
+                EditorActionSpec(
+                    "new_level_document",
+                    lambda: window._act_create_typed_document("level"),
+                ),
+                EditorActionSpec(
+                    "new_world_document",
+                    lambda: window._act_create_typed_document("world"),
+                ),
+                EditorActionSpec("open_document", window._project_workflow.open_document),
                 EditorActionSpec("open_scene", window._project_workflow.open_scene),
+                EditorActionSpec("add_world_level", window._act_add_world_level, enabled=False),
+                EditorActionSpec(
+                    "create_world_connection",
+                    window._act_create_world_connection,
+                    enabled=False,
+                ),
+                EditorActionSpec("save_document", window._act_save_document, enabled=False),
                 EditorActionSpec("save_scene", window._act_save_scene, enabled=False),
-                EditorActionSpec("save_scene_as", window._project_workflow.save_scene_as),
+                EditorActionSpec(
+                    "save_document_as", window._project_workflow.save_active_document_as
+                ),
+                EditorActionSpec(
+                    "save_scene_as", window._project_workflow.save_scene_as
+                ),
+                EditorActionSpec("duplicate_document", window._project_workflow.duplicate_document),
                 EditorActionSpec("duplicate_scene", window._project_workflow.duplicate_scene),
             ),
             menus=(
@@ -62,19 +88,39 @@ def build_builtin_features(window: Any) -> tuple[EditorFeatureSpec, ...]:
                 MenuContribution("File", "Close Project", "close_project", group="project"),
                 MenuContribution("File", "Import Asset...", "import_asset", group="project"),
                 MenuContribution("File", "Input Settings...", "configure_input", group="project"),
-                MenuContribution("File", "New Scene", "new_scene", group="scene", order=0),
-                MenuContribution("File", "Open Scene...", "open_scene", group="scene", order=1),
-                MenuContribution("File", "Save Scene...", "save_scene", group="scene", order=2),
                 MenuContribution(
-                    "File", "Save Scene As...", "save_scene_as", group="scene", order=3
+                    "File", "New Scene — reusable composition", "new_scene_document",
+                    group="scene", order=0,
                 ),
                 MenuContribution(
-                    "File", "Duplicate Scene...", "duplicate_scene", group="scene", order=4
+                    "File", "New Level — playable place", "new_level_document",
+                    group="scene", order=1,
+                ),
+                MenuContribution(
+                    "File", "New World — connected Levels", "new_world_document",
+                    group="scene", order=2,
+                ),
+                MenuContribution("File", "Open Document...", "open_document", group="scene", order=3),
+                MenuContribution("File", "Save Scene", "save_document", group="scene", order=4),
+                MenuContribution(
+                    "File", "Save Scene As...", "save_document_as", group="scene", order=5
+                ),
+                MenuContribution(
+                    "File", "Duplicate Document...", "duplicate_document", group="scene", order=6
                 ),
             ),
             toolbars=(
-                ToolbarContribution("new_scene", "New Scene", group="scene"),
-                ToolbarContribution("save_scene", "Save", group="scene"),
+                ToolbarContribution(
+                    None,
+                    "New ▼",
+                    group="document",
+                    menu_items=(
+                        ToolbarMenuItem("New Scene — reusable composition", "new_scene_document"),
+                        ToolbarMenuItem("New Level — playable place", "new_level_document"),
+                        ToolbarMenuItem("New World — connected Levels", "new_world_document"),
+                    ),
+                ),
+                ToolbarContribution("save_document", "Save Scene", group="scene"),
             ),
         ),
         EditorFeatureSpec(

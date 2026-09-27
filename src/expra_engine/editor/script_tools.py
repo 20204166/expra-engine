@@ -10,9 +10,14 @@ from expra_engine.filesystem import ResourceId
 from expra_engine.runtime.script_component import ScriptComponent
 
 
+def _valid_behaviour_class_name(class_name: object) -> bool:
+    """Return True only for a non-empty, non-keyword Python identifier."""
+    return isinstance(class_name, str) and class_name.isidentifier() and not keyword.iskeyword(class_name)
+
+
 def create_behaviour_script(project_root: Path, relative_path: str, class_name: str) -> ResourceId:
     """Create a minimal script without overwriting or escaping the project."""
-    if not class_name.isidentifier() or keyword.iskeyword(class_name):
+    if not _valid_behaviour_class_name(class_name):
         raise ValueError(f"invalid Behaviour class name: {class_name!r}")
     resource = ResourceId.from_project_path(relative_path, scheme="project")
     if not resource.path.startswith("scripts/") or not resource.path.endswith(".py"):
@@ -45,7 +50,7 @@ def attach_script(entity: Entity, script_id: ResourceId | str, class_name: str) 
         or not resource.path.endswith(".py")
     ):
         raise ValueError("scripts must be project://scripts/*.py")
-    if not class_name.isidentifier() or keyword.iskeyword(class_name):
+    if not _valid_behaviour_class_name(class_name):
         raise ValueError(f"invalid Behaviour class name: {class_name!r}")
     for component in entity.components:
         if isinstance(component, ScriptComponent) and (

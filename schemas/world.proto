@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+package expra.schema.v1;
+
+import "common.proto";
+
+message WorldLevelDescriptor {
+  string instance_id = 1;
+  string resource_path = 2;
+  repeated double origin = 3;
+  repeated double bounds = 4;
+  repeated string tags = 5;
+  bool always_loaded = 6;
+  int32 priority = 7;
+  JsonObject metadata = 8;
+}
+
+message WorldConnection {
+  string connection_id = 1;
+  string source_level_id = 2;
+  string source_anchor_id = 3;
+  string destination_level_id = 4;
+  string destination_anchor_id = 5;
+  bool bidirectional = 6;
+  string transition = 7;
+  double preload_distance = 8;
+  double unload_distance = 9;
+}
+
+message WorldStreamingSettings {
+  uint32 max_concurrent_loads = 1;
+  uint32 max_loaded_levels = 2;
+}
+
+message WorldDocument {
+  uint32 schema_version = 1;
+  string document_kind = 2;
+  string world_id = 3;
+  string name = 4;
+  repeated WorldLevelDescriptor levels = 5;
+  repeated WorldConnection connections = 6;
+  optional string initial_level_id = 7;
+  optional string initial_entrance_id = 8;
+  WorldStreamingSettings streaming = 9;
+  JsonObject metadata = 10;
+  optional string primary_anchor_id = 11;
+}

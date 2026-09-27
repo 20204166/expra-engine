@@ -15,6 +15,7 @@ from expra_engine.runtime.animated_sprite_2d import (
     SpriteFrames2D,
     SpriteLoopMode,
 )
+from expra_engine.runtime.animated_sprite_system import AnimatedSpriteSystem
 from expra_engine.runtime.animation import SpriteRegion
 from expra_engine.runtime.pygame_renderer import PygameRenderer
 from expra_engine.runtime.render_extractor import extract_render_frame
@@ -148,6 +149,24 @@ def test_runtime_system_ignores_disabled_entities_and_components() -> None:
         runtime_disabled_component,
         runtime_component,
     }
+
+
+def test_world_level_lifecycle_starts_and_releases_animation_players() -> None:
+    world_scene = Scene("world")
+    level_scene = Scene("town")
+    entity = level_scene.create_entity("hero", entity_id="hero")
+    component = AnimatedSprite2DComponent(_frames(), autoplay="walk")
+    entity.add_component(component)
+    world_scene.add_entity(entity)
+    engine = SimpleNamespace(active_scene=world_scene, observer=None, signal=lambda *_args: None)
+    system = AnimatedSpriteSystem()
+    system.start(engine)
+
+    system.on_world_level_activated(world_scene, "town", (entity.entity_id,))
+    assert system.player_for(component) is not None
+
+    system.on_world_level_deactivated(world_scene, "town", (entity.entity_id,))
+    assert system.player_for(component) is None
 
 
 def test_runtime_system_reconciles_changed_frame_collections_without_serializing_player_state() -> (

@@ -16,6 +16,11 @@ from unittest.mock import MagicMock, patch
 from expra_engine.core.component import TransformComponent
 from expra_engine.core.engine import Engine
 from expra_engine.core.project import Project, ProjectError
+from expra_engine.core.scene import Level
+from expra_engine.core.world import LevelDescriptor, World, WorldConnection
+from expra_engine.editor.active_document import ActiveDocument
+from expra_engine.editor.contributions import EditorContext
+from expra_engine.editor.preferences import EditorPreferences
 from expra_engine.editor.project_workflow import ProjectWorkflow
 from expra_engine.editor.script_tools import attach_script, create_behaviour_script
 from expra_engine.runtime import ScriptComponent, ScriptRegistry
@@ -58,6 +63,429 @@ class RecordingTimer:
 
 
 class TestProjectWorkflow(unittest.TestCase):
+    def test_open_loaded_world_uses_typed_active_document_and_world_play_source(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Project.create("World", Path(tmp) / "world")
+            world = World(
+                "Main World",
+                world_id="main-world",
+                levels=(LevelDescriptor("town", "levels/town.level.pb"),),
+                initial_level_id="town",
+            )
+            project.save_document(world, "worlds/main.world.pb")
+            project.set_entrypoint("worlds/main.world.pb")
+            engine = Engine()
+            active_document = ActiveDocument()
+            window = SimpleNamespace(
+                _engine=engine,
+                _active_document=active_document,
+                _command_stack=active_document.command_stack,
+                _last_save_path=active_document.path,
+                _observer=None,
+                _runtime_preview=MagicMock(),
+                _viewport=MagicMock(),
+                _editor_context=EditorContext(
+                    engine=engine,
+                    actions=MagicMock(),
+                    ui=MagicMock(),
+                    project=None,
+                ),
+                _assets=MagicMock(),
+                _preferences=EditorPreferences(),
+                _selected_ids=(),
+                _root=MagicMock(),
+                _console=MagicMock(),
+                _update_project_actions=MagicMock(),
+                _present_all=MagicMock(),
+            )
+
+            ProjectWorkflow(window).open_loaded(project)
+
+            self.assertEqual(active_document.document, world)
+            self.assertEqual(active_document.kind.value, "world")
+            self.assertEqual(active_document.path, project.document_file("worlds/main.world.pb"))
+            self.assertIs(active_document.play_source, active_document.document)
+            self.assertEqual(engine.world_streaming_system.world, world)
+            self.assertIsNone(engine.edit_scene)
+            engine.world_streaming_system.close()
+
+    def test_saving_world_marks_active_document_clean_only_after_success(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Project.create("World", Path(tmp) / "world")
+            world = World(
+                "Main World",
+                world_id="main-world",
+                levels=(LevelDescriptor("town", "levels/town.level.pb"),),
+                initial_level_id="town",
+            )
+            path = "worlds/main.world.pb"
+            project.save_document(world, path)
+            document = project.load_world(path)
+            active_document = ActiveDocument()
+            active_document.open(document, project.document_file(path))
+            active_document.mark_dirty()
+            window = SimpleNamespace(
+                _engine=SimpleNamespace(project=project, edit_scene=None),
+                _active_document=active_document,
+                _last_save_path=project.document_file(path),
+                _console=MagicMock(),
+            )
+            workflow = ProjectWorkflow(window)
+
+            with (
+                patch.object(project, "save_document", side_effect=OSError("disk full")),
+                self.assertRaisesRegex(OSError, "disk full"),
+            ):
+                workflow.save_scene_silent()
+            self.assertTrue(active_document.is_dirty)
+
+            workflow.save_scene_silent()
+
+            self.assertFalse(active_document.is_dirty)
+            self.assertEqual(project.load_world(path), document)
+
+    def test_duplicate_world_preserves_level_references_without_copying_levels(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Project.create("World", Path(tmp) / "world")
+            world = World(
+                "Main World",
+                world_id="main-world",
+                levels=(LevelDescriptor("town", "levels/town.level.pb"),),
+                initial_level_id="town",
+            )
+            project.save_document(world, "worlds/main.world.pb")
+            active_document = ActiveDocument()
+            active_document.open(world, project.document_file("worlds/main.world.pb"))
+            engine = Engine()
+            engine.set_project(project)
+            engine.set_scene(None)
+            window = SimpleNamespace(
+                _engine=engine,
+                _active_document=active_document,
+                _last_save_path=active_document.path,
+                _selected_ids=(),
+                _root=MagicMock(),
+                _console=MagicMock(),
+                _present_all=MagicMock(),
+            )
+
+            ProjectWorkflow(window).duplicate_scene("copy")
+
+            duplicate = project.load_world("worlds/copy.world.pb")
+            self.assertNotEqual(duplicate.world_id, world.world_id)
+            self.assertEqual(duplicate.levels, world.levels)
+            self.assertFalse(project.document_file("levels/town.level.pb").exists())
+            self.assertEqual(active_document.document, duplicate)
+            self.assertEqual(active_document.path, project.document_file("worlds/copy.world.pb"))
+            assert engine.world_streaming_system is not None
+            engine.world_streaming_system.close()
+
+    def test_open_document_switches_from_level_to_world_without_scene_aliasing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Project.create("World", Path(tmp) / "world")
+            level = project.load_scene("scenes/main.scene.pb")
+            world = World(
+                "Main World",
+                world_id="main-world",
+                levels=(LevelDescriptor("town", "levels/town.level.pb"),),
+                initial_level_id="town",
+            )
+            project.save_document(world, "worlds/main.world.pb")
+            engine = Engine()
+            engine.set_project(project)
+            engine.set_scene(level)
+            active_document = ActiveDocument()
+            active_document.open(level, project.document_file("scenes/main.scene.pb"))
+            window = SimpleNamespace(
+                _engine=engine,
+                _active_document=active_document,
+                _observer=None,
+                _command_stack=active_document.command_stack,
+                _last_save_path=active_document.path,
+                _root=MagicMock(),
+                _console=MagicMock(),
+                _present_all=MagicMock(),
+            )
+
+            ProjectWorkflow(window).open_document("worlds/main.world.pb")
+
+            self.assertEqual(active_document.kind.value, "world")
+            self.assertEqual(active_document.document, world)
+            self.assertIsNone(engine.edit_scene)
+            assert engine.world_streaming_system is not None
+            self.assertEqual(engine.world_streaming_system.world, world)
+            engine.world_streaming_system.close()
+
+    def test_new_world_saves_typed_empty_document_and_opens_it(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Project.create("World", Path(tmp) / "world")
+            engine = Engine()
+            engine.set_project(project)
+            active_document = ActiveDocument()
+            window = SimpleNamespace(
+                _engine=engine,
+                _active_document=active_document,
+                _command_stack=active_document.command_stack,
+                _last_save_path=None,
+                _selected_ids=(),
+                _root=MagicMock(),
+                _console=MagicMock(),
+                _present_all=MagicMock(),
+            )
+
+            ProjectWorkflow(window).new_world("Open World")
+
+            restored = project.load_world("worlds/Open World.world.pb")
+            self.assertEqual(restored.name, "Open World")
+            self.assertEqual(active_document.kind.value, "world")
+            self.assertEqual(active_document.document, restored)
+            self.assertEqual(project.world_paths(), ("worlds/Open World.world.pb",))
+            assert engine.world_streaming_system is not None
+            engine.world_streaming_system.close()
+
+    def test_new_level_saves_typed_document_and_opens_it_for_authoring(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Project.create("Level", Path(tmp) / "level")
+            engine = Engine()
+            engine.set_project(project)
+            active_document = ActiveDocument()
+            window = SimpleNamespace(
+                _engine=engine,
+                _active_document=active_document,
+                _command_stack=active_document.command_stack,
+                _last_save_path=None,
+                _selected_ids=(),
+                _root=MagicMock(),
+                _console=MagicMock(),
+                _present_all=MagicMock(),
+            )
+
+            ProjectWorkflow(window).new_level("Forest")
+
+            saved = project.load_document("levels/Forest.level.pb")
+            self.assertIsInstance(saved, Level)
+            self.assertEqual(active_document.kind.value, "level")
+            self.assertEqual(active_document.document.name, saved.name)
+            self.assertEqual(active_document.path, project.document_file("levels/Forest.level.pb"))
+            self.assertIs(engine.edit_scene, active_document.document)
+
+    def test_add_level_to_world_adds_reference_without_copying_document_and_is_undoable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Project.create("World", Path(tmp) / "world")
+            source = LevelDescriptor("source", "levels/source.level.pb")
+            project.save_document(Level("Source"), source.resource_path)
+            world = World("Main", world_id="main")
+            active_document = ActiveDocument()
+            active_document.open(world, project.document_file("worlds/main.world.pb"))
+            engine = Engine()
+            engine.set_project(project)
+            engine.set_scene(None)
+            window = SimpleNamespace(
+                _engine=engine,
+                _active_document=active_document,
+                _command_stack=active_document.command_stack,
+                _last_save_path=active_document.path,
+                _observer=None,
+                _console=MagicMock(),
+                _root=MagicMock(),
+                _present_all=MagicMock(),
+                _update_undo_redo_state=MagicMock(),
+            )
+            workflow = ProjectWorkflow(window)
+
+            workflow.add_level_to_world(source.resource_path, origin=(20.0, 30.0))
+
+            self.assertEqual(len(active_document.document.levels), 1)
+            descriptor = active_document.document.levels[0]
+            self.assertEqual(descriptor.resource_path, source.resource_path)
+            self.assertEqual(descriptor.origin, (20.0, 30.0))
+            self.assertEqual(active_document.document.initial_level_id, descriptor.instance_id)
+            self.assertTrue(active_document.is_dirty)
+            self.assertEqual(project.load_document(source.resource_path).name, "Source")
+            self.assertTrue(active_document.command_stack.undo())
+            self.assertEqual(active_document.document.levels, ())
+            self.assertTrue(project.document_file(source.resource_path).exists())
+            assert engine.world_streaming_system is not None
+            engine.world_streaming_system.close()
+
+    def test_level_placement_edit_moves_bounds_and_is_undoable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Project.create("World", Path(tmp) / "world")
+            world = World(
+                "Main",
+                world_id="main",
+                levels=(
+                    LevelDescriptor(
+                        "town",
+                        "levels/town.level.pb",
+                        origin=(1.0, 2.0),
+                        bounds=(0.0, 0.0, 100.0, 50.0),
+                    ),
+                ),
+                initial_level_id="town",
+            )
+            active_document = ActiveDocument()
+            active_document.open(world, project.document_file("worlds/main.world.pb"))
+            engine = Engine()
+            engine.set_project(project)
+            engine.set_scene(None)
+            window = SimpleNamespace(
+                _engine=engine,
+                _active_document=active_document,
+                _command_stack=active_document.command_stack,
+                _last_save_path=active_document.path,
+                _console=MagicMock(),
+                _root=MagicMock(),
+                _update_undo_redo_state=MagicMock(),
+                _present_all=MagicMock(),
+            )
+            workflow = ProjectWorkflow(window)
+
+            workflow.update_level_placement("town", (20.0, 30.0))
+
+            placed = active_document.document.levels[0]
+            self.assertEqual(placed.origin, (20.0, 30.0))
+            self.assertEqual(placed.bounds, (19.0, 28.0, 100.0, 50.0))
+            self.assertTrue(active_document.is_dirty)
+            active_document.command_stack.undo()
+            self.assertEqual(active_document.document.levels[0].origin, (1.0, 2.0))
+            self.assertEqual(active_document.document.levels[0].bounds, (0.0, 0.0, 100.0, 50.0))
+            assert engine.world_streaming_system is not None
+            engine.world_streaming_system.close()
+
+    def test_create_seamless_connection_validates_named_anchors_and_world_adjacency(self) -> None:
+        from expra_engine.runtime.level_anchor import LevelAnchorComponent
+
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Project.create("World", Path(tmp) / "world")
+            town = Level("Town")
+            exit_entity = town.create_entity("East Gate")
+            exit_entity.add_component(TransformComponent(x=100.0))
+            exit_entity.add_component(LevelAnchorComponent("east", kind="exit"))
+            forest = Level("Forest")
+            entry = forest.create_entity("West Entry")
+            entry.add_component(LevelAnchorComponent("west", kind="entrance"))
+            project.save_document(town, "levels/town.level.pb")
+            project.save_document(forest, "levels/forest.level.pb")
+            world = World(
+                "Main",
+                world_id="main",
+                levels=(
+                    LevelDescriptor("town", "levels/town.level.pb"),
+                    LevelDescriptor("forest", "levels/forest.level.pb", origin=(100.0, 0.0)),
+                ),
+                initial_level_id="town",
+            )
+            active_document = ActiveDocument()
+            active_document.open(world, project.document_file("worlds/main.world.pb"))
+            engine = Engine()
+            engine.set_project(project)
+            engine.set_scene(None)
+            window = SimpleNamespace(
+                _engine=engine,
+                _active_document=active_document,
+                _command_stack=active_document.command_stack,
+                _last_save_path=active_document.path,
+                _observer=None,
+                _console=MagicMock(),
+                _root=MagicMock(),
+                _update_undo_redo_state=MagicMock(),
+                _present_all=MagicMock(),
+            )
+            workflow = ProjectWorkflow(window)
+            connection = WorldConnection("town-forest", "town", "east", "forest", "west")
+
+            workflow.add_world_connection(connection)
+
+            self.assertEqual(active_document.document.connections, (connection,))
+            self.assertTrue(active_document.is_dirty)
+            active_document.command_stack.undo()
+            self.assertEqual(active_document.document.connections, ())
+            assert engine.world_streaming_system is not None
+            engine.world_streaming_system.close()
+
+    def test_remove_connection_then_level_preserves_world_graph_validation_and_undo(self) -> None:
+        world = World(
+            "Main",
+            world_id="main",
+            levels=(
+                LevelDescriptor("town", "levels/town.level.pb"),
+                LevelDescriptor("forest", "levels/forest.level.pb"),
+            ),
+            connections=(WorldConnection("gate", "town", "east", "forest", "west"),),
+            initial_level_id="town",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Project.create("World", Path(tmp) / "world")
+            project.save_document(world, "worlds/main.world.pb")
+            active_document = ActiveDocument()
+            active_document.open(world, project.document_file("worlds/main.world.pb"))
+            engine = Engine()
+            engine.set_project(project)
+            engine.set_scene(None)
+            window = SimpleNamespace(
+                _engine=engine,
+                _active_document=active_document,
+                _command_stack=active_document.command_stack,
+                _last_save_path=active_document.path,
+                _root=MagicMock(),
+                _update_undo_redo_state=MagicMock(),
+                _present_all=MagicMock(),
+            )
+            workflow = ProjectWorkflow(window)
+
+            with self.assertRaisesRegex(ProjectError, "connections"):
+                workflow.remove_level_from_world("town")
+            workflow.remove_world_connection("gate")
+            workflow.remove_level_from_world("town")
+
+            self.assertEqual(tuple(item.instance_id for item in active_document.document.levels), ("forest",))
+            self.assertEqual(active_document.document.initial_level_id, "forest")
+            active_document.command_stack.undo()
+            self.assertEqual(len(active_document.document.connections), 0)
+            active_document.command_stack.undo()
+            self.assertEqual(active_document.document, world)
+            assert engine.world_streaming_system is not None
+            engine.world_streaming_system.close()
+
+    def test_set_initial_level_is_undoable_and_clears_unrelated_entrance(self) -> None:
+        world = World(
+            "Main",
+            world_id="main",
+            levels=(
+                LevelDescriptor("town", "levels/town.level.pb"),
+                LevelDescriptor("forest", "levels/forest.level.pb"),
+            ),
+            initial_level_id="town",
+            initial_entrance_id="town_gate",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Project.create("World", Path(tmp) / "world")
+            active_document = ActiveDocument()
+            active_document.open(world)
+            engine = Engine()
+            engine.set_project(project)
+            engine.set_scene(None)
+            window = SimpleNamespace(
+                _engine=engine,
+                _active_document=active_document,
+                _command_stack=active_document.command_stack,
+                _last_save_path=None,
+                _root=MagicMock(),
+                _update_undo_redo_state=MagicMock(),
+                _present_all=MagicMock(),
+            )
+            workflow = ProjectWorkflow(window)
+
+            workflow.set_initial_level("forest")
+
+            self.assertEqual(active_document.document.initial_level_id, "forest")
+            self.assertIsNone(active_document.document.initial_entrance_id)
+            active_document.command_stack.undo()
+            self.assertEqual(active_document.document, world)
+            assert engine.world_streaming_system is not None
+            engine.world_streaming_system.close()
+
     def test_run_project_launches_the_project_script_as_a_child_process(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project = Project.create("Runtime", Path(tmp) / "runtime")

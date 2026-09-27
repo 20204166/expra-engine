@@ -23,4 +23,7 @@ class EditorApplication:
         self._window = EditorWindow(self._engine, theme=self._theme)
         if self._engine.project is None:
             self._window.show_project_welcome()
-        self._window.run()
+        try:
+            self._window.run()
+        except KeyboardInterrupt:
+            self._window._on_close()

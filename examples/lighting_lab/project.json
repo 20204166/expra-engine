@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "name": "2D Lighting Lab",
+  "game_version": "0.1.0",
+  "scenes": [
+    "scenes/main.scene.pb",
+    "scenes/street_lamp.scene.pb"
+  ],
+  "entrypoint": "levels/light_lab.level.pb",
+  "levels": [
+    "levels/light_lab.level.pb"
+  ]
+}

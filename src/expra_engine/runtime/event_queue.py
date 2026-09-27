@@ -23,6 +23,7 @@ else is convenience.
 from __future__ import annotations
 
 import contextlib
+import threading
 from collections import deque
 from collections.abc import Callable, Iterable
 from typing import Any
@@ -92,11 +93,14 @@ class EventQueue:
     def __init__(self, root: Any) -> None:
         self._root = root
         self._queue: deque[Any] = deque()
+        self._lock = threading.RLock()
+        self._dispatching_targets: set[int] | None = None
 
     @property
     def pending(self) -> bool:
         """True if there are events waiting to be published."""
-        return bool(self._queue)
+        with self._lock:
+            return bool(self._queue)
 
     def signal(self, event: Any, *, targets: Iterable[Any] | None = None) -> None:
         """Enqueue an event.
@@ -106,10 +110,11 @@ class EventQueue:
         :param event: Any event instance (typically a dataclass).
         :param targets: If given, only these objects receive the event.
         """
-        if targets is not None:
-            self._queue.append(_TargetedEvent(event, targets))
-        else:
-            self._queue.append(event)
+        with self._lock:
+            if targets is not None:
+                self._queue.append(_TargetedEvent(event, targets))
+            else:
+                self._queue.append(event)
 
     def publish(self) -> None:
         """Dequeue and dispatch the next event to all appropriate handlers.
@@ -117,19 +122,31 @@ class EventQueue:
         Handler names are derived from the event class name via
         ``camel_to_snake``: ``Update`` → ``on_update``.
         """
-        if not self._queue:
-            return
+        with self._lock:
+            if not self._queue:
+                return
+            item = self._queue.popleft()
+            self._dispatching_targets = set() if isinstance(item, _TargetedEvent) else None
+        try:
+            self._publish_item(item)
+        finally:
+            with self._lock:
+                self._dispatching_targets = None
 
-        item = self._queue.popleft()
+    def _publish_item(self, item: Any) -> None:
         if isinstance(item, _TargetedEvent):
             event = item.event
-            targets: Iterable[Any] = item.targets
+            targets: Iterable[Any] = tuple(item.targets)
         else:
             event = item
             targets = walk(self._root)
 
         handler_name = getattr(event, "event_handler_name", _handler_name(type(event).__name__))
         for obj in targets:
+            if isinstance(item, _TargetedEvent):
+                with self._lock:
+                    if self._dispatching_targets is not None and id(obj) in self._dispatching_targets:
+                        continue
             method = getattr(obj, handler_name, None)
             if method is not None and callable(method):
                 try:
@@ -182,7 +199,36 @@ class EventQueue:
         Called before scene transitions to prevent stale events being
         delivered to the wrong scene (same invariant as PPB).
         """
-        self._queue.clear()
+        with self._lock:
+            self._queue.clear()
+
+    def discard_targets(self, targets: Iterable[Any]) -> int:
+        """Remove queued targeted deliveries retaining Entities being unloaded.
+
+        Broadcast events are left intact because they resolve against the
+        current active-scene root at publish time. Returns the number of target
+        references removed (not the number of event records).
+        """
+        removed_ids = {id(target) for target in targets}
+        if not removed_ids:
+            return 0
+        removed = 0
+        with self._lock:
+            if self._dispatching_targets is not None:
+                self._dispatching_targets.update(removed_ids)
+            kept: deque[Any] = deque()
+            while self._queue:
+                item = self._queue.popleft()
+                if not isinstance(item, _TargetedEvent):
+                    kept.append(item)
+                    continue
+                survivors = [target for target in item.targets if id(target) not in removed_ids]
+                removed += len(item.targets) - len(survivors)
+                if survivors:
+                    item.targets = survivors
+                    kept.append(item)
+            self._queue = kept
+        return removed
 
     def drain(self) -> None:
         """Publish all pending events in order."""
@@ -191,4 +237,5 @@ class EventQueue:
 
     def set_root(self, root: Any) -> None:
         """Update the traversal root (e.g. after a scene change)."""
-        self._root = root
+        with self._lock:
+            self._root = root

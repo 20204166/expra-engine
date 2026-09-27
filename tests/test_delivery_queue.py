@@ -119,6 +119,37 @@ class TkDeliveryQueueTests(unittest.TestCase):
         delay, _ = widget.after_calls[0]
         self.assertEqual(delay, 25)
 
+    def test_callback_enqueued_during_drain_is_delivered_in_same_drain(self) -> None:
+        q, widget = self._make_queue()
+        order: list[str] = []
+
+        def first() -> None:
+            order.append("first")
+            q(lambda: order.append("nested"))
+
+        q(first)
+        q._drain()  # type: ignore[attr-defined]
+
+        self.assertEqual(order, ["first", "nested"])
+        self.assertEqual(len(widget.after_calls), 1)
+
+    def test_close_from_within_callback_stops_drain_without_reschedule(self) -> None:
+        q, widget = self._make_queue()
+        ran: list[str] = []
+
+        def stop() -> None:
+            ran.append("stop")
+            q.close()
+
+        q(stop)
+        q(lambda: ran.append("later"))
+
+        q._drain()  # type: ignore[attr-defined]
+
+        self.assertEqual(ran, ["stop"])
+        self.assertTrue(q.is_closed)
+        self.assertEqual(widget.after_calls, [])
+
     def test_callback_failure_does_not_stop_future_delivery(self) -> None:
         q, widget = self._make_queue()
         called: list[str] = []

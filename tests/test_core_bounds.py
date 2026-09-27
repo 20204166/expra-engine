@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import unittest
 from dataclasses import FrozenInstanceError
 
@@ -37,6 +38,33 @@ class Bounds2DTests(unittest.TestCase):
     def test_is_frozen(self) -> None:
         with self.assertRaises(FrozenInstanceError):
             Bounds2D(0, 0, 1, 1).min_x = 2  # type: ignore[misc]
+
+    def test_rejects_non_finite_coordinates(self) -> None:
+        finite = (0.0, 0.0, 1.0, 1.0)
+        for index in range(4):
+            for bad in (float("nan"), float("inf"), float("-inf")):
+                values = list(finite)
+                values[index] = bad
+                with self.assertRaises(ValueError, msg=f"{values}"):
+                    Bounds2D(*values)
+
+    def test_rejects_non_finite_via_from_center_size(self) -> None:
+        for bad in (float("nan"), float("inf"), float("-inf")):
+            with self.assertRaises(ValueError, msg=f"width={bad}"):
+                Bounds2D.from_center_size(0.0, 0.0, bad, 1.0)
+            with self.assertRaises(ValueError, msg=f"height={bad}"):
+                Bounds2D.from_center_size(0.0, 0.0, 1.0, bad)
+
+    def test_rejects_non_finite_via_expand(self) -> None:
+        bounds = Bounds2D(0.0, 0.0, 1.0, 1.0)
+        for bad in (float("nan"), float("inf"), float("-inf")):
+            with self.assertRaises(ValueError, msg=f"amount={bad}"):
+                bounds.expand(bad)
+
+    def test_finite_coordinates_produce_finite_geometry(self) -> None:
+        bounds = Bounds2D.from_center_size(5.0, 5.0, 4.0, 2.0)
+        self.assertTrue(all(math.isfinite(v) for v in (bounds.width, bounds.height)))
+        self.assertTrue(all(math.isfinite(v) for v in (bounds.center_x, bounds.center_y)))
 
 
 if __name__ == "__main__":

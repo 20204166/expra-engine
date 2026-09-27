@@ -194,7 +194,76 @@ def _register_builtin_components() -> None:
     _register_audio_components()
     _register_screen_components()
     _register_composition_components()
+    _register_world_components()
     _BUILTINS_REGISTERED = True
+
+
+def _register_world_components() -> None:
+    if all(
+        name in _COMPONENT_REGISTRY
+        for name in (
+            "level_anchor",
+            "streaming_anchor",
+            "world_persistent_actor",
+            "world_session_state",
+        )
+    ):
+        return
+    from expra_engine.runtime.level_anchor import (
+        LevelAnchorComponent,
+        StreamingAnchorComponent,
+        WorldPersistentActorComponent,
+    )
+    from expra_engine.runtime.world_state import WorldSessionStateComponent
+
+    if "level_anchor" not in _COMPONENT_REGISTRY:
+        _register_component(
+            LevelAnchorComponent.component_type,
+            LevelAnchorComponent,
+            (
+                PropertyDescriptor("anchor_id", "Anchor ID", str, "anchor"),
+                PropertyDescriptor(
+                    "kind",
+                    "Anchor Kind",
+                    str,
+                    "both",
+                    enum_values=("entrance", "exit", "both"),
+                ),
+                PropertyDescriptor(
+                    "shape",
+                    "Trigger Shape",
+                    str,
+                    "rectangle",
+                    enum_values=("rectangle", "circle"),
+                ),
+                PropertyDescriptor(
+                    "size",
+                    "Trigger Size",
+                    tuple,
+                    (1.0, 1.0),
+                    tuple_length=2,
+                    tuple_minimum=(0.000001, 0.000001),
+                ),
+            ),
+        ),
+    if "streaming_anchor" not in _COMPONENT_REGISTRY:
+        _register_component(
+            StreamingAnchorComponent.component_type,
+            StreamingAnchorComponent,
+            (PropertyDescriptor("anchor_id", "Anchor ID", str, "primary"),),
+        )
+    if "world_persistent_actor" not in _COMPONENT_REGISTRY:
+        _register_component(
+            WorldPersistentActorComponent.component_type,
+            WorldPersistentActorComponent,
+            (PropertyDescriptor("persistent_id", "Persistent ID", str, "actor"),),
+        )
+    if "world_session_state" not in _COMPONENT_REGISTRY:
+        _register_component(
+            WorldSessionStateComponent.component_type,
+            WorldSessionStateComponent,
+            (PropertyDescriptor("values", "Session Values", dict, {}),),
+        )
 
 
 def _register_visual_components() -> None:
@@ -202,6 +271,8 @@ def _register_visual_components() -> None:
         return
     from expra_engine.runtime.animated_sprite_2d import AnimatedSprite2DComponent, SpriteFrames2D
     from expra_engine.runtime.canvas_effects import CanvasModulateComponent
+    from expra_engine.runtime.lighting_2d import Light2DComponent
+    from expra_engine.runtime.material_component import MaterialComponent
     from expra_engine.runtime.visual_components import (
         PrimitiveComponent,
         SpriteComponent,
@@ -266,6 +337,23 @@ def _register_visual_components() -> None:
             ),
         ),
         (
+            MaterialComponent.component_type,
+            MaterialComponent,
+            (
+                PropertyDescriptor(
+                    "mode", "Lighting", str, "lit", enum_values=("lit", "unlit", "toon")
+                ),
+                PropertyDescriptor(
+                    "ambient_response", "Ambient Response", float, 1.0, minimum=0.0, maximum=1.0
+                ),
+                PropertyDescriptor("diffuse", "Diffuse", float, 1.0, minimum=0.0, maximum=1.0),
+                PropertyDescriptor("emission", "Emission", float, 0.0, minimum=0.0, maximum=1.0),
+                PropertyDescriptor("emission_color", "Emission Color", tuple, (1.0, 1.0, 1.0, 1.0)),
+                PropertyDescriptor("toon_steps", "Toon Steps", int, 3, minimum=2, maximum=8),
+                PropertyDescriptor("enabled", "Enabled", bool, True),
+            ),
+        ),
+        (
             AnimatedSprite2DComponent.component_type,
             AnimatedSprite2DComponent,
             (
@@ -290,6 +378,22 @@ def _register_visual_components() -> None:
             CanvasModulateComponent,
             (
                 PropertyDescriptor("color", "Color", tuple, (1.0, 1.0, 1.0, 1.0)),
+                PropertyDescriptor("enabled", "Enabled", bool, True),
+            ),
+        ),
+        (
+            Light2DComponent.component_type,
+            Light2DComponent,
+            (
+                PropertyDescriptor("kind", "Kind", str, "point", enum_values=("point", "spot")),
+                PropertyDescriptor("color", "Color", tuple, (1.0, 1.0, 1.0, 1.0)),
+                PropertyDescriptor("energy", "Energy", float, 1.0, minimum=0.0, maximum=8.0),
+                PropertyDescriptor("radius", "Radius", float, 4.0, minimum=0.000001),
+                PropertyDescriptor("falloff", "Falloff", float, 2.0, minimum=0.1, maximum=8.0),
+                PropertyDescriptor(
+                    "cone_angle", "Cone Angle", float, 60.0, minimum=0.000001, maximum=360.0
+                ),
+                PropertyDescriptor("visible", "Visible", bool, True),
                 PropertyDescriptor("enabled", "Enabled", bool, True),
             ),
         ),

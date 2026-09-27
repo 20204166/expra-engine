@@ -95,7 +95,8 @@ def _finite_result(value: int | float) -> int | float:
     if isinstance(value, int):
         if abs(value) > _MAX_ABS_RESULT:
             raise ExpressionError("result is too large")
-    elif not math.isfinite(value):
+        return value
+    if not isinstance(value, float) or not math.isfinite(value):
         raise ExpressionError("result must be finite")
     return value
 

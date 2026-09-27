@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 
@@ -13,6 +14,11 @@ class Bounds2D:
     max_y: float
 
     def __post_init__(self) -> None:
+        if not all(
+            math.isfinite(value)
+            for value in (self.min_x, self.min_y, self.max_x, self.max_y)
+        ):
+            raise ValueError("bounds coordinates must be finite")
         if self.min_x > self.max_x:
             raise ValueError("min_x must be <= max_x")
         if self.min_y > self.max_y:

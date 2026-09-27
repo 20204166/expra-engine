@@ -6,7 +6,7 @@ import math
 from dataclasses import dataclass
 
 from expra_engine.core.entity import Entity
-from expra_engine.core.scene import Scene
+from expra_engine.core.scene import Scene, WorldTransform2D
 from expra_engine.core.component import TransformComponent
 from expra_engine.observability import ObservabilityWatcher
 from expra_engine.runtime.area import AreaComponent, SpaceOverride
@@ -24,6 +24,10 @@ class _Collider:
     entity: Entity
     component: ColliderComponent
     center: tuple[float, float]
+    width: float
+    height: float
+    radius: float | None
+    pose: WorldTransform2D
 
 
 class PhysicsWorld2D:
@@ -48,13 +52,26 @@ class PhysicsWorld2D:
                 and not (include_area_volumes and area is not None and area.enabled)
             ):
                 continue
-            transform = entity.get_component(TransformComponent)
-            position = (transform.x, transform.y) if transform is not None else (0.0, 0.0)
+            pose = self.scene.world_transform(entity.entity_id)
+            angle = math.radians(pose.rotation)
+            offset_x = component.offset[0] * pose.scale[0]
+            offset_y = component.offset[1] * pose.scale[1]
+            center = (
+                pose.position[0] + offset_x * math.cos(angle) - offset_y * math.sin(angle),
+                pose.position[1] + offset_x * math.sin(angle) + offset_y * math.cos(angle),
+            )
             result.append(
                 _Collider(
                     entity,
                     component,
-                    (position[0] + component.offset[0], position[1] + component.offset[1]),
+                    center,
+                    component.width * abs(pose.scale[0]),
+                    component.height * abs(pose.scale[1]),
+                    component.radius
+                    * max(abs(pose.scale[0]), abs(pose.scale[1]))
+                    if component.radius is not None
+                    else None,
+                    pose,
                 )
             )
         return tuple(result)
@@ -72,17 +89,20 @@ class PhysicsWorld2D:
         ax, ay = first.center
         bx, by = second.center
         if a.shape == "circle" and b.shape == "circle":
-            assert a.radius is not None and b.radius is not None
-            return (ax - bx) ** 2 + (ay - by) ** 2 <= (a.radius + b.radius) ** 2
+            assert first.radius is not None and second.radius is not None
+            return (ax - bx) ** 2 + (ay - by) ** 2 <= (first.radius + second.radius) ** 2
         if a.shape == "rectangle" and b.shape == "rectangle":
-            return abs(ax - bx) <= (a.width + b.width) / 2 and abs(ay - by) <= (a.height + b.height) / 2
+            return (
+                abs(ax - bx) <= (first.width + second.width) / 2
+                and abs(ay - by) <= (first.height + second.height) / 2
+            )
         circle, rectangle = (first, second) if a.shape == "circle" else (second, first)
-        radius = circle.component.radius
+        radius = circle.radius
         assert radius is not None
         cx, cy = circle.center
         rx, ry = rectangle.center
-        closest_x = max(rx - rectangle.component.width / 2, min(cx, rx + rectangle.component.width / 2))
-        closest_y = max(ry - rectangle.component.height / 2, min(cy, ry + rectangle.component.height / 2))
+        closest_x = max(rx - rectangle.width / 2, min(cx, rx + rectangle.width / 2))
+        closest_y = max(ry - rectangle.height / 2, min(cy, ry + rectangle.height / 2))
         return (cx - closest_x) ** 2 + (cy - closest_y) ** 2 <= radius**2
 
     def overlap(self, body_id: str, *, include_triggers: bool = True) -> tuple[str, ...]:
@@ -127,19 +147,16 @@ class PhysicsWorld2D:
                 area.gravity * area.gravity_direction[0],
                 area.gravity * area.gravity_direction[1],
             )
-        area_transform = area_item.entity.get_component(TransformComponent)
-        body_transform = body.entity.get_component(TransformComponent)
-        area_position = (area_item.center[0], area_item.center[1])
-        body_position = body.center
-        if area_transform is not None:
-            angle = math.radians(area_transform.rotation)
-            local_x, local_y = area.gravity_point_center
-            area_position = (
-                area_transform.x + local_x * math.cos(angle) - local_y * math.sin(angle),
-                area_transform.y + local_x * math.sin(angle) + local_y * math.cos(angle),
-            )
-        if body_transform is not None:
-            body_position = (body_transform.x, body_transform.y)
+        area_pose = area_item.pose
+        body_pose = body.pose
+        angle = math.radians(area_pose.rotation)
+        local_x = area.gravity_point_center[0] * area_pose.scale[0]
+        local_y = area.gravity_point_center[1] * area_pose.scale[1]
+        area_position = (
+            area_pose.position[0] + local_x * math.cos(angle) - local_y * math.sin(angle),
+            area_pose.position[1] + local_x * math.sin(angle) + local_y * math.cos(angle),
+        )
+        body_position = body_pose.position
         dx, dy = area_position[0] - body_position[0], area_position[1] - body_position[1]
         distance = math.hypot(dx, dy)
         if distance == 0.0:
@@ -253,10 +270,10 @@ class PhysicsWorld2D:
         ox, oy = origin
         ux, uy = unit
         if component.shape == "circle":
-            assert component.radius is not None
+            assert item.radius is not None
             vx, vy = cx - ox, cy - oy
             projection = vx * ux + vy * uy
-            discriminant = projection * projection - (vx * vx + vy * vy - component.radius**2)
+            discriminant = projection * projection - (vx * vx + vy * vy - item.radius**2)
             if discriminant < 0.0:
                 return None, None
             hit = projection - math.sqrt(discriminant)
@@ -267,7 +284,7 @@ class PhysicsWorld2D:
             px, py = ox + ux * hit, oy + uy * hit
             normal_length = math.hypot(px - cx, py - cy) or 1.0
             return hit, ((px - cx) / normal_length, (py - cy) / normal_length)
-        half_x, half_y = component.width / 2, component.height / 2
+        half_x, half_y = item.width / 2, item.height / 2
         t_min, t_max = 0.0, distance
         normal = (0.0, 0.0)
         for coordinate, direction, low, high, axis in (

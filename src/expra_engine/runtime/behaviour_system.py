@@ -109,6 +109,34 @@ class BehaviourSystem(RuntimeSystem):
         if self.engine is not None and self.engine.active_scene is not None:
             self._stop_scene(self.engine.active_scene)
 
+    def on_world_level_activated(
+        self, world_scene: Any, _level_id: str, entity_ids: tuple[str, ...]
+    ) -> None:
+        """Start the newly active Level's behaviours inside the World aggregate."""
+        if self.engine is not None and world_scene is not None:
+            entities = tuple(
+                entity
+                for entity_id in entity_ids
+                if (entity := world_scene.find_entity(entity_id)) is not None
+            )
+            self._start_entities(world_scene, entities)
+
+    def on_world_level_deactivated(
+        self, world_scene: Any, _level_id: str, entity_ids: tuple[str, ...]
+    ) -> None:
+        """Stop only the Level's behaviours before its entities leave the aggregate."""
+        if self.engine is None or world_scene is None:
+            return
+        cleanup_error: Exception | None = None
+        for entity_id in reversed(entity_ids):
+            try:
+                self._stop_entity(world_scene.scene_id, entity_id)
+            except Exception as exc:  # noqa: BLE001 - retire all Level behaviours
+                if cleanup_error is None:
+                    cleanup_error = exc
+        if cleanup_error is not None:
+            raise cleanup_error
+
     def reload_script(self, script_id: Any) -> int:
         """Atomically replace live instances for one script resource."""
         resource = script_id if isinstance(script_id, ResourceId) else ResourceId.parse(script_id)
@@ -208,14 +236,18 @@ class BehaviourSystem(RuntimeSystem):
         return cleanup_error
 
     def _start_scene(self, scene: Any) -> None:
-        if scene is None:
+        if scene is None or scene.scene_id in self._started_scenes:
             return
-        if scene.scene_id in self._started_scenes:
-            return
-        started: list[tuple[str, str]] = []
         self._started_scenes.add(scene.scene_id)
+        self._start_entities(scene, scene.entities)
+
+    def _start_entities(self, scene: Any, entities: Any) -> None:
+        started: list[tuple[str, str]] = []
         try:
-            for entity in scene.entities:
+            for entity in entities:
+                key = (scene.scene_id, entity.entity_id)
+                if key in self._instances:
+                    continue
                 components = sorted(
                     (
                         component
@@ -259,7 +291,6 @@ class BehaviourSystem(RuntimeSystem):
             if "behaviour" in locals() and behaviour.entity is not None:
                 with contextlib.suppress(Exception):
                     self._discard_uncommitted(entity, behaviour)
-            self._started_scenes.discard(scene.scene_id)
             raise
 
     def _stop_scene(self, scene: Any) -> None:

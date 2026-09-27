@@ -47,6 +47,11 @@ class SafeExpressionTests(unittest.TestCase):
         ):
             evaluate("10**1000000")
 
+    def test_rejects_fractional_power_of_negative_number(self) -> None:
+        for expression in ("(-1)**0.5", "(-2)**0.5", "(-8)**(1/3)", "(-1.0)**0.5"):
+            with self.subTest(expression=expression), self.assertRaises(ExpressionError):
+                evaluate(expression)
+
 
 if __name__ == "__main__":
     unittest.main()

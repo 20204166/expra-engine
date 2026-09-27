@@ -20,7 +20,7 @@ from typing import Any
 from expra_engine.core.camera import Camera2D
 from expra_engine.core.component import TransformComponent
 from expra_engine.core.scene import Scene
-from expra_engine.core.world import LevelDescriptor, World
+from expra_engine.core.world import World
 from expra_engine.runtime.animated_sprite_2d import (
     AnimatedSprite2DComponent,
     AnimatedSpritePlayer2D,
@@ -40,6 +40,7 @@ from expra_engine.ui.viewport_camera import (
     compute_frame_fit,
 )
 from expra_engine.ui.viewport_camera_overlay import draw_camera_overlay
+from expra_engine.ui.viewport_lighting import LightGizmo, update_light_gizmo
 from expra_engine.ui.viewport_markers import (
     MarkerEntry,
     draw_entity_markers,
@@ -51,6 +52,7 @@ from expra_engine.ui.viewport_render_target import (
     EditorRenderTarget,
     build_editor_render_target,
 )
+from expra_engine.ui.world_overlay import WorldOverlayMixin
 
 __all__ = [
     "VIEWPORT_BASE_PPU",
@@ -71,7 +73,7 @@ class _CanvasEntry:
     label: int | None = None  # name label canvas item ID
 
 
-class ViewportPanel(tk.Frame):
+class ViewportPanel(WorldOverlayMixin, tk.Frame):
     """Canvas-based editor viewport.
 
     ``on_entity_click(entity_id)`` is called when the user clicks an entity.
@@ -112,6 +114,7 @@ class ViewportPanel(tk.Frame):
         self._interpolator: Any | None = None
         self._interpolation_fraction = 0.0
         self._world_transition_alpha = 0.0
+        self._preview_lighting: bool | None = None
         self._observer = observer
         self._pixel_renderer = EditorPixelRenderer(resource_service, observer=observer)
         self._pixel_image: Any | None = None
@@ -126,6 +129,7 @@ class ViewportPanel(tk.Frame):
         self._grid_dirty = True  # grid/axis needs rebuild (camera moved or canvas resized)
         self._canvas_items: dict[str, _CanvasEntry] = {}  # retained visual-entity items
         self._marker_entries: dict[str, MarkerEntry] = {}  # retained icon-marker items
+        self._light_gizmo: LightGizmo | None = None
         self._entity_map: dict[str, Any] = {}  # built once per render() call; O(1) lookup
         self._items_by_id: dict[str, RenderItem] = {}
 
@@ -200,6 +204,8 @@ class ViewportPanel(tk.Frame):
         interpolation_fraction: float = 0.0,
         animated_players: dict[AnimatedSprite2DComponent, AnimatedSpritePlayer2D] | None = None,
         world_transition_alpha: float = 0.0,
+        preview_lighting: bool | None = None,
+        modulation_entity_ids: Any | None = None,
     ) -> None:
         """Redraw the viewport for ``scene``. Called on the main thread."""
         if self._world is not None:
@@ -222,6 +228,7 @@ class ViewportPanel(tk.Frame):
         self._interpolator = interpolator
         self._interpolation_fraction = interpolation_fraction
         self._world_transition_alpha = max(0.0, min(1.0, float(world_transition_alpha)))
+        self._preview_lighting = preview_lighting
         self._animated_players = animated_players
 
         if scene_changed and scene is not None:
@@ -252,6 +259,8 @@ class ViewportPanel(tk.Frame):
             interpolation_fraction=interpolation_fraction,
             animated_players=animated_players,
             observer=self._observer,
+            preview_lighting=self._preview_lighting,
+            modulation_entity_ids=modulation_entity_ids,
         )
         self._items_by_id = {item.key: item for item in self._target.items}
         self._target_dirty = False
@@ -333,6 +342,14 @@ class ViewportPanel(tk.Frame):
                 )
             if entity_id == selected_id and self._editor_overlays:
                 self._draw_selection_outline(item)
+        self._light_gizmo = update_light_gizmo(
+            self._canvas,
+            self._scene,
+            selected_id if self._editor_overlays else None,
+            self._camera,
+            self._colors,
+            self._light_gizmo,
+        )
 
     def set_resource_service(self, resource_service: Any | None) -> None:
         """Replace project resources and discard backend-owned decoded textures."""
@@ -456,6 +473,7 @@ class ViewportPanel(tk.Frame):
             interpolation_fraction=self._interpolation_fraction,
             observer=self._observer,
             animated_players=getattr(self, "_animated_players", None),
+            preview_lighting=self._preview_lighting,
         )
         self._target_dirty = False
         self._items_by_id = {item.key: item for item in self._target.items}
@@ -473,6 +491,7 @@ class ViewportPanel(tk.Frame):
             interpolation_fraction=self._interpolation_fraction,
             observer=self._observer,
             animated_players=getattr(self, "_animated_players", None),
+            preview_lighting=self._preview_lighting,
         )
         self._items_by_id = {item.key: item for item in self._target.items}
         self._target_dirty = False
@@ -590,155 +609,15 @@ class ViewportPanel(tk.Frame):
             for eid in list(self._marker_entries):
                 canvas.delete(f"entity:{eid}")
             self._marker_entries.clear()
+        self._light_gizmo = update_light_gizmo(
+            canvas,
+            self._scene,
+            self._selected_id if self._editor_overlays else None,
+            self._camera,
+            self._colors,
+            self._light_gizmo,
+        )
         self._draw_transition_overlay(w, h)
-
-    def _draw_transition_overlay(self, width: int, height: int) -> None:
-        canvas = self._canvas
-        canvas.delete("world_transition_overlay")
-        alpha = self._world_transition_alpha
-        if not self._editor_overlays and alpha > 0.0:
-            stipple = None if alpha >= 0.9 else "gray75" if alpha >= 0.7 else "gray50" if alpha >= 0.4 else "gray25"
-            canvas.create_rectangle(
-                0,
-                0,
-                width,
-                height,
-                fill="#000000",
-                stipple=stipple or "",
-                outline="",
-                tags="world_transition_overlay",
-            )
-            canvas.tag_raise("world_transition_overlay")
-
-    def _draw_world(self, world: World) -> None:
-        canvas = self._canvas
-        canvas.delete("world")
-        self._world_style_items.clear()
-        levels = {descriptor.instance_id: descriptor for descriptor in world.levels}
-        for descriptor in world.levels:
-            self._draw_world_level(world, descriptor)
-        for connection in world.connections:
-            source = levels[connection.source_level_id]
-            destination = levels[connection.destination_level_id]
-            source_point = _descriptor_center(source)
-            destination_point = _descriptor_center(destination)
-            sx, sy = self._camera.project(source_point)
-            dx, dy = self._camera.project(destination_point)
-            tag = f"connection:{connection.connection_id}"
-            color = self._colors["accent"] if tag == self._selected_id else self._colors["ink_3"]
-            line = canvas.create_line(
-                sx,
-                sy,
-                dx,
-                dy,
-                fill=color,
-                width=2 if tag == self._selected_id else 1,
-                arrow="last",
-                tags=("world", tag, f"world:{tag}"),
-            )
-            self._track_world_item(tag, line, "connection-line")
-            label = (
-                f"{connection.source_anchor_id} → {connection.destination_anchor_id}"
-                f" · {connection.transition.value}"
-            )
-            label_item = canvas.create_text(
-                (sx + dx) / 2,
-                (sy + dy) / 2 - 10,
-                text=label,
-                fill=self._colors["ink_2"],
-                font=("TkDefaultFont", 8),
-                tags=("world", tag, f"world:{tag}"),
-            )
-            self._track_world_item(tag, label_item, "connection-label")
-            self._bind_world_selection(tag)
-        canvas.tag_raise("world")
-        self._world_drawn = True
-
-    def _draw_world_level(self, world: World, descriptor: LevelDescriptor) -> None:
-        canvas = self._canvas
-        tag = f"level:{descriptor.instance_id}"
-        selected = tag == self._selected_id
-        color = self._colors["accent"] if selected else self._colors["ink_2"]
-        if descriptor.bounds is not None:
-            x, y, width, height = descriptor.bounds
-            left, top = self._camera.project((x, y + height))
-            right, bottom = self._camera.project((x + width, y))
-            outline = canvas.create_rectangle(
-                left,
-                top,
-                right,
-                bottom,
-                outline=color,
-                width=2 if selected else 1,
-                fill=self._colors["panel_bg"],
-                stipple="gray50",
-                tags=("world", tag, f"world:{tag}"),
-            )
-            self._track_world_item(tag, outline, "level-outline")
-        origin_x, origin_y = self._camera.project(descriptor.origin)
-        origin_item = canvas.create_oval(
-            origin_x - 4,
-            origin_y - 4,
-            origin_x + 4,
-            origin_y + 4,
-            fill=color,
-            outline=color,
-            tags=("world", tag, f"world:{tag}"),
-        )
-        self._track_world_item(tag, origin_item, "level-origin")
-        title = descriptor.instance_id
-        if descriptor.instance_id == world.initial_level_id:
-            title = f"★ {title}"
-            initial_item = canvas.create_text(
-                origin_x,
-                origin_y,
-                text="★",
-                fill=self._colors["success"],
-                tags=("world", f"world:initial:{descriptor.instance_id}"),
-            )
-            self._track_world_item(tag, initial_item, "level-initial")
-        label_item = canvas.create_text(
-            origin_x + 8,
-            origin_y - 12,
-            text=title,
-            anchor="sw",
-            fill=color,
-            font=("TkDefaultFont", 9, "bold"),
-            tags=("world", f"world:{tag}"),
-        )
-        self._track_world_item(tag, label_item, "level-label")
-        self._bind_world_selection(tag)
-
-    def _track_world_item(self, identifier: str, item_id: int, kind: str) -> None:
-        self._world_style_items.setdefault(identifier, []).append((item_id, kind))
-
-    def _restyle_world_items(self, identifier: str, *, selected: bool) -> None:
-        color = (
-            self._colors["accent"]
-            if selected
-            else self._colors["ink_3"]
-            if identifier.startswith("connection:")
-            else self._colors["ink_2"]
-        )
-        for item_id, kind in self._world_style_items.get(identifier, ()):
-            if kind == "level-outline":
-                self._canvas.itemconfigure(item_id, outline=color, width=2 if selected else 1)
-            elif kind == "level-origin":
-                self._canvas.itemconfigure(item_id, fill=color, outline=color)
-            elif kind in {"level-label", "connection-label"}:
-                self._canvas.itemconfigure(item_id, fill=color)
-            elif kind == "connection-line":
-                self._canvas.itemconfigure(item_id, fill=color, width=2 if selected else 1)
-
-    def _bind_world_selection(self, tag: str) -> None:
-        if self._on_entity_click is not None:
-            self._canvas.tag_bind(
-                tag,
-                "<Button-1>",
-                lambda _event, identifier=tag: self._on_entity_click((identifier,), False)
-                or "break",
-            )
-
     def _draw_grid(self, w: int, h: int) -> None:
         canvas = self._canvas
         c = self._colors
@@ -772,6 +651,10 @@ class ViewportPanel(tk.Frame):
         self._canvas.delete("collider")
         self._canvas.delete("selection")
         self._canvas.delete("camera_overlay")
+        if self._light_gizmo is not None:
+            for item in self._light_gizmo.items:
+                self._canvas.delete(item)
+            self._light_gizmo = None
 
     def _draw_render_item(
         self,
@@ -1090,10 +973,3 @@ class ViewportPanel(tk.Frame):
             if x0 <= sx <= x1 and y0 <= sy <= y1:
                 hits.append(entity.entity_id)
         self._on_entity_click(tuple(hits), event_extends_selection(event))
-
-
-def _descriptor_center(descriptor: LevelDescriptor) -> tuple[float, float]:
-    if descriptor.bounds is None:
-        return descriptor.origin
-    x, y, width, height = descriptor.bounds
-    return (x + width / 2.0, y + height / 2.0)

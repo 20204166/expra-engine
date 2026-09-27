@@ -19,6 +19,7 @@ Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
@@ -94,7 +95,7 @@ class CanvasModulateComponent(Component):
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "CanvasModulateComponent":
+    def from_dict(cls, data: dict[str, Any]) -> CanvasModulateComponent:
         return cls(
             data.get("color", (1.0, 1.0, 1.0, 1.0)),
             enabled=bool(data.get("enabled", True)),
@@ -120,7 +121,11 @@ class CanvasModulation:
         return self.source_entity_id is not None
 
 
-def resolve_canvas_modulation(scene: Scene) -> CanvasModulation:
+def resolve_canvas_modulation(
+    scene: Scene,
+    *,
+    entity_ids: Iterable[str] | None = None,
+) -> CanvasModulation:
     """Resolve the active modulation without mutating scene or render state.
 
     Selection follows scene insertion order so multiple components never create
@@ -131,10 +136,23 @@ def resolve_canvas_modulation(scene: Scene) -> CanvasModulation:
     if not isinstance(scene, Scene):
         raise TypeError("scene must be a Scene")
 
+    eligible_ids: frozenset[str] | None = None
+    if entity_ids is not None:
+        if isinstance(entity_ids, (str, bytes)):
+            raise TypeError("entity_ids must be an iterable of Entity ID strings")
+        try:
+            eligible_ids = frozenset(entity_ids)
+        except TypeError as exc:
+            raise TypeError("entity_ids must be an iterable of Entity ID strings") from exc
+        if any(not isinstance(entity_id, str) for entity_id in eligible_ids):
+            raise TypeError("entity_ids must contain only strings")
+
     selected: tuple[str, CanvasModulateComponent] | None = None
     duplicates = 0
 
     for entity in scene.entities:
+        if eligible_ids is not None and entity.entity_id not in eligible_ids:
+            continue
         if not entity.enabled:
             continue
         component = entity.get_component(CanvasModulateComponent)

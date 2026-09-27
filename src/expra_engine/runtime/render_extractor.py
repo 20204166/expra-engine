@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 
-from expra_engine.core.component import TransformComponent
 from expra_engine.core.entity import Entity
 from expra_engine.core.scene import Scene
 from expra_engine.runtime.animated_sprite_2d import (
@@ -12,8 +11,12 @@ from expra_engine.runtime.animated_sprite_2d import (
     AnimatedSpritePlayer2D,
 )
 from expra_engine.runtime.canvas_effects import resolve_canvas_modulation
+from expra_engine.runtime.lighting_2d import Light2DComponent
+from expra_engine.runtime.material_component import MaterialComponent
+from expra_engine.runtime.material_lighting import MaterialLightResponse
 from expra_engine.runtime.rendering import (
     Color,
+    LightDescriptor,
     MaterialDescriptor,
     PrimitiveDescriptor,
     RenderFrame,
@@ -41,45 +44,24 @@ __all__ = ("extract_render_frame",)
 
 
 def _transform(
+    scene: Scene,
     entity: Entity,
-    entities: dict[str, Entity],
-    active: set[str],
     interpolator: TransformInterpolator | None = None,
     interpolation_fraction: float = 0.0,
 ) -> Transform:
-    if entity.entity_id in active:
-        raise ValueError("cyclic entity hierarchy")
-    active.add(entity.entity_id)
     if interpolator is not None:
         try:
             result = interpolator.sample_world(entity.entity_id, interpolation_fraction)
         except KeyError:
             pass
         else:
-            active.remove(entity.entity_id)
             return result
-    local = entity.get_component(TransformComponent)
-    result = (
-        Transform(
-            position=(local.x, local.y, 0.0),
-            rotation=local.rotation,
-            scale=(local.scale_x, local.scale_y, 1.0),
-        )
-        if local is not None and local.enabled
-        else Transform()
+    pose = scene.world_transform(entity.entity_id)
+    return Transform(
+        position=(pose.position[0], pose.position[1], 0.0),
+        rotation=pose.rotation,
+        scale=(pose.scale[0], pose.scale[1], 1.0),
     )
-    if entity.parent_id is not None:
-        parent = entities.get(entity.parent_id)
-        if parent is not None:
-            result = _transform(
-                parent,
-                entities,
-                active,
-                interpolator,
-                interpolation_fraction,
-            ).compose(result)
-    active.remove(entity.entity_id)
-    return result
 
 
 def _item(
@@ -87,6 +69,7 @@ def _item(
     visual: object,
     transform: Transform,
     player: AnimatedSpritePlayer2D | None = None,
+    light_response: MaterialLightResponse | None = None,
 ) -> RenderItem:
     if isinstance(visual, PrimitiveComponent):
         if visual.kind not in {"point", "rectangle", "circle", "rounded_rectangle"}:
@@ -99,6 +82,7 @@ def _item(
             color=color,
             outline=visual.outline,
             outline_width=visual.outline_width,
+            light_response=light_response,
         )
         payload = visual.to_dict()
         layer = visual.layer
@@ -112,6 +96,7 @@ def _item(
             tint=color,
             texture_id=visual.asset,
             source_region=visual.region,
+            light_response=light_response,
         )
         payload = visual.to_dict()
         layer = visual.layer
@@ -125,6 +110,7 @@ def _item(
         material = MaterialDescriptor(
             texture_id=view.asset_id,
             source_region=view.region,
+            light_response=light_response,
         )
         payload = visual.to_dict()
         layer = view.layer
@@ -133,7 +119,7 @@ def _item(
             raise ValueError("invalid text")
         primitive = PrimitiveDescriptor("text", (visual.size, visual.size))
         color = visual.color
-        material = MaterialDescriptor(color=color, tint=color)
+        material = MaterialDescriptor(color=color, tint=color, light_response=light_response)
         payload = visual.to_dict()
         layer = visual.layer
     else:
@@ -195,26 +181,48 @@ def extract_render_frame(
     interpolator: TransformInterpolator | None = None,
     interpolation_fraction: float = 0.0,
     animated_players: Mapping[AnimatedSprite2DComponent, AnimatedSpritePlayer2D] | None = None,
+    modulation_entity_ids: Iterable[str] | None = None,
 ) -> RenderFrame:
     """Convert registered scene visuals into backend-neutral render data."""
-    entities = {entity.entity_id: entity for entity in scene.entities}
     items: list[RenderItem] = []
+    lights: list[LightDescriptor] = []
     submissions: list[object] = []
     any_effect = False
+    camera_lighting_enabled = scene.camera.get("lighting_enabled", True)
+    lighting_enabled = camera_lighting_enabled if type(camera_lighting_enabled) is bool else True
     for entity in scene.entities:
         if not entity.enabled:
             continue
         try:
             transform = _transform(
+                scene,
                 entity,
-                entities,
-                set(),
                 interpolator,
                 interpolation_fraction,
             )
         except (TypeError, ValueError, OverflowError):
             continue
         for visual in entity.components:
+            if isinstance(visual, Light2DComponent):
+                if not visual.enabled or not visual.visible:
+                    continue
+                try:
+                    lights.append(
+                        LightDescriptor(
+                            entity.entity_id,
+                            visual.kind,
+                            transform.position,
+                            visual.color,
+                            visual.energy,
+                            visual.radius * max(abs(transform.scale[0]), abs(transform.scale[1])),
+                            visual.falloff,
+                            direction_degrees=transform.rotation,
+                            cone_angle=visual.cone_angle,
+                        )
+                    )
+                except (TypeError, ValueError, OverflowError):
+                    continue
+                continue
             if isinstance(
                 visual,
                 (PrimitiveComponent, SpriteComponent, TextComponent, AnimatedSprite2DComponent),
@@ -226,7 +234,15 @@ def extract_render_frame(
                         entity,
                         visual,
                         transform,
-                        animated_players.get(visual) if animated_players else None,
+                        animated_players.get(visual)
+                        if animated_players and isinstance(visual, AnimatedSprite2DComponent)
+                        else None,
+                        (
+                            material.response
+                            if (material := entity.get_component(MaterialComponent)) is not None
+                            and material.enabled
+                            else None
+                        ),
                     )
                 except (TypeError, ValueError, OverflowError):
                     continue
@@ -274,6 +290,8 @@ def extract_render_frame(
     return RenderFrame(
         tuple(items),
         elapsed=elapsed,
-        modulation=resolve_canvas_modulation(scene).color,
+        modulation=resolve_canvas_modulation(scene, entity_ids=modulation_entity_ids).color,
         submissions=tuple(submissions) if any_effect else (),
+        lights=tuple(lights),
+        lighting_enabled=lighting_enabled,
     )

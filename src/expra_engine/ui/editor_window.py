@@ -15,10 +15,9 @@ Background work delivers results through TkDeliveryQueue → AppCoordinator
 from __future__ import annotations
 
 import contextlib
-import json
 import logging
 import tkinter as tk
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
 from tkinter import messagebox, simpledialog
@@ -31,14 +30,14 @@ from expra_engine.coordinators.app_coordinator import AppCoordinator
 from expra_engine.coordinators.button_coordinator import ButtonCoordinator
 from expra_engine.coordinators.ui_coordinator import RenderIntent, UICoordinator
 from expra_engine.core.component import TransformComponent, registered_component_types
+from expra_engine.core.document_kind import DocumentKind
 from expra_engine.core.engine import Engine, EngineRunState
-from expra_engine.core.project import Project
 from expra_engine.core.scene import Scene
+from expra_engine.editor.active_document import ActiveDocument
 from expra_engine.editor.builtin_features import build_builtin_features
 from expra_engine.editor.commands import (
     AddComponentCommand,
     Command,
-    CommandStack,
     CreateEntityCommand,
     DeleteEntityCommand,
     RenameEntityCommand,
@@ -47,7 +46,6 @@ from expra_engine.editor.commands import (
     TransformEntityCommand,
     apply_component_change,
     delete_selection,
-    drop_asset_on_viewport,
     duplicate_selection,
     remove_component,
     reparent_selection_to,
@@ -60,12 +58,14 @@ from expra_engine.editor.contributions import (
     ShortcutRegistry,
 )
 from expra_engine.editor.delivery import TkDeliveryQueue
+from expra_engine.editor.document_actions import EditorDocumentSurface
 from expra_engine.editor.export_dialog import ExportDialog
 from expra_engine.editor.preferences import PreferencesStore
 from expra_engine.editor.project_workflow import ProjectWorkflow
 from expra_engine.editor.runtime_preview import RuntimePreviewLoop
 from expra_engine.editor.script_tools import attach_script, create_behaviour_script
 from expra_engine.editor.window_placement import WindowGeometry
+from expra_engine.editor.world_authoring import WorldEditorActionsMixin
 from expra_engine.observability import ObservabilityWatcher
 from expra_engine.runtime.input import PhysicalInput
 from expra_engine.runtime.script_component import ScriptComponent
@@ -99,17 +99,17 @@ _PREFERENCES_PATH = Path.home() / ".expra" / "preferences.json"
 _VIEWPORT_CAMERA_SAVE_DEBOUNCE_MS = 400
 
 
-class EditorWindow:
+class EditorWindow(EditorDocumentSurface, WorldEditorActionsMixin):
     """Root editor window."""
 
     def __init__(self, engine: Engine, *, theme: str = "bootstrap-dark") -> None:
         self._engine = engine
+        self._active_document = ActiveDocument()
         self._is_closing = False
         self._pending_timer_ids: set[str] = set()
         self._sash_after_id: str | None = None
         self._autosave_after_id: str | None = None
         self._viewport_camera_save_after_id: str | None = None
-        self._last_save_path: Path | None = None
         self._preferences_path = _PREFERENCES_PATH
         self._preferences_store = PreferencesStore()
         self._preferences = self._preferences_store.load(self._preferences_path)
@@ -171,10 +171,8 @@ class EditorWindow:
             pending_ids=self._pending_timer_ids,
             logger=LOGGER,
         )
-        self._selected_ids: tuple[str, ...] = ()
         self._render_generations: dict[str, int] = {"inspector": 0}
         self._render_owners: dict[str, str | None] = {"inspector": None}
-        self._command_stack: CommandStack = CommandStack()
         self._project_workflow = ProjectWorkflow(self)
         self._runtime_preview = RuntimePreviewLoop(
             self._root,
@@ -259,6 +257,9 @@ class EditorWindow:
             actions=self._actions,
             on_select=self._on_hierarchy_select,
             on_create=self._on_hierarchy_create,
+            on_add_level=self._act_add_world_level,
+            on_create_connection=self._act_create_world_connection,
+            on_open_level=self._open_world_level,
             on_delete=self._on_hierarchy_delete,
             on_reparent=lambda ids, target: reparent_selection_to(self, ids, target),
         )
@@ -276,7 +277,7 @@ class EditorWindow:
             observer=self._observer,
             colors=self._colors,
             on_open=self._on_asset_open,
-            on_drop=lambda entry, x, y: drop_asset_on_viewport(self, entry, x, y),
+            on_drop=self._on_asset_drop,
         )
         self._assets.pack(fill="both", expand=True)
         self._hierarchy_host = hierarchy_host
@@ -319,6 +320,9 @@ class EditorWindow:
             on_add_component=self._on_add_component,
             on_component_change=lambda *args: apply_component_change(self, *args),
             on_remove_component=lambda *args: remove_component(self, *args),
+            on_world_level_placement=self._on_world_level_placement,
+            on_world_set_initial_level=self._on_world_set_initial_level,
+            on_world_remove_item=self._on_world_remove_item,
         )
         self._inspector.pack(fill="both", expand=True)
         self._inspector_host = insp_frame
@@ -333,6 +337,15 @@ class EditorWindow:
         self._assets.refresh()
 
     def _on_asset_open(self, entry: Any) -> None:
+        project = self._engine.project
+        if project is not None and entry.kind in {"Scene", "Level", "World"}:
+            try:
+                relative = entry.path.resolve().relative_to(project.path.resolve()).as_posix()
+            except ValueError:
+                self._console.log("[Assets] Document is outside the current project", level="error")
+                return
+            self._project_workflow.open_document(relative)
+            return
         if entry.logical_id is not None:
             self._console.log(f"[Assets] Open: {entry.logical_id}", level="info")
 
@@ -416,6 +429,7 @@ class EditorWindow:
 
         file_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="File", menu=file_menu)
+        self._file_menu = file_menu
         self._recent_menu = tk.Menu(file_menu, tearoff=0)
         file_menu.add_cascade(label="Open Recent", menu=self._recent_menu)
         self._populate_recent_projects()
@@ -425,10 +439,20 @@ class EditorWindow:
         edit_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Edit", menu=edit_menu)
         self._edit_menu = edit_menu
+        view_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="View", menu=view_menu)
+        self._preview_lighting_var = tk.BooleanVar(master=self._root, value=True)
+        view_menu.add_checkbutton(
+            label="Preview Lighting",
+            variable=self._preview_lighting_var,
+            command=self._act_preview_lighting_changed,
+        )
         MenuFactory({"File": file_menu, "Edit": edit_menu}).build(
             self._contributions.menu_contributions(),
             self._actions,
         )
+        self._save_menu_index = file_menu.index("Save Scene")
+        self._save_as_menu_index = file_menu.index("Save Scene As...")
 
     def _register_render_targets(self) -> None:
         self._render_targets.register("hierarchy", self._render_hierarchy)
@@ -440,10 +464,24 @@ class EditorWindow:
         self._hierarchy.render(intent.payload)
 
     def _render_inspector(self, intent: RenderIntent) -> None:
+        if self._editing_world_document():
+            self._inspector.render_world(
+                self._active_document.document,
+                self._selected_id,
+            )
+            return
         self._inspector.render(intent.payload)
 
     def _render_toolbar(self, _intent: RenderIntent) -> None:
         self._update_play_pause_state()
+
+    def _act_preview_lighting_changed(self) -> None:
+        """Refresh the edit viewport without changing authored camera settings."""
+        self._request_render(
+            "viewport",
+            (self._engine.active_scene, tuple(self._selected_ids)),
+            priority=10,
+        )
 
     def _act_export_game(self) -> None:
         if self._engine.project is None:
@@ -510,62 +548,6 @@ class EditorWindow:
     # ------------------------------------------------------------------
     # Project and scene actions
     # ------------------------------------------------------------------
-
-    def _act_new_scene(self) -> None:
-        project = self._engine.project
-        if project is not None:
-            name = simpledialog.askstring("New Scene", "Scene name:", parent=self._root)
-            if not name:
-                return
-            relative = f"scenes/{Path(name).stem}.json"
-            scene = Scene(name)
-            project.register_scene_path(relative)
-            self._last_save_path = project.path / relative
-        else:
-            scene = Scene("New Scene")
-        self._engine.set_scene(scene)
-        self._set_selection_state(())
-        self._console.log(f"[Editor] Created scene: {scene.name}")
-        self._present_all()
-
-    def _act_new_project(self) -> None:
-        self._project_workflow.new_project()
-
-    def _act_open_project(self) -> None:
-        self._project_workflow.open_project()
-
-    def _act_open_project_manifest(self) -> None:
-        self._project_workflow.open_project_manifest()
-
-    def _act_import_asset(self) -> None:
-        self._project_workflow.import_assets()
-
-    def _act_configure_input(self) -> None:
-        self._project_workflow.configure_input()
-
-    def _act_close_project(self) -> None:
-        self._project_workflow.close_project()
-
-    def _open_loaded_project(self, project: Project) -> None:
-        self._project_workflow.open_loaded(project)
-
-    def _act_save_scene(self) -> None:
-        self._project_workflow.save_scene()
-
-    def _act_save_scene_silent(self) -> None:
-        workflow = getattr(self, "_project_workflow", None)
-        if workflow is not None:
-            workflow.save_scene_silent()
-            return
-        if (
-            self._last_save_path is not None
-            and self._engine.edit_scene is not None
-            and self._engine.project is None
-        ):
-            self._last_save_path.write_text(
-                json.dumps(self._engine.edit_scene.to_dict(), indent=2), encoding="utf-8"
-            )
-
     def _start_autosave(self) -> None:
         """Schedule recurring silent saves using the configured preference."""
         interval_ms = max(1, int(self._preferences.autosave_interval_ms))
@@ -592,12 +574,6 @@ class EditorWindow:
                 label=project,
                 command=self._recent_project_command(project),
             )
-
-    def _recent_project_command(self, project: str) -> Callable[[], None]:
-        return lambda: self._act_open_recent(project)
-
-    def _act_open_recent(self, project: str) -> None:
-        self._project_workflow.open_recent(project)
 
     def _act_add_entity(self) -> None:
         if self._engine.run_state != EngineRunState.EDIT:
@@ -680,11 +656,6 @@ class EditorWindow:
             self._console.log(f"[Editor] Removed script from {entity.name}")
             self._present_all()
 
-    @property
-    def _selected_id(self) -> str | None:
-        """Primary selected entity id, or None -- read-only alias for callers unaware of multi-select."""
-        return self._selected_ids[0] if self._selected_ids else None
-
     def _on_hierarchy_select(self, ids: Sequence[str]) -> None:
         """Central selection setter: dedupes, drops dead ids, updates dependent action state."""
         scene, entity = self._set_selection_state(ids)
@@ -692,6 +663,8 @@ class EditorWindow:
 
     def _set_selection_state(self, ids: Sequence[str]) -> tuple[Scene | None, Any | None]:
         """Set the canonical selection and its action state without presenting it."""
+        if self._apply_world_selection(ids):
+            return None, None
         scene = self._engine.active_scene
         valid = tuple(
             dict.fromkeys(i for i in ids if scene is None or scene.find_entity(i) is not None)
@@ -884,26 +857,29 @@ class EditorWindow:
 
     def _update_play_pause_state(self) -> None:
         state = self._engine.run_state
+        entity_editable = (
+            state == EngineRunState.EDIT and self._active_document.kind is not DocumentKind.WORLD
+        )
         self._actions.set_enabled("play", state != EngineRunState.PLAY)
         self._actions.set_enabled("pause", state == EngineRunState.PLAY)
         self._actions.set_enabled("stop", state != EngineRunState.EDIT)
-        self._actions.set_enabled("add_entity", state == EngineRunState.EDIT)
+        self._actions.set_enabled("add_entity", entity_editable)
+        self._actions.set_enabled("delete_entity", entity_editable and bool(self._selected_ids))
         self._actions.set_enabled(
-            "delete_entity", state == EngineRunState.EDIT and bool(self._selected_ids)
-        )
-        self._actions.set_enabled(
-            "duplicate_selection", state == EngineRunState.EDIT and bool(self._selected_ids)
+            "duplicate_selection", entity_editable and bool(self._selected_ids)
         )
         self._update_project_actions()
 
     def _update_project_actions(self) -> None:
         has_project = self._engine.project is not None
+        self._actions.set_enabled("save_document", has_project)
         self._actions.set_enabled("save_scene", has_project)
         self._actions.set_enabled("close_project", has_project)
         self._actions.set_enabled("new_script", has_project)
         self._actions.set_enabled("import_asset", has_project)
         self._actions.set_enabled("configure_input", has_project)
         self._actions.set_enabled("editor.export_game", has_project)
+        self._refresh_typed_save_labels()
 
     def _create_default_scene(self) -> None:
         scene = Scene("Sample Scene")
@@ -912,6 +888,7 @@ class EditorWindow:
         entity2 = scene.create_entity("Player")
         entity2.add_component(TransformComponent(x=80, y=-40))
         self._engine.set_scene(scene)
+        self._active_document.open(scene)
         self._console.log("[Editor] Expra Engine started")
         self._console.log(f"[Editor] Loaded scene: {scene.name}")
         self._present_all()
@@ -965,6 +942,12 @@ class EditorWindow:
         ids = tuple(selected_ids) if selected_ids else ()
         primary_id = ids[0] if ids else None
         runtime_preview = self._engine.run_state in (EngineRunState.PLAY, EngineRunState.PAUSED)
+        world_system = self._engine.world_streaming_system
+        _ws_active = runtime_preview and world_system is not None
+        transition_alpha = world_system.transition_alpha if _ws_active else 0.0
+        if not runtime_preview and self._editing_world_document():
+            self._viewport.render_world(self._active_document.document, primary_id)
+            return
         if (
             intent.components == frozenset({"selection"})
             and scene is self._viewport._scene
@@ -980,6 +963,9 @@ class EditorWindow:
             interpolator=self._engine.transform_interpolator if runtime_preview else None,
             interpolation_fraction=self._engine.interpolation_fraction if runtime_preview else 0.0,
             animated_players=self._engine.animated_sprite_system.players,
+            world_transition_alpha=transition_alpha,
+            preview_lighting=(None if runtime_preview else self._preview_lighting_var.get()),
+            modulation_entity_ids=world_system.environment_entity_ids if _ws_active else None,
         )
 
     def _present_selection(self, scene: Scene | None, entity: Any) -> None:
@@ -996,8 +982,13 @@ class EditorWindow:
 
     def _present_all(self) -> None:
         scene, entity = self._set_selection_state(self._selected_ids)
+        hierarchy_document = (
+            self._active_document.document
+            if self._engine.run_state is EngineRunState.EDIT
+            else self._engine.active_scene
+        )
         self._ui.begin_batch()
-        self._request_render("hierarchy", scene, priority=20)
+        self._request_render("hierarchy", hierarchy_document, priority=20)
         self._request_render("inspector", entity, owner_id=self._selected_id, priority=30)
         self._request_render("viewport", (scene, self._selected_ids), priority=10)
         self._request_render("toolbar", self._engine.run_state, priority=40)

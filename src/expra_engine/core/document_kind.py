@@ -14,3 +14,4 @@ class DocumentKind(StrEnum):
 
     SCENE = "scene"
     LEVEL = "level"
+    WORLD = "world"

@@ -31,13 +31,14 @@ def _generate(output_dir: Path) -> None:
             str(SCHEMA_DIR / "common.proto"),
             str(SCHEMA_DIR / "scene.proto"),
             str(SCHEMA_DIR / "level.proto"),
+            str(SCHEMA_DIR / "world.proto"),
         )
     )
     if result != 0:
         raise SystemExit(result)
     # grpc_tools emits sibling imports as top-level imports. Checked-in
     # bindings live in a package, so normalize those imports deterministically.
-    for module in ("scene_pb2.py", "level_pb2.py"):
+    for module in ("scene_pb2.py", "level_pb2.py", "world_pb2.py"):
         path = output_dir / module
         text = path.read_text(encoding="utf-8")
         text = text.replace(
@@ -45,6 +46,9 @@ def _generate(output_dir: Path) -> None:
         )
         text = text.replace(
             "import scene_pb2 as scene__pb2", "from . import scene_pb2 as scene__pb2"
+        )
+        text = text.replace(
+            "import world_pb2 as world__pb2", "from . import world_pb2 as world__pb2"
         )
         path.write_text(text, encoding="utf-8")
 

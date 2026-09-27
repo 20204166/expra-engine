@@ -408,6 +408,7 @@ def _renderer_capabilities(resource_provider: Any) -> dict:
         "screen_capture": caps.screen_capture,
         "screen_texture": caps.screen_texture,
         "screen_texture_mipmaps": caps.screen_texture_mipmaps,
+        "lighting_2d": caps.lighting_2d,
     }
 
 
@@ -447,6 +448,21 @@ def _render_item_to_dict(item: Any) -> dict:
         "phase": getattr(item.phase, "name", str(item.phase)),
         "layer": item.layer,
         "visible": item.visible,
+    }
+
+
+def _light_descriptor_to_dict(light: Any) -> dict:
+    """Serialize renderer-neutral light metadata without backend objects."""
+    return {
+        "entity_id": light.entity_id,
+        "kind": light.kind,
+        "position": list(light.position),
+        "color": _color_to_list(light.color),
+        "energy": light.energy,
+        "radius": light.radius,
+        "falloff": light.falloff,
+        "direction_degrees": light.direction_degrees,
+        "cone_angle": light.cone_angle,
     }
 
 
@@ -534,9 +550,12 @@ def op_render_inspect(req: dict) -> dict:
             "action": action,
             "executed_project_code": False,
             "item_count": len(frame.items),
+            "light_count": len(frame.lights),
+            "lighting_enabled": frame.lighting_enabled,
             "elapsed": frame.elapsed,
             "modulation": _color_to_list(frame.modulation),
             "items": [_render_item_to_dict(item) for item in frame.items],
+            "lights": [_light_descriptor_to_dict(light) for light in frame.lights],
         }
 
     if action == "plan":

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 from collections.abc import Callable
 from typing import Any
 
@@ -59,8 +60,13 @@ class PygameRuntime:
         self.camera = camera or OrthographicCamera()
         self.camera_target_id = camera_target_id
         self._camera_scene_id: str | None = None
+        self._camera_settings_fingerprint: str | None = None
+        self._world_camera_bounds: tuple[float, float, float, float] | None = None
+        self._camera_recenter_generation = 0
         self.ui_root = ui_root
         self.surface: Any | None = None
+        self._transition_overlay: Any | None = None
+        self._transition_overlay_size: tuple[int, int] | None = None
         self._keys: set[Any] = set()
         self._running = False
         self._context: RenderContext | None = None
@@ -104,6 +110,13 @@ class PygameRuntime:
                     self.stop()
                 self._sync_camera_target()
                 self.camera.update(dt)
+                world_system = getattr(self.engine, "world_streaming_system", None)
+                report_camera_view = getattr(world_system, "report_camera_view", None)
+                if callable(report_camera_view):
+                    report_camera_view(
+                        self.camera.position[:2],
+                        (self.camera.width, self.camera.height),
+                    )
                 if self.renderer is not None:
                     frame = (
                         self.frame_factory(self.engine, dt)
@@ -117,6 +130,7 @@ class PygameRuntime:
                             draw_ui(self.ui_root.draw_commands())
                 elif self.render_callback is not None:
                     self.render_callback(self.surface, self.engine)
+                self._draw_world_transition_overlay()
                 self.pygame.display.flip()
                 if self._running:
                     dt = self.clock.tick(self.frame_rate) / 1000.0
@@ -133,25 +147,74 @@ class PygameRuntime:
         viewport = self._context.viewport if self._context is not None else Viewport(0, 0, *self.size)
         return self.camera.unproject(point, viewport)
 
+    def _draw_world_transition_overlay(self) -> None:
+        """Present World FADE over the completed frame without renderer ownership."""
+        if self.surface is None:
+            return
+        world_system = getattr(self.engine, "world_streaming_system", None)
+        alpha = float(getattr(world_system, "transition_alpha", 0.0))
+        if alpha <= 0.0:
+            return
+        if self._transition_overlay is None or self._transition_overlay_size != self.size:
+            self._transition_overlay = self.pygame.Surface(self.size, self.pygame.SRCALPHA)
+            self._transition_overlay.fill((0, 0, 0))
+            self._transition_overlay_size = self.size
+        self._transition_overlay.set_alpha(round(min(1.0, alpha) * 255))
+        self.surface.blit(self._transition_overlay, (0, 0))
+
     def _sync_camera_target(self) -> None:
         scene = getattr(self.engine, "active_scene", None)
         if scene is None:
             return
-        if scene.scene_id != self._camera_scene_id:
+        settings = getattr(scene, "camera", {})
+        try:
+            fingerprint = json.dumps(settings, sort_keys=True, separators=(",", ":"))
+        except (TypeError, ValueError):
+            fingerprint = repr(settings)
+        if scene.scene_id != self._camera_scene_id or fingerprint != self._camera_settings_fingerprint:
             self._camera_scene_id = scene.scene_id
-            settings = getattr(scene, "camera", {})
+            self._camera_settings_fingerprint = fingerprint
             if isinstance(settings, dict):
                 if hasattr(settings, "apply_to"):
                     settings.apply_to(self.camera)
                 else:
                     self.camera.apply_dict(settings)
                 self.camera_target_id = getattr(settings, "target_entity_id", None) or self.camera_target_id
+        world_system = getattr(self.engine, "world_streaming_system", None)
+        context = None
+        if world_system is not None:
+            context = getattr(world_system, "camera_context", None)
+            if context is not None:
+                if context.follow_target_entity_id is not None:
+                    self.camera_target_id = context.follow_target_entity_id
+                bounds = context.effective_bounds
+                if bounds != self._world_camera_bounds:
+                    if bounds is None:
+                        self.camera.clear_limits()
+                    else:
+                        self.camera.set_limits(*bounds)
+                    self._world_camera_bounds = bounds
+        elif getattr(self, "_world_camera_bounds", None) is not None:
+            self.camera.clear_limits()
+            self._world_camera_bounds = None
+            self._camera_recenter_generation = 0
         if self.camera_target_id is None:
             return
         target = scene.find_entity(self.camera_target_id)
-        transform = target.get_component(TransformComponent) if target is not None else None
-        if target is not None and target.enabled and transform is not None and transform.enabled:
-            self.camera.target_position = (transform.x, transform.y)
+        if target is None or not target.enabled:
+            return
+        transform = target.get_component(TransformComponent)
+        if transform is not None and transform.enabled:
+            self.camera.target_position = scene.world_transform(target.entity_id).position
+            recenter_generation = getattr(context, "recenter_generation", 0)
+            if recenter_generation != getattr(self, "_camera_recenter_generation", 0):
+                target_position = self.camera.target_position
+                self.camera.position = (
+                    target_position[0],
+                    target_position[1],
+                    self.camera.position[2],
+                )
+                self._camera_recenter_generation = recenter_generation
 
     def _poll_events(self) -> None:
         for event in self.pygame.event.get():

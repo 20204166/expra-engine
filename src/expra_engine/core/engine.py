@@ -39,10 +39,12 @@ from expra_engine.runtime.transform_interpolation import TransformInterpolator
 
 if TYPE_CHECKING:
     from expra_engine.core.project import Project
+    from expra_engine.core.world import World
     from expra_engine.runtime.behaviour_system import BehaviourSystem
     from expra_engine.runtime.clock import RuntimeClock
     from expra_engine.runtime.event_queue import EventQueue
     from expra_engine.runtime.system import RuntimeSystem
+    from expra_engine.runtime.world_streaming import WorldStreamingSystem
 
 
 class EngineRunState(Enum):
@@ -80,6 +82,9 @@ class Engine:
         self._state = EngineRunState.EDIT
         self._stop_in_progress = False
         self._project: Project | None = None
+        self._world: World | None = None
+        self._world_streaming_system: WorldStreamingSystem | None = None
+        self._world_lifecycle_errors: list[str] = []
         self._edit_scene: Scene | None = None
         self._runtime_scene: Scene | None = None
         self._last_update: float | None = None
@@ -134,6 +139,19 @@ class Engine:
     @property
     def project(self) -> Project | None:
         return self._project
+
+    @property
+    def world(self) -> World | None:
+        return self._world
+
+    @property
+    def world_streaming_system(self) -> WorldStreamingSystem | None:
+        return self._world_streaming_system
+
+    @property
+    def world_lifecycle_errors(self) -> tuple[str, ...]:
+        """Bounded cleanup/activation failures from Level system hooks."""
+        return tuple(self._world_lifecycle_errors)
 
     @property
     def active_scene(self) -> Scene | None:
@@ -221,9 +239,96 @@ class Engine:
         """Set the scene for editing. Resets any running play state first."""
         if self._state != EngineRunState.EDIT:
             self.stop()
+        if scene is not None and self._world_streaming_system is not None:
+            self.remove_system(self._world_streaming_system)
+            self._world_streaming_system.close()
+            self._world_streaming_system = None
+            self._world = None
         self._edit_scene = scene
         if self._project is not None and scene is not None:
             self._project.set_active_scene(scene)
+
+    def set_world(
+        self,
+        world: World,
+        *,
+        project: Project | None = None,
+        streaming_system: WorldStreamingSystem | None = None,
+        world_resource_path: str | None = None,
+    ) -> None:
+        """Configure the canonical World streaming owner for the next Play."""
+        from expra_engine.core.world import World as WorldDocument
+        from expra_engine.runtime.world_streaming import WorldStreamingSystem as StreamingSystem
+
+        if self._state is not EngineRunState.EDIT:
+            self.stop()
+        if not isinstance(world, WorldDocument):
+            raise TypeError("world must be a World document")
+        if streaming_system is not None and streaming_system.world != world:
+            raise ValueError("streaming system belongs to a different World")
+        previous = self._world_streaming_system
+        if previous is not None and previous is not streaming_system:
+            self.remove_system(previous)
+            previous.close()
+        system = streaming_system or StreamingSystem(
+            project,
+            world,
+            observer=self._observer,
+            world_resource_path=world_resource_path,
+        )
+        if project is not None:
+            self.set_project(project)
+        self._world = world
+        self._world_streaming_system = system
+        if system not in self._systems:
+            self._systems.insert(0, system)
+
+    def notify_world_level_activated(
+        self, level_id: str, entity_ids: tuple[str, ...]
+    ) -> None:
+        """Notify runtime owners after a Level's Entities enter the World Scene."""
+        world_scene = self.active_scene
+        if world_scene is None:
+            raise RuntimeError("World Level activation requires an active World Scene")
+        notified: list[RuntimeSystem] = []
+        try:
+            for system in tuple(self._systems):
+                system.on_world_level_activated(world_scene, level_id, entity_ids)
+                notified.append(system)
+        except Exception as error:
+            self._record_world_lifecycle_error("activation", level_id, error)
+            for system in reversed(notified):
+                with contextlib.suppress(Exception):
+                    system.on_world_level_deactivated(world_scene, level_id, entity_ids)
+            raise
+
+    def notify_world_level_deactivated(
+        self, level_id: str, entity_ids: tuple[str, ...]
+    ) -> None:
+        """Notify runtime owners before a Level's Entities leave the World Scene."""
+        world_scene = self.active_scene
+        if world_scene is None:
+            return
+        if self._eq is not None:
+            targets = tuple(
+                entity
+                for entity_id in entity_ids
+                if (entity := world_scene.find_entity(entity_id)) is not None
+            )
+            self._eq.discard_targets(targets)
+        for system in reversed(tuple(self._systems)):
+            try:
+                system.on_world_level_deactivated(world_scene, level_id, entity_ids)
+            except Exception as error:
+                self._record_world_lifecycle_error("deactivation", level_id, error)
+
+    def _record_world_lifecycle_error(
+        self, phase: str, level_id: str, error: Exception
+    ) -> None:
+        self._world_lifecycle_errors.append(
+            f"{phase} {level_id}: {type(error).__name__}: {str(error)[:160]}"
+        )
+        del self._world_lifecycle_errors[:-64]
 
     def add_system(self, system: RuntimeSystem) -> None:
         """Register a RuntimeSystem that will receive events during PLAY."""
@@ -241,9 +346,13 @@ class Engine:
     def play(self) -> bool:
         """Enter PLAY state. Returns True if state changed."""
         if self._state == EngineRunState.EDIT:
-            behaviour_factories = self._capture_behaviour_factories()
-            runtime_scene = self._copy_scene(self._edit_scene)
-            self._attach_runtime_behaviours(runtime_scene, behaviour_factories)
+            if self._world_streaming_system is not None:
+                behaviour_factories = {}
+                runtime_scene = self._world_streaming_system.runtime_scene
+            else:
+                behaviour_factories = self._capture_behaviour_factories()
+                runtime_scene = self._copy_scene(self._edit_scene)
+                self._attach_runtime_behaviours(runtime_scene, behaviour_factories)
             self._runtime_scene = runtime_scene
             self._state = EngineRunState.PLAY
             self._quit_requested = False

@@ -676,6 +676,23 @@ class Audio2DSystem(RuntimeSystem):
             self._remove_scene(scene)
         self._world = None
 
+    def on_world_level_activated(
+        self, world_scene: Scene, _level_id: str, _entity_ids: tuple[str, ...]
+    ) -> None:
+        self._activate_scene(world_scene, start_autoplay=True)
+
+    def on_world_level_deactivated(
+        self, world_scene: Scene, _level_id: str, entity_ids: tuple[str, ...]
+    ) -> None:
+        for entity_id in entity_ids:
+            entity = world_scene.find_entity(entity_id)
+            if entity is None:
+                continue
+            for component in entity.get_components(AudioStreamPlayer2DComponent):
+                state = self._states.pop((id(world_scene), id(component)), None)
+                if state is not None:
+                    state.stop()
+
     def on_update(self, event: Update, _signal: Any) -> None:
         observer = self._observer
         token = observer.begin(_AUDIO_TARGET) if observer is not None else None

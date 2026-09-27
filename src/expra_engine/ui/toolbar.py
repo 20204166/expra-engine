@@ -63,17 +63,34 @@ def build_toolbar(
             ToolbarContribution("save_scene", "Save", group="scene"),
         )
     previous_group: str | None = None
+    action_buttons: dict[str, Any] = {}
     for contribution in contributions:
         if previous_group is not None and contribution.group != previous_group:
             sep = ttk.Separator(inner, orient="vertical")
             sep.pack(side="left", fill="y", padx=6, pady=2)
-        button = ttk.Button(
-            inner,
-            text=contribution.label,
-            style=toolbar_style_for_role(contribution.style_role),
-        )
+        style = toolbar_style_for_role(contribution.style_role)
+        if contribution.menu_items:
+            button = ttk.Menubutton(inner, text=contribution.label, style=style)
+            menu = tk.Menu(button, tearoff=False)
+            for item in contribution.menu_items:
+                menu.add_command(
+                    label=item.label,
+                    command=lambda action_id=item.action_id: actions.dispatch(action_id),
+                )
+            button.configure(menu=menu)
+        else:
+            button = ttk.Button(
+                inner,
+                text=contribution.label,
+                style=style,
+            )
         button.pack(side="left", padx=2)
-        actions.bind(button, contribution.action_id)
+        if contribution.action_id is not None:
+            actions.bind(button, contribution.action_id)
+            action_buttons[contribution.action_id] = button
+        else:
+            action_buttons[contribution.label] = button
         previous_group = contribution.group
 
+    frame.action_buttons = action_buttons
     return frame

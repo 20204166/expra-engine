@@ -145,6 +145,229 @@ class RuntimePreviewLoopTests(unittest.TestCase):
         self.assertEqual(rendered, [])
         self.assertIsNone(loop._after_id)
 
+    def test_tick_failure_stops_engine_and_surfaces_error(self) -> None:
+        class LiveRoot:
+            def __init__(self) -> None:
+                self.scheduled: list[tuple[int, object]] = []
+
+            def after(self, delay: int, callback: object) -> str:
+                self.scheduled.append((delay, callback))
+                return "timer"
+
+            def winfo_exists(self) -> bool:
+                return True
+
+        class FailingEngine:
+            run_state = EngineRunState.PLAY
+
+            def __init__(self) -> None:
+                self.stopped = False
+
+            def tick(self) -> None:
+                raise RuntimeError("behaviour failed")
+
+            def stop(self) -> None:
+                self.stopped = True
+                self.run_state = EngineRunState.EDIT
+
+        engine = FailingEngine()
+        root = LiveRoot()
+        loop = RuntimePreviewLoop(cast(Any, root), cast(Any, engine), lambda: None)
+
+        with self.assertRaises(RuntimeError):
+            loop._tick()
+
+        self.assertTrue(engine.stopped)
+        self.assertEqual(engine.run_state, EngineRunState.EDIT)
+        self.assertIsNone(loop._after_id)
+        self.assertEqual(root.scheduled, [])
+
+    def test_tick_on_destroyed_root_stops_engine(self) -> None:
+        class DeadRoot:
+            def after(self, _delay: int, _callback: object) -> str:
+                return "unexpected-timer"
+
+            def winfo_exists(self) -> bool:
+                return False
+
+        class PlayEngine:
+            run_state = EngineRunState.PLAY
+
+            def __init__(self) -> None:
+                self.stopped = False
+                self.ticks = 0
+
+            def tick(self) -> None:
+                self.ticks += 1
+
+            def stop(self) -> None:
+                self.stopped = True
+                self.run_state = EngineRunState.EDIT
+
+        engine = PlayEngine()
+        loop = RuntimePreviewLoop(cast(Any, DeadRoot()), cast(Any, engine), lambda: None)
+
+        loop._tick()
+
+        self.assertTrue(engine.stopped)
+        self.assertEqual(engine.run_state, EngineRunState.EDIT)
+        self.assertEqual(engine.ticks, 0)
+        self.assertIsNone(loop._after_id)
+
+    def test_start_on_destroyed_root_stops_engine(self) -> None:
+        class DeadRoot:
+            def after(self, _delay: int, _callback: object) -> str:
+                raise tk.TclError("event loop is stopping")
+
+            def winfo_exists(self) -> bool:
+                return False
+
+        class PlayEngine:
+            run_state = EngineRunState.PLAY
+
+            def __init__(self) -> None:
+                self.stopped = False
+
+            def stop(self) -> None:
+                self.stopped = True
+                self.run_state = EngineRunState.EDIT
+
+        engine = PlayEngine()
+        loop = RuntimePreviewLoop(cast(Any, DeadRoot()), cast(Any, engine), lambda: None)
+
+        loop.start()
+
+        self.assertTrue(engine.stopped)
+        self.assertEqual(engine.run_state, EngineRunState.EDIT)
+        self.assertIsNone(loop._after_id)
+
+    def test_reschedule_failure_after_root_destruction_stops_engine(self) -> None:
+        class FlakyRoot:
+            def __init__(self) -> None:
+                self.after_attempted = False
+
+            def after(self, _delay: int, _callback: object) -> str:
+                self.after_attempted = True
+                raise tk.TclError("event loop is stopping")
+
+            def winfo_exists(self) -> bool:
+                return not self.after_attempted
+
+        class PlayEngine:
+            run_state = EngineRunState.PLAY
+
+            def __init__(self) -> None:
+                self.stopped = False
+
+            def tick(self) -> None:
+                pass
+
+            def stop(self) -> None:
+                self.stopped = True
+                self.run_state = EngineRunState.EDIT
+
+        engine = PlayEngine()
+        loop = RuntimePreviewLoop(cast(Any, FlakyRoot()), cast(Any, engine), lambda: None)
+
+        loop._tick()
+
+        self.assertTrue(engine.stopped)
+        self.assertEqual(engine.run_state, EngineRunState.EDIT)
+        self.assertIsNone(loop._after_id)
+
+    def test_fail_closed_records_engine_stopped(self) -> None:
+        class DeadRoot:
+            def after(self, _delay: int, _callback: object) -> str:
+                return "unexpected-timer"
+
+            def winfo_exists(self) -> bool:
+                return False
+
+        class PlayEngine:
+            run_state = EngineRunState.PLAY
+
+            def stop(self) -> bool:
+                self.run_state = EngineRunState.EDIT
+                return True
+
+            def tick(self) -> None:
+                pass
+
+        observer = ObservabilityWatcher()
+        engine = PlayEngine()
+        loop = RuntimePreviewLoop(
+            cast(Any, DeadRoot()), cast(Any, engine), lambda: None, observer=observer
+        )
+
+        loop._tick()
+
+        self.assertEqual(
+            observer.counter_value("editor:preview:fail_closed", "stopped"), 1
+        )
+        self.assertEqual(engine.run_state, EngineRunState.EDIT)
+
+    def test_fail_closed_records_nothing_when_engine_already_edit(self) -> None:
+        class DeadRoot:
+            def after(self, _delay: int, _callback: object) -> str:
+                return "unexpected-timer"
+
+            def winfo_exists(self) -> bool:
+                return False
+
+        class EditEngine:
+            run_state = EngineRunState.EDIT
+
+            def stop(self) -> bool:
+                return False
+
+            def tick(self) -> None:
+                pass
+
+        observer = ObservabilityWatcher()
+        loop = RuntimePreviewLoop(
+            cast(Any, DeadRoot()), cast(Any, EditEngine()), lambda: None, observer=observer
+        )
+
+        loop._tick()
+
+        self.assertEqual(
+            observer.counter_value("editor:preview:fail_closed", "stopped"), 0
+        )
+        self.assertEqual(
+            observer.event_count("editor:preview:fail_closed", "failure"), 0
+        )
+
+    def test_fail_closed_records_failure_when_stop_raises(self) -> None:
+        class DeadRoot:
+            def after(self, _delay: int, _callback: object) -> str:
+                return "unexpected-timer"
+
+            def winfo_exists(self) -> bool:
+                return False
+
+        class BrokenEngine:
+            run_state = EngineRunState.PLAY
+
+            def stop(self) -> bool:
+                raise RuntimeError("teardown failed")
+
+            def tick(self) -> None:
+                pass
+
+        observer = ObservabilityWatcher()
+        loop = RuntimePreviewLoop(
+            cast(Any, DeadRoot()), cast(Any, BrokenEngine()), lambda: None, observer=observer
+        )
+
+        loop._tick()  # must not raise despite stop() failing
+
+        self.assertEqual(
+            observer.event_count("editor:preview:fail_closed", "failure"), 1
+        )
+        self.assertEqual(
+            observer.counter_value("editor:preview:fail_closed", "stopped"), 0
+        )
+
 
 def test_inspector_value_conversion_uses_descriptor_rejection_policy() -> None:
     descriptor = PropertyDescriptor("x", "X", float, 0.0, minimum=-10.0, maximum=10.0)

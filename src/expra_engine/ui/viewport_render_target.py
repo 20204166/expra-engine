@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Iterable
+from dataclasses import dataclass, replace
 from typing import Any
 
 from expra_engine.core.component import TransformComponent
@@ -56,6 +57,8 @@ def build_editor_render_target(
     interpolation_fraction: float = 0.0,
     animated_players: dict[AnimatedSprite2DComponent, AnimatedSpritePlayer2D] | None = None,
     observer: ObservabilityWatcher | None = None,
+    preview_lighting: bool | None = None,
+    modulation_entity_ids: Iterable[str] | None = None,
 ) -> EditorRenderTarget:
     """Extract the runtime frame once and apply editor preview clipping."""
     if scene is None:
@@ -67,6 +70,7 @@ def build_editor_render_target(
             interpolator=interpolator,
             interpolation_fraction=interpolation_fraction,
             animated_players=animated_players,
+            modulation_entity_ids=modulation_entity_ids,
         )
     finally:
         if observer is not None and extract_token is not None:
@@ -74,6 +78,10 @@ def build_editor_render_target(
     if observer is not None:
         observer.increment("render:extract", "entities_considered", len(scene.entities))
         observer.increment("render:extract", "items_produced", len(frame.items))
+    if preview_lighting is not None:
+        if type(preview_lighting) is not bool:
+            raise TypeError("preview_lighting must be a bool or None")
+        frame = replace(frame, lighting_enabled=preview_lighting)
     unsupported_effects = tuple(
         effect.request.entity_id for effect in frame.submissions if isinstance(effect, RenderEffect)
     )

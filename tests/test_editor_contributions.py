@@ -17,6 +17,7 @@ from expra_engine.editor.contributions import (
     ShortcutContribution,
     ShortcutRegistry,
     ToolbarContribution,
+    ToolbarMenuItem,
 )
 from expra_engine.ui.styles import STYLE_NEUTRAL_BUTTON, STYLE_PLAY_BUTTON
 from expra_engine.ui.toolbar import toolbar_style_for_role
@@ -70,6 +71,22 @@ class EditorContributionMetadataTests(unittest.TestCase):
         self.assertEqual(toolbar.action_id, shortcut.action_id)
         self.assertEqual(menu.order, 2)
         self.assertEqual(toolbar.style_role, "neutral")
+
+    def test_typed_new_toolbar_menu_routes_each_label_to_shared_registered_actions(self) -> None:
+        toolbar = ToolbarContribution(
+            None,
+            "New",
+            group="document",
+            menu_items=(
+                ToolbarMenuItem("New Scene — reusable composition", "new_scene_document"),
+                ToolbarMenuItem("New Level — playable place", "new_level_document"),
+                ToolbarMenuItem("New World — connected Levels", "new_world_document"),
+            ),
+        )
+        self.assertEqual(
+            tuple(item.action_id for item in toolbar.menu_items),
+            ("new_scene_document", "new_level_document", "new_world_document"),
+        )
 
     def test_context_is_explicit_and_immutable(self) -> None:
         context = EditorContext(engine="engine", actions="actions", ui="ui")

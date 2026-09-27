@@ -142,6 +142,44 @@ class _FailingStopRenderer(_RecordingRenderer):
 
 
 class TestPygameRuntime(unittest.TestCase):
+    def test_world_fade_overlay_is_composited_after_render_and_reused(self) -> None:
+        class Overlay:
+            def __init__(self, size, flags) -> None:
+                self.size = size
+                self.flags = flags
+                self.alpha = None
+                self.fill_color = None
+
+            def fill(self, color) -> None:
+                self.fill_color = color
+
+            def set_alpha(self, alpha) -> None:
+                self.alpha = alpha
+
+        overlays: list[Overlay] = []
+        pygame = SimpleNamespace(SRCALPHA=1, Surface=lambda size, flags: overlays.append(Overlay(size, flags)) or overlays[-1])
+        screen = SimpleNamespace(blits=[])
+        screen.blit = lambda source, position: screen.blits.append((source, position))
+        engine = _FakeEngine()
+        engine.world_streaming_system = SimpleNamespace(transition_alpha=0.5)
+        runtime = PygameRuntime(
+            engine,
+            pygame_module=pygame,
+            clock=_FakeClock([]),
+            surface_factory=lambda _size: screen,
+            size=(40, 30),
+        )
+        runtime.surface = screen
+
+        runtime._draw_world_transition_overlay()
+        engine.world_streaming_system.transition_alpha = 0.25
+        runtime._draw_world_transition_overlay()
+
+        self.assertEqual(len(overlays), 1)
+        self.assertEqual(overlays[0].fill_color, (0, 0, 0))
+        self.assertEqual(overlays[0].alpha, round(0.25 * 255))
+        self.assertEqual(screen.blits, [(overlays[0], (0, 0)), (overlays[0], (0, 0))])
+
     def test_runtime_updates_camera_following_before_render(self) -> None:
         pygame = _FakePygame([[], [SimpleNamespace(type=_FakePygame.QUIT)]])
         camera = OrthographicCamera()
@@ -592,7 +630,10 @@ def test_project_runner_carries_effect_submissions_and_legacy_payload(
     ] == ["capture", "consumer"]
     assert frame.items[0].key == "background"
     assert isinstance(frame.payload, PygameRenderFrame)
-    assert frame.payload.active_scene is captured["engine"].active_scene
+    assert frame.payload.active_scene is not captured["engine"].edit_scene
+    assert frame.payload.active_scene.scene_id == captured["engine"].edit_scene.scene_id
+    assert captured["engine"].active_scene is captured["engine"].edit_scene
+    assert captured["engine"].run_state.value == "edit"
 
     empty_frame = captured["empty_frame"]
     assert empty_frame.items == ()

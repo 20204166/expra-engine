@@ -1,6 +1,7 @@
 """Focused tests for the 2D spatial-audio conversion."""
 
 import math
+from types import SimpleNamespace
 
 import pytest
 
@@ -9,6 +10,7 @@ from expra_engine.core.scene import Scene
 from expra_engine.runtime.audio import AudioMixer
 from expra_engine.runtime.audio_2d import (
     Audio2DWorld,
+    Audio2DSystem,
     AudioListener2DComponent,
     AudioStreamPlayer2DComponent,
     AudioStreamPlayer2DState,
@@ -81,6 +83,23 @@ def test_distance_attenuation_and_pan_are_resolved():
     assert mix.right_gain > mix.left_gain
 
 
+def test_audio_uses_the_same_composed_world_positions_as_the_camera():
+    scene = Scene("placed audio")
+    origin = scene.create_entity("Level Origin")
+    origin.add_component(TransformComponent(x=2000.0, y=40.0))
+    listener = scene.create_entity("listener", parent_id=origin.entity_id)
+    listener.add_component(TransformComponent(x=0.0, y=0.0))
+    listener.add_component(AudioListener2DComponent(current=True))
+    source = scene.create_entity("source", entity_id="source", parent_id=origin.entity_id)
+    source.add_component(TransformComponent(x=10.0, y=0.0))
+    source.add_component(AudioStreamPlayer2DComponent("tone.wav", max_distance=100.0))
+
+    world = Audio2DWorld(scene)
+
+    assert world.current_listener().position == (2000.0, 40.0)
+    assert world.mix_for("source", viewport_width=100.0).distance == pytest.approx(10.0)
+
+
 def test_outside_max_distance_is_silent():
     scene, source, _ = scene_with_source_and_listener()
     source.get_component(TransformComponent).x = 101.0
@@ -143,6 +162,28 @@ def test_playback_request_combines_state_and_spatial_mix():
 def test_db_linear_conversion_round_trip():
     assert linear_to_db(db_to_linear(-12.0)) == pytest.approx(-12.0)
     assert linear_to_db(0.0) == float("-inf")
+
+
+def test_audio_runtime_level_lifecycle_releases_level_local_voice_state():
+    world_scene = Scene("world")
+    level_scene = Scene("town")
+    source = level_scene.create_entity("source", entity_id="source")
+    source.add_component(AudioStreamPlayer2DComponent("tone.wav"))
+    world_scene.add_entity(source)
+    engine = SimpleNamespace(active_scene=world_scene, observer=None)
+    system = Audio2DSystem()
+    system.start(engine)
+
+    system.on_world_level_activated(world_scene, "town", (source.entity_id,))
+    assert system.state_for("source") is not None
+    system.play("source")
+    state = system.state_for("source")
+    assert state is not None and state.is_playing
+
+    system.on_world_level_deactivated(world_scene, "town", (source.entity_id,))
+
+    assert system.state_for("source") is None
+    assert not state.is_playing
 
 
 @pytest.mark.parametrize("bad", [math.inf, -math.inf, math.nan])

@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from expra_engine.core.component import TransformComponent
+from expra_engine.runtime.level_anchor import LevelAnchorComponent
 from expra_engine.ui.styles import editor_entity_kind
 
 __all__ = ("ENTITY_MARKER_RADIUS", "MarkerEntry", "draw_entity_markers")
@@ -25,6 +26,7 @@ class MarkerEntry:
     kind: str  # "default" | "camera" | "camera_compact" | "player" | "player_compact"
     ids: list[int] = field(default_factory=list)  # all canvas IDs in draw order
     screen_position: tuple[float, float] = (0.0, 0.0)
+    base_fill: str | None = None
 
 
 def draw_entity_markers(
@@ -39,7 +41,8 @@ def draw_entity_markers(
     """Draw icon markers for non-visual entities; retain bindings across frames."""
     needed: dict[str, str] = {}  # entity_id -> kind
     for entity in scene.entities:
-        if not entity.enabled or entity.entity_id in visual_ids:
+        anchor = entity.get_component(LevelAnchorComponent)
+        if not entity.enabled or (entity.entity_id in visual_ids and anchor is None):
             continue
         transform = entity.get_component(TransformComponent)
         has_script = any(
@@ -47,7 +50,9 @@ def draw_entity_markers(
         )
         if transform is None and has_script:
             continue
-        needed[entity.entity_id] = editor_entity_kind(entity.name) or "default"
+        needed[entity.entity_id] = (
+            "level_anchor" if anchor is not None else editor_entity_kind(entity.name) or "default"
+        )
 
     for stale in set(entries) - set(needed):
         canvas.delete(f"entity:{stale}")
@@ -63,7 +68,7 @@ def draw_entity_markers(
         is_selected = eid == selected_id
         existing = entries.get(eid)
         if existing is not None and existing.kind == kind:
-            _update_marker_coords(canvas, colors, existing, ex, ey, is_selected)
+            _update_marker_coords(canvas, colors, existing, entity, ex, ey, is_selected)
         else:
             if existing is not None:
                 canvas.delete(f"entity:{eid}")
@@ -74,6 +79,7 @@ def _update_marker_coords(
     canvas: Any,
     colors: dict[str, str],
     entry: MarkerEntry,
+    entity: Any,
     ex: float,
     ey: float,
     is_selected: bool,
@@ -81,16 +87,18 @@ def _update_marker_coords(
     """Move and recolour all canvas items for an existing marker without rebinding."""
     r = ENTITY_MARKER_RADIUS
     c = colors
-    fill = c["accent"] if is_selected else c["surface"]
+    fill = c["accent"] if is_selected else entry.base_fill or c["surface"]
     outline = c["accent_ink"] if is_selected else c["ink_2"]
     label_color = c["accent_ink"] if is_selected else c["ink_3"]
     ids = entry.ids
 
-    if entry.kind == "default":
+    if entry.kind in {"default", "level_anchor"}:
         # [rect, label]
         canvas.coords(ids[0], ex - r, ey - r, ex + r, ey + r)
         canvas.itemconfig(ids[0], fill=fill, outline=outline)
         canvas.coords(ids[1], ex, ey + r + 8)
+        if entity is not None:
+            canvas.itemconfig(ids[1], text=_marker_label(entity, entry.kind))
         canvas.itemconfig(ids[1], fill=label_color)
     elif entry.kind in {"camera", "camera_compact"}:
         # camera_compact: [rect_body, oval_body, label]
@@ -151,7 +159,17 @@ def _create_marker(
     """Create fresh canvas items for an entity marker; bind click handler once."""
     r = ENTITY_MARKER_RADIUS
     c = colors
-    fill = c["accent"] if is_selected else c["surface"]
+    anchor = entity.get_component(LevelAnchorComponent)
+    base_fill = None
+    if kind == "level_anchor" and anchor is not None:
+        fill = c["success"] if anchor.kind.value == "entrance" else c["warning"]
+        if anchor.kind.value == "both":
+            fill = c["accent"]
+        base_fill = fill
+        if is_selected:
+            fill = c["accent"]
+    else:
+        fill = c["accent"] if is_selected else c["surface"]
     outline = c["accent_ink"] if is_selected else c["ink_2"]
     label_color = c["accent_ink"] if is_selected else c["ink_3"]
     tag = f"entity:{entity.entity_id}"
@@ -284,10 +302,15 @@ def _create_marker(
 
     ids.append(
         canvas.create_text(
-            ex, ey + r + 8, text=entity.name, fill=label_color, font=("Helvetica", 9), tags=tag
+            ex,
+            ey + r + 8,
+            text=_marker_label(entity, kind),
+            fill=label_color,
+            font=("Helvetica", 9),
+            tags=tag,
         )
     )
-    return MarkerEntry(kind=kind, ids=ids, screen_position=(ex, ey))
+    return MarkerEntry(kind=kind, ids=ids, screen_position=(ex, ey), base_fill=base_fill)
 
 
 def update_marker_selection(
@@ -301,7 +324,21 @@ def update_marker_selection(
         canvas,
         colors,
         entry,
+        None,
         entry.screen_position[0],
         entry.screen_position[1],
         is_selected,
+    )
+
+
+def _marker_label(entity: Any, kind: str) -> str:
+    if kind != "level_anchor" or entity is None:
+        return entity.name if entity is not None else ""
+    anchor = entity.get_component(LevelAnchorComponent)
+    if anchor is None:
+        return entity.name
+    width, height = anchor.size
+    return (
+        f"{entity.name}\n{anchor.anchor_id} · {anchor.kind.value}\n"
+        f"{width:g} x {height:g}"
     )

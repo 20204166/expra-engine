@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from enum import IntEnum
+from numbers import Real
 from typing import Protocol, runtime_checkable
 
 from expra_engine.core.math_utils import compose_2d_pose
@@ -15,6 +16,7 @@ from expra_engine.ui_model.nine_slice import NineSlice
 
 __all__ = (
     "Color",
+    "LightDescriptor",
     "MaterialDescriptor",
     "NineSliceDescriptor",
     "OrthographicCamera",
@@ -62,6 +64,7 @@ class RendererCapabilities:
     screen_capture: bool = False
     screen_texture: bool = False
     screen_texture_mipmaps: bool = False
+    lighting_2d: bool = False
 
 
 @dataclass(frozen=True)
@@ -183,6 +186,77 @@ class Color:
 
 
 @dataclass(frozen=True)
+class LightDescriptor:
+    """Backend-neutral world-space data for one dynamic 2D light."""
+
+    entity_id: str
+    kind: str
+    position: Vec3
+    color: Color
+    energy: float
+    radius: float
+    falloff: float
+    direction_degrees: float = 0.0
+    cone_angle: float = 60.0
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.entity_id, str) or not self.entity_id:
+            raise ValueError("entity_id must not be empty")
+        if not isinstance(self.kind, str) or self.kind not in {"point", "spot"}:
+            raise ValueError("kind must be 'point' or 'spot'")
+        if any(isinstance(value, bool) or not isinstance(value, Real) for value in self.position):
+            raise ValueError("position must contain finite numeric values")
+        object.__setattr__(self, "position", _tuple(self.position, 3, "position"))
+        if not isinstance(self.color, Color):
+            raise TypeError("color must be a rendering.Color")
+        numeric_fields = (
+            ("energy", self.energy),
+            ("radius", self.radius),
+            ("falloff", self.falloff),
+            ("direction_degrees", self.direction_degrees),
+            ("cone_angle", self.cone_angle),
+        )
+        if any(isinstance(value, bool) or not isinstance(value, Real) for _, value in numeric_fields):
+            invalid = next(name for name, value in numeric_fields if isinstance(value, bool) or not isinstance(value, Real))
+            raise ValueError(f"{invalid} must be a finite number")
+        energy = _finite(self.energy, "energy")
+        radius = _finite(self.radius, "radius")
+        falloff = _finite(self.falloff, "falloff")
+        direction = _finite(self.direction_degrees, "direction_degrees")
+        cone = _finite(self.cone_angle, "cone_angle")
+        if not 0.0 <= energy <= 8.0:
+            raise ValueError("energy must be between 0 and 8")
+        if radius <= 0.0:
+            raise ValueError("radius must be positive")
+        if not 0.1 <= falloff <= 8.0:
+            raise ValueError("falloff must be between 0.1 and 8")
+        if not 0.0 < cone <= 360.0:
+            raise ValueError("cone_angle must be greater than 0 and at most 360")
+        object.__setattr__(self, "energy", energy)
+        object.__setattr__(self, "radius", radius)
+        object.__setattr__(self, "falloff", falloff)
+        object.__setattr__(self, "direction_degrees", direction)
+        object.__setattr__(self, "cone_angle", cone)
+
+    def is_visible(self, context: RenderContext) -> bool:
+        """Conservatively cull lights outside the camera viewport or depth range."""
+        if not context.camera.near <= self.position[2] <= context.camera.far:
+            return False
+        viewport = context.viewport
+        center_x, center_y = context.camera.project(self.position[:2], viewport)
+        radius_pixels = max(
+            self.radius / context.camera.width * viewport.width,
+            self.radius / context.camera.height * viewport.height,
+        )
+        return (
+            center_x + radius_pixels >= viewport.x
+            and center_x - radius_pixels <= viewport.right
+            and center_y + radius_pixels >= viewport.y
+            and center_y - radius_pixels <= viewport.bottom
+        )
+
+
+@dataclass(frozen=True)
 class MaterialDescriptor:
     color: Color = field(default_factory=lambda: Color(1.0, 1.0, 1.0))
     opacity: float = 1.0
@@ -192,6 +266,7 @@ class MaterialDescriptor:
     outline_width: float = 0.0
     blend_mode: str = "normal"
     source_region: SpriteRegion | None = None
+    light_response: MaterialLightResponse | None = None
 
     def __post_init__(self) -> None:
         opacity = _finite(self.opacity, "opacity")
@@ -202,6 +277,10 @@ class MaterialDescriptor:
         _finite(self.outline_width, "outline_width")
         if self.blend_mode not in {"normal", "add", "multiply"}:
             raise ValueError("unsupported blend mode")
+        if self.light_response is not None and not isinstance(
+            self.light_response, MaterialLightResponse
+        ):
+            raise TypeError("light_response must be MaterialLightResponse or None")
 
 
 @dataclass(frozen=True)
@@ -378,13 +457,20 @@ class RenderFrame:
     payload: object | None = None
     modulation: Color = field(default_factory=lambda: Color(1.0, 1.0, 1.0, 1.0))
     submissions: tuple[object, ...] = ()
+    lights: tuple[LightDescriptor, ...] = ()
+    lighting_enabled: bool = True
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "items", tuple(self.items))
         object.__setattr__(self, "submissions", tuple(self.submissions))
+        object.__setattr__(self, "lights", tuple(self.lights))
         _finite(self.elapsed, "elapsed")
         if not isinstance(self.modulation, Color):
             raise TypeError("modulation must be a Color")
+        if any(not isinstance(light, LightDescriptor) for light in self.lights):
+            raise TypeError("lights must contain LightDescriptor values")
+        if type(self.lighting_enabled) is not bool:
+            raise TypeError("lighting_enabled must be a bool")
 
     def ordered_items(self) -> tuple[RenderItem, ...]:
         return tuple(
@@ -403,6 +489,11 @@ class RenderFrame:
     def visible_items(self, context: RenderContext) -> tuple[RenderItem, ...]:
         return tuple(item for item in self.ordered_items() if item.is_visible(context))
 
+    def visible_lights(self, context: RenderContext) -> tuple[LightDescriptor, ...]:
+        if not self.lighting_enabled:
+            return ()
+        return tuple(light for light in self.lights if light.is_visible(context))
+
 
 @runtime_checkable
 class Renderer(Protocol):
@@ -415,3 +506,8 @@ class Renderer(Protocol):
     def resize(self, viewport: Viewport) -> None: ...
 
     def stop(self) -> None: ...
+
+
+# Imported after Color and the backend-neutral contracts are defined: the
+# material module depends on Color but not on any renderer implementation.
+from expra_engine.runtime.material_lighting import MaterialLightResponse  # noqa: E402

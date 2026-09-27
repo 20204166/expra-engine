@@ -126,6 +126,44 @@ class CommandStackTests(unittest.TestCase):
         stack.clear()
         self.assertFalse(stack.can_undo)
         self.assertFalse(stack.can_redo)
+        self.assertFalse(stack.is_dirty)
+
+    def test_clean_checkpoint_tracks_save_undo_redo_and_branch_replacement(self) -> None:
+        log: list = []
+        stack = CommandStack()
+        self.assertFalse(stack.is_dirty)
+        stack.push(SimpleCommand("a", log))
+        self.assertTrue(stack.is_dirty)
+        stack.mark_clean()
+        self.assertFalse(stack.is_dirty)
+
+        stack.push(SimpleCommand("b", log))
+        self.assertTrue(stack.is_dirty)
+        stack.undo()
+        self.assertFalse(stack.is_dirty)
+        stack.undo()
+        self.assertTrue(stack.is_dirty)
+        stack.redo()
+        self.assertFalse(stack.is_dirty)
+
+        stack.push(SimpleCommand("c", log))
+        self.assertTrue(stack.is_dirty)
+        stack.undo()
+        stack.push(SimpleCommand("replacement", log))
+        self.assertTrue(stack.is_dirty)
+
+    def test_trimmed_history_cannot_make_an_unreachable_savepoint_appear_clean(self) -> None:
+        log: list = []
+        stack = CommandStack(max_size=2)
+        stack.mark_clean()
+        stack.push(SimpleCommand("a", log))
+        stack.push(SimpleCommand("b", log))
+        stack.push(SimpleCommand("c", log))
+
+        self.assertTrue(stack.is_dirty)
+        stack.undo()
+        stack.undo()
+        self.assertTrue(stack.is_dirty)
 
     def test_max_size_trims_oldest(self) -> None:
         log: list = []

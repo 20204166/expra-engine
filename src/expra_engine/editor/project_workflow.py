@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import math
 import subprocess
 import sys
 import uuid
@@ -16,8 +15,8 @@ from expra_engine.core.document_kind import DocumentKind
 from expra_engine.core.project import Project, ProjectError
 from expra_engine.core.scene import Level, Scene
 from expra_engine.core.scene.document_codec import canonical_pb_path
-from expra_engine.core.world import World
-from expra_engine.editor.commands import ReplaceWorldDocumentCommand
+from expra_engine.core.world import World, WorldConnection
+from expra_engine.editor.world_authoring import WorldAuthoringWorkflow
 from expra_engine.runtime.input import ActionId, PhysicalInput
 from expra_engine.runtime.script_registry import ScriptRegistry
 
@@ -32,6 +31,7 @@ class ProjectWorkflow:
         self._pending_restore: tuple[Any, Path | None] | None = None
         self._project_process: subprocess.Popen[bytes] | None = None
         self._project_poll_id: str | None = None
+        self.world_authoring = WorldAuthoringWorkflow(window)
 
     def new_project(self) -> None:
         window = self.window
@@ -397,248 +397,28 @@ class ProjectWorkflow:
         *,
         origin: tuple[float, float] = (0.0, 0.0),
     ) -> None:
-        """Add a typed Level reference; the Level graph remains independently owned."""
-        from expra_engine.core.scene import Level
-        from expra_engine.core.world import LevelDescriptor
-
-        window = self.window
-        project = window._engine.project
-        world = _active_document_value(window)
-        if project is None or not isinstance(world, World):
-            raise ProjectError("Add Level requires an active World document")
-        project.document_file(relative_path)
-        source = project.read_document(relative_path, observer=window._observer)
-        if not isinstance(source, Level):
-            raise ProjectError(f"document is not a Level: {relative_path}")
-        project.register_level_path(relative_path)
-        stem = Path(relative_path).name.removesuffix(".level.pb")
-        instance_id = stem
-        suffix = 2
-        existing = {item.instance_id for item in world.levels}
-        while instance_id in existing:
-            instance_id = f"{stem}-{suffix}"
-            suffix += 1
-        descriptor = LevelDescriptor(instance_id, relative_path, origin=origin)
-        updated = replace(
-            world,
-            levels=(*world.levels, descriptor),
-            initial_level_id=world.initial_level_id or instance_id,
-        )
-        self._commit_world_change(world, updated, f"Add Level {instance_id}")
-        window._console.log(f"[World] Added Level reference: {relative_path}")
-        window._present_all()
+        """Compatibility delegate to the canonical World authoring contributor."""
+        self.world_authoring.add_level_to_world(relative_path, origin=origin)
 
     def update_level_placement(self, instance_id: str, origin: tuple[float, float]) -> None:
-        """Update World placement and translate optional World-space bounds."""
-        window = self.window
-        world = _active_document_value(window)
-        if not isinstance(world, World):
-            raise ProjectError("Level placement requires an active World document")
-        descriptor = next((item for item in world.levels if item.instance_id == instance_id), None)
-        if descriptor is None:
-            raise ProjectError(f"World Level instance does not exist: {instance_id}")
-        updated_descriptor = replace(descriptor, origin=origin)
-        if updated_descriptor == descriptor:
-            return
-        bounds = descriptor.bounds
-        if bounds is not None:
-            dx = updated_descriptor.origin[0] - descriptor.origin[0]
-            dy = updated_descriptor.origin[1] - descriptor.origin[1]
-            updated_descriptor = replace(
-                updated_descriptor,
-                bounds=(bounds[0] + dx, bounds[1] + dy, bounds[2], bounds[3]),
-            )
-        updated = replace(
-            world,
-            levels=tuple(
-                updated_descriptor if item.instance_id == instance_id else item
-                for item in world.levels
-            ),
-        )
-        self._commit_world_change(world, updated, f"Place Level {instance_id}")
-        window._present_all()
+        self.world_authoring.update_level_placement(instance_id, origin)
 
     def set_initial_level(self, instance_id: str, entrance_id: str | None = None) -> None:
-        window = self.window
-        world = _active_document_value(window)
-        if not isinstance(world, World):
-            raise ProjectError("Set Initial Level requires an active World document")
-        descriptor = next((item for item in world.levels if item.instance_id == instance_id), None)
-        if descriptor is None:
-            raise ProjectError(f"World Level instance does not exist: {instance_id}")
-        if entrance_id is None and instance_id != world.initial_level_id:
-            entrance_id = None
-        elif entrance_id is None:
-            entrance_id = world.initial_entrance_id
-        if entrance_id is not None:
-            project = window._engine.project
-            if project is None:
-                raise ProjectError("Initial entrance validation requires an active Project")
-            from expra_engine.core.scene import Level
-            from expra_engine.runtime.level_anchor import LevelAnchorKind
-
-            level = project.read_document(descriptor.resource_path, observer=window._observer)
-            anchor = level.find_anchor(entrance_id) if isinstance(level, Level) else None
-            if anchor is None or anchor[1].kind not in {
-                LevelAnchorKind.ENTRANCE,
-                LevelAnchorKind.BOTH,
-            }:
-                raise ProjectError(f"initial entrance is not an entrance anchor: {entrance_id}")
-        updated = replace(
-            world,
-            initial_level_id=instance_id,
-            initial_entrance_id=entrance_id,
-        )
-        self._commit_world_change(world, updated, f"Set Initial Level {instance_id}")
-        window._present_all()
+        self.world_authoring.set_initial_level(instance_id, entrance_id)
 
     def add_world_connection(
         self,
-        connection: Any,
+        connection: WorldConnection,
         *,
         create_reverse: bool = False,
     ) -> None:
-        """Validate named Level anchors and add a directed World connection."""
-        from expra_engine.core.scene import Level
-        from expra_engine.core.world import TransitionMode, WorldConnection
-        from expra_engine.runtime.level_anchor import LevelAnchorKind
-
-        window = self.window
-        project = window._engine.project
-        world = _active_document_value(window)
-        if project is None or not isinstance(world, World):
-            raise ProjectError("Create Connection requires an active World document")
-        if not isinstance(connection, WorldConnection):
-            raise TypeError("connection must be a WorldConnection")
-        if connection.bidirectional:
-            raise ProjectError(
-                "Create an explicit reverse connection instead of bidirectional mode"
-            )
-        descriptors = {item.instance_id: item for item in world.levels}
-        routes = [connection]
-        if create_reverse:
-            reverse = replace(
-                connection,
-                connection_id=f"{connection.connection_id}:reverse",
-                source_level_id=connection.destination_level_id,
-                source_anchor_id=connection.destination_anchor_id,
-                destination_level_id=connection.source_level_id,
-                destination_anchor_id=connection.source_anchor_id,
-            )
-            routes.append(reverse)
-        for route in routes:
-            source_descriptor = descriptors.get(route.source_level_id)
-            destination_descriptor = descriptors.get(route.destination_level_id)
-            if source_descriptor is None or destination_descriptor is None:
-                raise ProjectError(f"connection {route.connection_id!r} references a missing Level")
-            source_level = project.read_document(
-                source_descriptor.resource_path, observer=window._observer
-            )
-            destination_level = project.read_document(
-                destination_descriptor.resource_path, observer=window._observer
-            )
-            if not isinstance(source_level, Level) or not isinstance(destination_level, Level):
-                raise ProjectError("World connections must reference Level documents")
-            source_anchor = source_level.find_anchor(route.source_anchor_id)
-            destination_anchor = destination_level.find_anchor(route.destination_anchor_id)
-            if source_anchor is None or destination_anchor is None:
-                raise ProjectError(
-                    f"connection {route.connection_id!r} references a missing anchor"
-                )
-            if source_anchor[1].kind not in {LevelAnchorKind.EXIT, LevelAnchorKind.BOTH}:
-                raise ProjectError("connection source anchor must be an exit or both-way anchor")
-            if destination_anchor[1].kind not in {
-                LevelAnchorKind.ENTRANCE,
-                LevelAnchorKind.BOTH,
-            }:
-                raise ProjectError(
-                    "connection destination anchor must be an entrance or both-way anchor"
-                )
-            if route.transition is TransitionMode.SEAMLESS:
-                source_pose = source_level.world_transform(source_anchor[0].entity_id)
-                destination_pose = destination_level.world_transform(
-                    destination_anchor[0].entity_id
-                )
-                source_position = (
-                    source_descriptor.origin[0] + source_pose.position[0],
-                    source_descriptor.origin[1] + source_pose.position[1],
-                )
-                destination_position = (
-                    destination_descriptor.origin[0] + destination_pose.position[0],
-                    destination_descriptor.origin[1] + destination_pose.position[1],
-                )
-                if math.dist(source_position, destination_position) > 0.01:
-                    raise ProjectError(
-                        f"seamless connection {route.connection_id!r} endpoints are not adjacent"
-                    )
-        updated = replace(world, connections=(*world.connections, *routes))
-        description = f"Create Connection {connection.connection_id}"
-        self._commit_world_change(world, updated, description)
-        window._present_all()
+        self.world_authoring.add_connection(connection, create_reverse=create_reverse)
 
     def remove_world_connection(self, connection_id: str) -> None:
-        window = self.window
-        world = _active_document_value(window)
-        if not isinstance(world, World):
-            raise ProjectError("Remove Connection requires an active World document")
-        if not any(item.connection_id == connection_id for item in world.connections):
-            raise ProjectError(f"World connection does not exist: {connection_id}")
-        updated = replace(
-            world,
-            connections=tuple(
-                item for item in world.connections if item.connection_id != connection_id
-            ),
-        )
-        self._commit_world_change(world, updated, f"Remove Connection {connection_id}")
-        window._present_all()
+        self.world_authoring.remove_connection(connection_id)
 
     def remove_level_from_world(self, instance_id: str) -> None:
-        window = self.window
-        world = _active_document_value(window)
-        if not isinstance(world, World):
-            raise ProjectError("Remove Level requires an active World document")
-        if not any(item.instance_id == instance_id for item in world.levels):
-            raise ProjectError(f"World Level instance does not exist: {instance_id}")
-        if any(
-            item.source_level_id == instance_id or item.destination_level_id == instance_id
-            for item in world.connections
-        ):
-            raise ProjectError(
-                f"remove connections referencing Level {instance_id!r} before removing it"
-            )
-        levels = tuple(item for item in world.levels if item.instance_id != instance_id)
-        initial_level_id = world.initial_level_id
-        if initial_level_id == instance_id:
-            initial_level_id = levels[0].instance_id if levels else None
-        initial_entrance_id = world.initial_entrance_id if initial_level_id else None
-        updated = replace(
-            world,
-            levels=levels,
-            initial_level_id=initial_level_id,
-            initial_entrance_id=initial_entrance_id,
-        )
-        self._commit_world_change(world, updated, f"Remove Level {instance_id}")
-        window._present_all()
-
-    def _commit_world_change(self, before: World, after: World, description: str) -> None:
-        window = self.window
-        window._command_stack.push(
-            ReplaceWorldDocumentCommand(self._install_world_document, before, after, description)
-        )
-        window._update_undo_redo_state()
-
-    def _install_world_document(self, world: World) -> None:
-        window = self.window
-        project = window._engine.project
-        if project is None:
-            raise ProjectError("World authoring requires an active Project")
-        window._active_document.document = world
-        window._engine.set_world(
-            world,
-            project=project,
-            world_resource_path=self._current_relative_path(project),
-        )
-        window._root.title(self.window_title())
+        self.world_authoring.remove_level(instance_id)
 
     def save_scene_as(self) -> None:
         """Compatibility wrapper for typed active-document Save As."""

@@ -3,7 +3,7 @@
 from expra_engine.core.document_kind import DocumentKind
 from expra_engine.core.scene.camera import Camera2D, SceneCamera
 from expra_engine.core.scene.level import Level, LevelMetadata
-from expra_engine.core.scene.scene import Scene
+from expra_engine.core.scene.scene import Scene, WorldTransform2D
 from expra_engine.core.scene.scene_instance import (
     SceneInstanceComponent,
     SceneInstanceCycleError,
@@ -17,6 +17,7 @@ __all__ = (
     "Level",
     "LevelMetadata",
     "Scene",
+    "WorldTransform2D",
     "SceneCamera",
     "SceneInstanceComponent",
     "SceneInstanceCycleError",

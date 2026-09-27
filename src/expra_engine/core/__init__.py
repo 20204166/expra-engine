@@ -31,6 +31,13 @@ from expra_engine.core.string_utils import (
     snake_to_camel,
     snake_to_lower_camel,
 )
+from expra_engine.core.world import (
+    LevelDescriptor,
+    TransitionMode,
+    World,
+    WorldConnection,
+    WorldStreamingSettings,
+)
 
 __all__ = [
     "ALL",
@@ -47,9 +54,14 @@ __all__ = [
     "Engine",
     "EngineRunState",
     "Entity",
+    "LevelDescriptor",
     "Project",
     "Scene",
+    "TransitionMode",
     "TransformComponent",
+    "World",
+    "WorldConnection",
+    "WorldStreamingSettings",
     "camel_to_snake",
     "clamp",
     "inverselerp",

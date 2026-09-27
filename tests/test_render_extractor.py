@@ -8,7 +8,7 @@ from expra_engine.core.component import (
     registered_component_types,
 )
 from expra_engine.core.component_schema import component_type_spec
-from expra_engine.core.scene import Scene
+from expra_engine.core.scene import Scene, WorldTransform2D
 from expra_engine.editor.commands import SetComponentPropertyCommand
 from expra_engine.runtime.animation import SpriteRegion
 from expra_engine.runtime.canvas_effects import CanvasModulateComponent
@@ -185,6 +185,24 @@ def test_extractor_can_sample_runtime_interpolated_world_transforms() -> None:
     frame = extract_render_frame(scene, interpolator=interpolator, interpolation_fraction=0.5)
 
     assert frame.items[0].transform.position == pytest.approx((5.0, 0.0, 0.0))
+
+
+def test_static_render_extraction_uses_scene_world_transform_owner(monkeypatch) -> None:
+    scene = Scene("world pose owner")
+    entity = scene.create_entity("marker", entity_id="marker")
+    entity.add_component(TransformComponent(x=1.0, y=2.0))
+    entity.add_component(PrimitiveComponent("rectangle"))
+    monkeypatch.setattr(
+        scene,
+        "world_transform",
+        lambda entity_id: WorldTransform2D((30.0, 40.0), 15.0, (2.0, 3.0)),
+    )
+
+    item = extract_render_frame(scene).items[0]
+
+    assert item.transform.position == (30.0, 40.0, 0.0)
+    assert item.transform.rotation == 15.0
+    assert item.transform.scale == (2.0, 3.0, 1.0)
 
 
 def test_static_sprite_maps_region_offset_centering_and_flips() -> None:

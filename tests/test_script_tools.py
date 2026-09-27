@@ -1,3 +1,4 @@
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -26,6 +27,27 @@ class ScriptToolsTests(unittest.TestCase):
             attach_script(entity, "project://scripts/player.py", "PlayerBehaviour")
         attach_script(entity, "project://scripts/player.py", "HealthBehaviour")
         self.assertEqual(len(entity.components), 2)
+
+    def test_create_rejects_non_string_class_name(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for bad in (42, None, ["PlayerBehaviour"]):
+                with self.subTest(bad=bad), self.assertRaises(ValueError):
+                    create_behaviour_script(root, "scripts/player.py", bad)
+
+    def test_attach_rejects_non_string_class_name(self) -> None:
+        entity = Entity("Player")
+        for bad in (42, None, ["PlayerBehaviour"]):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                attach_script(entity, "project://scripts/player.py", bad)
+
+    @unittest.skipUnless(hasattr(os, "symlink"), "symlinks unavailable on this platform")
+    def test_create_rejects_symlink_directory_escape(self) -> None:
+        with tempfile.TemporaryDirectory() as outside, tempfile.TemporaryDirectory() as inside:
+            root = Path(inside)
+            (root / "scripts").symlink_to(Path(outside), target_is_directory=True)
+            with self.assertRaises(ValueError):
+                create_behaviour_script(root, "scripts/player.py", "PlayerBehaviour")
 
 
 if __name__ == "__main__":

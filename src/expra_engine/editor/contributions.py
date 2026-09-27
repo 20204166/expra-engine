@@ -52,14 +52,31 @@ class MenuContribution:
 
 
 @dataclass(frozen=True, slots=True)
+class ToolbarMenuItem:
+    """Typed menu row nested beneath one shared toolbar dropdown."""
+
+    label: str
+    action_id: str
+
+
+@dataclass(frozen=True, slots=True)
 class ToolbarContribution:
     """One toolbar button contributed by an editor feature."""
 
-    action_id: str
+    action_id: str | None
     label: str
     group: str = ""
     order: int = 0
     style_role: str = "neutral"
+    menu_items: tuple[ToolbarMenuItem, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.label:
+            raise ValueError("toolbar contribution label must not be empty")
+        if self.action_id is None and not self.menu_items:
+            raise ValueError("toolbar contribution needs an action or nested menu items")
+        if self.action_id is not None and self.menu_items:
+            raise ValueError("a toolbar contribution cannot be both a button and a menu")
 
 
 @dataclass(frozen=True, slots=True)
@@ -153,9 +170,21 @@ class ContributionRegistry:
         if conflict:
             raise ValueError(f"Action already registered: {sorted(conflict)[0]}")
         menu_action_ids = tuple(item.action_id for item in feature.menus)
-        toolbar_action_ids = tuple(item.action_id for item in feature.toolbars)
+        toolbar_action_ids = tuple(
+            item.action_id for item in feature.toolbars if item.action_id is not None
+        )
+        toolbar_menu_action_ids = tuple(
+            menu_item.action_id
+            for toolbar in feature.toolbars
+            for menu_item in toolbar.menu_items
+        )
         shortcut_action_ids = tuple(item.action_id for item in feature.shortcuts)
-        referenced_ids = set(menu_action_ids + toolbar_action_ids + shortcut_action_ids)
+        referenced_ids = set(
+            menu_action_ids
+            + toolbar_action_ids
+            + toolbar_menu_action_ids
+            + shortcut_action_ids
+        )
         if not referenced_ids.issubset(action_ids):
             missing = sorted(referenced_ids.difference(action_ids))[0]
             raise ValueError(f"Contribution references unknown action: {missing}")

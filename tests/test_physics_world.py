@@ -88,6 +88,31 @@ def test_disabled_and_removed_colliders_are_ignored():
     assert world.raycast((-3.0, 0.0), (1.0, 0.0), 10.0).hit is False
 
 
+def test_physics_queries_use_hierarchy_composed_world_positions() -> None:
+    scene = make_scene()
+    level_root = scene.create_entity("Placed Level")
+    level_root.add_component(TransformComponent(x=100.0, y=50.0))
+    parent = scene.create_entity("Parent", parent_id=level_root.entity_id)
+    parent.add_component(TransformComponent(x=2.0, y=3.0))
+    body = add_box(scene, "placed-body", 4.0, 5.0)
+    body.parent_id = parent.entity_id
+    target = add_box(scene, "world-target", 106.0, 58.0)
+
+    world = PhysicsWorld2D(scene)
+
+    assert world.overlap(body.entity_id) == (target.entity_id,)
+
+
+def test_physics_uses_identity_pose_for_disabled_transform_components() -> None:
+    scene = make_scene()
+    disabled = scene.create_entity("disabled transform")
+    disabled.add_component(TransformComponent(x=100.0, enabled=False))
+    disabled.add_component(ColliderComponent(width=2.0, height=2.0))
+    nearby = add_box(scene, "nearby", 0.5, 0.0)
+
+    assert PhysicsWorld2D(scene).overlap(disabled.entity_id) == (nearby.entity_id,)
+
+
 def test_trigger_lifecycle_reports_enter_stay_exit_and_removed_pairs():
     scene = make_scene()
     trigger = add_box(scene, "trigger", 0.0, 0.0, trigger=True, solid=False)

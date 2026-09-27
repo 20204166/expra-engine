@@ -24,6 +24,7 @@ from expra_engine.core.scene.scene_instance import (
     SceneInstanceSourceError,
     resolve_scene_instances,
 )
+from expra_engine.core.world import World
 from expra_engine.runtime.visual_components import SpriteComponent
 
 __all__ = (
@@ -37,6 +38,7 @@ __all__ = (
     "RemoveComponentCommand",
     "RenameEntityCommand",
     "ReparentEntityCommand",
+    "ReplaceWorldDocumentCommand",
     "SetComponentPropertyCommand",
     "SetExposedValueCommand",
     "ToggleEnabledCommand",
@@ -80,6 +82,7 @@ class CommandStack:
         self._max = max_size
         self._history: list[Command] = []
         self._index: int = 0  # points one past the last executed command
+        self._clean_index: int | None = 0
 
     @property
     def can_undo(self) -> bool:
@@ -88,6 +91,11 @@ class CommandStack:
     @property
     def can_redo(self) -> bool:
         return self._index < len(self._history)
+
+    @property
+    def is_dirty(self) -> bool:
+        """Whether the executed command cursor differs from the last saved cursor."""
+        return self._clean_index is None or self._index != self._clean_index
 
     @property
     def undo_description(self) -> str | None:
@@ -107,6 +115,8 @@ class CommandStack:
         All redo entries (commands after the current index) are discarded.
         """
         # Discard redo branch
+        if self._clean_index is not None and self._clean_index > self._index:
+            self._clean_index = None
         del self._history[self._index :]
         command.execute()
         self._history.append(command)
@@ -116,6 +126,14 @@ class CommandStack:
             excess = len(self._history) - self._max
             del self._history[:excess]
             self._index = max(0, self._index - excess)
+            if self._clean_index is not None:
+                self._clean_index = (
+                    self._clean_index - excess if self._clean_index >= excess else None
+                )
+
+    def mark_clean(self) -> None:
+        """Record the current undo cursor as the last successfully saved state."""
+        self._clean_index = self._index
 
     def undo(self) -> Command | None:
         """Undo the most recently executed command, returning it."""
@@ -139,11 +157,38 @@ class CommandStack:
         """Discard all history."""
         self._history.clear()
         self._index = 0
+        self._clean_index = 0
 
     @property
     def history(self) -> tuple[Command, ...]:
         """Return commands in execution order (oldest first)."""
         return tuple(self._history[: self._index])
+
+
+class ReplaceWorldDocumentCommand(Command):
+    """Replace immutable World authoring data while preserving undo ownership."""
+
+    def __init__(
+        self,
+        set_world: Callable[[World], None],
+        before: World,
+        after: World,
+        description: str,
+    ) -> None:
+        self._set_world = set_world
+        self._before = before
+        self._after = after
+        self._description = description
+
+    def execute(self) -> None:
+        self._set_world(self._after)
+
+    def undo(self) -> None:
+        self._set_world(self._before)
+
+    @property
+    def description(self) -> str:
+        return self._description
 
 
 # ---------------------------------------------------------------------------

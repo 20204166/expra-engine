@@ -5,7 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from expra_engine.core.engine import Engine
-from expra_engine.core.project import Project
+from expra_engine.core.project import Project, ProjectError
+from expra_engine.core.scene import Scene
+from expra_engine.core.world import World
 from expra_engine.observability import ObservabilityWatcher
 from expra_engine.runtime.pygame_renderer import (
     PygameRenderer,
@@ -19,7 +21,7 @@ from expra_engine.runtime.script_registry import ScriptRegistry
 
 
 def run_project(project_dir: Path | str = ".") -> None:
-    """Run the configured Scene/Level entrypoint through the normal runtime."""
+    """Run the configured Scene, Level, or World entrypoint in a standalone process."""
     import pygame  # type: ignore[reportMissingImports]
 
     project = Project.load(Path(project_dir))
@@ -27,15 +29,29 @@ def run_project(project_dir: Path | str = ".") -> None:
     engine = Engine(observer=observer)
     engine.set_project(project)
     engine.set_script_registry(ScriptRegistry(project.path))
-    engine.set_scene(project.load_document(observer=observer))
+    document = project.load_document(observer=observer)
+    if isinstance(document, World):
+        engine.set_world(
+            document,
+            project=project,
+            world_resource_path=project.entrypoint,
+        )
+    elif isinstance(document, Scene):
+        engine.set_scene(document)
+    else:
+        raise ProjectError("Project entrypoint must be a Scene, Level, or World")
     renderer = PygameRenderer(
         pygame,
         None,
         screen_size=(960, 640),
-        resource_provider=PygameResourceProvider(pygame, project.resource_service()),
+        resource_provider=PygameResourceProvider(
+            pygame, project.resource_service(observer=observer)
+        ),
+        observer=observer,
     )
 
     def frame_factory(current_engine: Engine, dt: float) -> RenderFrame:
+        world_system = current_engine.world_streaming_system
         extracted = (
             extract_render_frame(
                 current_engine.active_scene,
@@ -43,6 +59,9 @@ def run_project(project_dir: Path | str = ".") -> None:
                 interpolator=current_engine.transform_interpolator,
                 interpolation_fraction=current_engine.interpolation_fraction,
                 animated_players=current_engine.animated_sprite_system.players,
+                modulation_entity_ids=(
+                    world_system.environment_entity_ids if world_system is not None else None
+                ),
             )
             if current_engine.active_scene is not None
             else RenderFrame(elapsed=dt)
@@ -57,6 +76,8 @@ def run_project(project_dir: Path | str = ".") -> None:
                 modulation=extracted.modulation,
             ),
             submissions=extracted.submissions,
+            lights=extracted.lights,
+            lighting_enabled=extracted.lighting_enabled,
         )
 
     runtime = PygameRuntime(
@@ -66,8 +87,16 @@ def run_project(project_dir: Path | str = ".") -> None:
         size=(960, 640),
         frame_factory=frame_factory,
     )
-    engine.play()
-    runtime.run()
+    world_system = engine.world_streaming_system
+    try:
+        if not engine.play():
+            raise RuntimeError("Project Engine could not enter Play")
+        runtime.run()
+    finally:
+        if engine.run_state.value != "edit":
+            engine.stop()
+        if world_system is not None:
+            world_system.close()
 
 
 __all__ = ["run_project"]

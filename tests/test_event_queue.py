@@ -160,6 +160,37 @@ class TestEventQueueTargeted(unittest.TestCase):
         eq.signal(Ping(), targets=[])
         eq.drain()  # must not raise
 
+    def test_discard_targets_releases_pending_events_for_deactivated_entities(self) -> None:
+        first = _Root()
+        second = _Root()
+        eq = EventQueue(object())
+        eq.signal(Ping(7), targets=(first, second))
+
+        removed = eq.discard_targets((first,))
+        eq.drain()
+
+        self.assertEqual(removed, 1)
+        self.assertEqual(first.received, [])
+        self.assertEqual([event.value for event in second.received], [7])
+
+    def test_discard_target_during_dispatch_prevents_later_delivery_in_same_batch(self) -> None:
+        first = _Root()
+        second = _Root()
+        eq = EventQueue(object())
+        received: list[Ping] = []
+
+        def discard_second(event: Ping, _signal: Any) -> None:
+            received.append(event)
+            eq.discard_targets((second,))
+
+        first.on_ping = discard_second
+        eq.signal(Ping(9), targets=(first, second))
+
+        eq.publish()
+
+        self.assertEqual(len(received), 1)
+        self.assertEqual(second.received, [])
+
 
 class TestEventQueueDeferredSignal(unittest.TestCase):
     """Events signalled inside a handler are deferred, not immediate."""

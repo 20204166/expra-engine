@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from expra_engine.core.engine import Engine
+    from expra_engine.core.scene import Scene
 
 __all__ = ("RuntimeSystem",)
 
@@ -49,3 +50,13 @@ class RuntimeSystem:
 
     def stop(self) -> None:
         """Called when the engine leaves PLAY/PAUSED and returns to EDIT."""
+
+    def on_world_level_activated(
+        self, world_scene: Scene, level_id: str, entity_ids: tuple[str, ...]
+    ) -> None:
+        """Join runtime state for one Level's Entities in the active World Scene."""
+
+    def on_world_level_deactivated(
+        self, world_scene: Scene, level_id: str, entity_ids: tuple[str, ...]
+    ) -> None:
+        """Release one Level's Entities before they leave the World Scene."""

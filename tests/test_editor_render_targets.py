@@ -88,7 +88,10 @@ class EditorRenderTargetTests(unittest.TestCase):
             transform_interpolator=interpolator,
             interpolation_fraction=0.5,
             animated_sprite_system=SimpleNamespace(players={}),
+            world_streaming_system=None,
         )
+        window._active_document = SimpleNamespace(kind=None, document=None)
+        window._preview_lighting_var = SimpleNamespace(get=lambda: False)
         scene = Scene("routing")
 
         for state, overlays, expected_interpolator in (

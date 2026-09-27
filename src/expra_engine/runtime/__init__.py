@@ -55,6 +55,9 @@ from expra_engine.runtime.events import (
     Update,
 )
 from expra_engine.runtime.invoke import Repeater, after, every, invoke
+from expra_engine.runtime.lighting_2d import Light2DComponent
+from expra_engine.runtime.material_component import MaterialComponent
+from expra_engine.runtime.material_lighting import LightingMode, MaterialLightResponse
 from expra_engine.runtime.physics import AreaEffect2D
 from expra_engine.runtime.platformer import PlatformerController2d, PlatformerPhase
 from expra_engine.runtime.pygame_renderer import (
@@ -68,6 +71,7 @@ from expra_engine.runtime.pygame_screen_pipeline import PygameScreenPipeline
 from expra_engine.runtime.render_pipeline import RenderPlan, RenderPlanBuilder
 from expra_engine.runtime.rendering import (
     Color,
+    LightDescriptor,
     MaterialDescriptor,
     NineSliceDescriptor,
     OrthographicCamera,
@@ -158,7 +162,12 @@ __all__ = [
     "Func",
     "GameCanvas",
     "Idle",
+    "Light2DComponent",
+    "LightDescriptor",
+    "LightingMode",
+    "MaterialComponent",
     "MaterialDescriptor",
+    "MaterialLightResponse",
     "NineSliceDescriptor",
     "OrthographicCamera",
     "PlatformerController2d",

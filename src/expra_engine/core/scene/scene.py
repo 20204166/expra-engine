@@ -10,6 +10,7 @@ from __future__ import annotations
 import copy
 import math
 import uuid
+from dataclasses import dataclass
 from typing import Any
 
 from expra_engine.core.component import TransformComponent
@@ -26,6 +27,25 @@ def _clone_components_and_tags(source: Entity, target: Entity) -> None:
         target.add_component(copy.deepcopy(comp))
     for tag in source.tags:
         target.add_tag(tag)
+
+
+@dataclass(frozen=True, slots=True)
+class WorldTransform2D:
+    """Canonical parent-composed World-space 2D pose for a Scene Entity."""
+
+    position: tuple[float, float]
+    rotation: float
+    scale: tuple[float, float]
+
+    def __post_init__(self) -> None:
+        values = (*self.position, self.rotation, *self.scale)
+        if len(self.position) != 2 or len(self.scale) != 2 or not all(
+            math.isfinite(float(value)) for value in values
+        ):
+            raise ValueError("WorldTransform2D values must be finite 2D pose values")
+        object.__setattr__(self, "position", (float(self.position[0]), float(self.position[1])))
+        object.__setattr__(self, "rotation", float(self.rotation))
+        object.__setattr__(self, "scale", (float(self.scale[0]), float(self.scale[1])))
 
 
 class Scene:
@@ -132,6 +152,63 @@ class Scene:
                 return True
         return False
 
+    def transfer_entities_to(
+        self,
+        target: Scene,
+        entity_ids: tuple[str, ...] | None = None,
+    ) -> tuple[Entity, ...]:
+        """Move a complete set of Entity objects to another Scene without cloning.
+
+        The transfer preserves Entity identity and SceneInstance bookkeeping.
+        Selected parent/child subtrees and any materialized SceneInstance subtree
+        must move as a whole so neither Scene publishes dangling ownership.
+        """
+        if not isinstance(target, Scene) or target is self:
+            raise ValueError("target must be a different Scene")
+        source_index = self._ensure_entity_index()
+        selected_ids = set(source_index) if entity_ids is None else set(entity_ids)
+        if not selected_ids:
+            return ()
+        missing = selected_ids - source_index.keys()
+        if missing:
+            raise KeyError(f"cannot transfer missing Entity IDs: {sorted(missing)!r}")
+        target_index = target._ensure_entity_index()
+        duplicates = selected_ids & target_index.keys()
+        if duplicates:
+            raise ValueError(f"target Scene already contains Entity IDs: {sorted(duplicates)!r}")
+        for entity_id in selected_ids:
+            entity = source_index[entity_id]
+            if entity.parent_id in source_index and entity.parent_id not in selected_ids:
+                raise ValueError("Entity transfer cannot leave a parent in another Scene")
+            if any(
+                child.entity_id not in selected_ids
+                for child in self.children_of(entity_id)
+            ):
+                raise ValueError("Entity transfer cannot leave children in another Scene")
+        moved_instance_roots: dict[str, set[str]] = {}
+        for root_id, children in self._instance_children.items():
+            affected = root_id in selected_ids or bool(children & selected_ids)
+            if not affected:
+                continue
+            subtree = {root_id, *children}
+            if not subtree <= selected_ids:
+                raise ValueError("Scene Instance materialized content must transfer as a whole")
+            moved_instance_roots[root_id] = set(children)
+
+        moved = tuple(entity for entity in self._entities if entity.entity_id in selected_ids)
+        self._entities = [entity for entity in self._entities if entity.entity_id not in selected_ids]
+        for entity in moved:
+            target._entities.append(entity)
+            target_index[entity.entity_id] = entity
+            if target._children_index is not None:
+                target._children_index.setdefault(entity.parent_id, []).append(entity)
+        for root_id in moved_instance_roots:
+            del self._instance_children[root_id]
+        target._instance_children.update(moved_instance_roots)
+        self._entity_index = None
+        self._children_index = None
+        return moved
+
     def _forget_instance_bookkeeping(self, removed_ids: set[str]) -> None:
         """Drop any scene-instance tracking that referenced a removed entity."""
         for root_id in removed_ids:
@@ -197,12 +274,18 @@ class Scene:
         return self._entity_index
 
     def world_pose(self, entity_id: str) -> tuple[float, float, float]:
-        """Return an entity's authoritative parent-composed 2D pose.
+        """Return an entity's parent-composed World position and rotation.
 
         Missing or disabled transforms use the identity pose, matching render
         extraction. Missing parents are treated as roots; malformed cycles are
-        rejected rather than recursing indefinitely.
+        rejected rather than recursing indefinitely. Use ``world_transform``
+        when scale is also required.
         """
+        pose = self.world_transform(entity_id)
+        return pose.position[0], pose.position[1], pose.rotation
+
+    def world_transform(self, entity_id: str) -> WorldTransform2D:
+        """Resolve local Transform and all parents to the canonical World pose."""
         entities = self._ensure_entity_index()
         active: set[str] = set()
 
@@ -234,8 +317,8 @@ class Scene:
             active.remove(current_id)
             return pose
 
-        x, y, rotation, _scale_x, _scale_y = resolve(entity_id)
-        return x, y, rotation
+        x, y, rotation, scale_x, scale_y = resolve(entity_id)
+        return WorldTransform2D((x, y), rotation, (scale_x, scale_y))
 
     def entities_by_layer(self) -> list[Entity]:
         """Return all entities sorted ascending by layer."""

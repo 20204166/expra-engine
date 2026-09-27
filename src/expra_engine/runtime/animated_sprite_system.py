@@ -66,6 +66,24 @@ class AnimatedSpriteSystem(RuntimeSystem):
         if scene is not None:
             self._remove_scene(scene)
 
+    def on_world_level_activated(
+        self, world_scene: Scene, _level_id: str, _entity_ids: tuple[str, ...]
+    ) -> None:
+        signal = self._engine.signal if self._engine is not None else lambda *_args: None
+        self._reconcile(world_scene, start_autoplay=True, signal=signal)
+
+    def on_world_level_deactivated(
+        self, world_scene: Scene, _level_id: str, entity_ids: tuple[str, ...]
+    ) -> None:
+        for entity_id in entity_ids:
+            entity = world_scene.find_entity(entity_id)
+            if entity is None:
+                continue
+            for component in entity.get_components(AnimatedSprite2DComponent):
+                player = self._players.pop((id(world_scene), id(component)), None)
+                if player is not None:
+                    player.stop()
+
     def on_update(self, event: Update, signal: Any) -> None:
         observer = self._observer
         token = observer.begin(_TARGET) if observer is not None else None

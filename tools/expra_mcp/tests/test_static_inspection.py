@@ -18,6 +18,7 @@ from mcp import Client
 from mcp.types import ImageContent, TextContent
 
 PROJECT = "examples/blacksite_relay"
+LIGHTING_PROJECT = "examples/lighting_lab"
 
 
 @pytest.fixture
@@ -136,6 +137,7 @@ async def test_render_inspect_capabilities_is_headless(server) -> None:
         caps = result.structured_content["data"]["capabilities"]
         assert caps["headless"] is True
         assert caps["primitive"] is True
+        assert caps["lighting_2d"] is True
 
 
 async def test_render_inspect_frame_has_real_items(server) -> None:
@@ -144,6 +146,23 @@ async def test_render_inspect_frame_has_real_items(server) -> None:
         data = result.structured_content["data"]
         assert data["item_count"] > 0
         assert len(data["items"]) == data["item_count"]
+
+
+async def test_render_inspect_frame_reports_backend_neutral_lights(server) -> None:
+    async with Client(server) as client:
+        result = await client.call_tool(
+            "render_inspect",
+            {
+                "action": "frame",
+                "project": LIGHTING_PROJECT,
+                "scene": "levels/light_lab.level.pb",
+            },
+        )
+        assert result.is_error is not True
+        data = result.structured_content["data"]
+        assert data["light_count"] >= 5
+        assert data["lighting_enabled"] is True
+        assert all("entity_id" in light and "position" in light for light in data["lights"])
 
 
 async def test_render_inspect_plan_matches_blacksite_scale(server) -> None:

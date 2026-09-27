@@ -76,6 +76,34 @@ class Level(Scene):
         data["level_metadata"] = self.level_metadata.to_dict()
         return data
 
+    def find_anchor(self, anchor_id: str):
+        """Return the ordinary Level entity and anchor marker for one ID."""
+        from expra_engine.runtime.level_anchor import LevelAnchorComponent
+
+        self.validate_anchors()
+        return next(
+            (
+                (entity, component)
+                for entity in self.entities
+                if (component := entity.get_component(LevelAnchorComponent)) is not None
+                and component.anchor_id == anchor_id
+            ),
+            None,
+        )
+
+    def validate_anchors(self) -> None:
+        """Reject duplicate named anchors before a Level can be used by a World."""
+        from expra_engine.runtime.level_anchor import LevelAnchorComponent
+
+        seen: set[str] = set()
+        for entity in self.entities:
+            component = entity.get_component(LevelAnchorComponent)
+            if component is None:
+                continue
+            if component.anchor_id in seen:
+                raise ValueError(f"duplicate Level anchor ID: {component.anchor_id!r}")
+            seen.add(component.anchor_id)
+
     @classmethod
     def from_dict(
         cls,
@@ -85,4 +113,5 @@ class Level(Scene):
     ) -> Level:
         level = cast(Level, super().from_dict(data, observer=observer))
         level.level_metadata = LevelMetadata.from_dict(data.get("level_metadata", {}))
+        level.validate_anchors()
         return level

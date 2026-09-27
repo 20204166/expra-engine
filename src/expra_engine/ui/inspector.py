@@ -5,7 +5,7 @@ from __future__ import annotations
 import contextlib
 import tkinter as tk
 from collections.abc import Callable
-from tkinter import ttk
+from tkinter import messagebox, ttk
 from typing import Any
 
 from expra_engine.core.component import Component, TransformComponent, registered_component_types
@@ -15,6 +15,7 @@ from expra_engine.core.component_schema import (
     registered_component_specs,
 )
 from expra_engine.core.entity import Entity
+from expra_engine.core.world import World
 from expra_engine.runtime.script_component import ScriptComponent
 from expra_engine.ui.layout import make_scrollable_frame
 from expra_engine.ui.styles import (
@@ -42,6 +43,9 @@ class InspectorPanel(tk.Frame):
         on_add_component: Callable[[str], None] | None = None,
         on_component_change: Callable[[str, str, str, Any], None] | None = None,
         on_remove_component: Callable[[str, str], None] | None = None,
+        on_world_level_placement: Callable[[str, tuple[float, float]], None] | None = None,
+        on_world_set_initial_level: Callable[[str], None] | None = None,
+        on_world_remove_item: Callable[[str], None] | None = None,
     ) -> None:
         c = colors or COLORS
         super().__init__(parent, bg=c["panel_bg"])
@@ -53,6 +57,9 @@ class InspectorPanel(tk.Frame):
         self._on_add_component = on_add_component
         self._on_component_change = on_component_change
         self._on_remove_component = on_remove_component
+        self._on_world_level_placement = on_world_level_placement
+        self._on_world_set_initial_level = on_world_set_initial_level
+        self._on_world_remove_item = on_world_remove_item
         self._current_entity_id: str | None = None
         self._current_entity: Entity | None = None
         self._structure_key: tuple[Any, ...] | None = None
@@ -72,6 +79,10 @@ class InspectorPanel(tk.Frame):
         self._script_vars: dict[tuple[int, str], tk.Variable] = {}
         self._script_widgets: dict[tuple[int, str], tk.Widget] = {}
         self._invalid_value: tk.Label | None = None
+        self._world_render_key: tuple[World, str | None] | None = None
+        self._world_origin_x_var: tk.StringVar | None = None
+        self._world_origin_y_var: tk.StringVar | None = None
+        self._world_selected_level_id: str | None = None
 
         header = tk.Frame(self, bg=c["panel_bg"])
         header.pack(fill="x", padx=SPACING["card_pad_x"], pady=(SPACING["card_pad_y"], 6))
@@ -93,9 +104,190 @@ class InspectorPanel(tk.Frame):
         )
         self._scroll_canvas.configure(bg=c["panel_bg"], highlightthickness=0)
         self._content.configure(bg=c["panel_bg"])
+        self._header_label = header.winfo_children()[0]
+
+    @staticmethod
+    def _world_inspection_values(
+        world: World, selection: str | None
+    ) -> tuple[tuple[str, str], ...]:
+        if selection and selection.startswith("level:"):
+            level_id = selection.removeprefix("level:")
+            descriptor = next(
+                (item for item in world.levels if item.instance_id == level_id), None
+            )
+            if descriptor is None:
+                return (("Level", "missing reference"),)
+            return (
+                ("Instance ID", descriptor.instance_id),
+                ("Resource", descriptor.resource_path),
+                ("Origin", repr(descriptor.origin)),
+                ("Bounds", repr(descriptor.bounds) if descriptor.bounds is not None else "not set"),
+                ("Initial", "yes" if descriptor.instance_id == world.initial_level_id else "no"),
+                ("Always loaded", str(descriptor.always_loaded).lower()),
+                ("Priority", str(descriptor.priority)),
+            )
+        if selection and selection.startswith("connection:"):
+            connection_id = selection.removeprefix("connection:")
+            connection = next(
+                (item for item in world.connections if item.connection_id == connection_id), None
+            )
+            if connection is None:
+                return (("Connection", "missing reference"),)
+            return (
+                ("Connection ID", connection.connection_id),
+                (
+                    "Route",
+                    f"{connection.source_level_id}.{connection.source_anchor_id} → "
+                    f"{connection.destination_level_id}.{connection.destination_anchor_id}",
+                ),
+                ("Transition", connection.transition.value),
+                ("Bidirectional", str(connection.bidirectional).lower()),
+                ("Preload distance", str(connection.preload_distance)),
+                ("Unload distance", str(connection.unload_distance)),
+            )
+        return (
+            ("World ID", world.world_id),
+            ("Levels", str(len(world.levels))),
+            ("Connections", str(len(world.connections))),
+            ("Initial Level", world.initial_level_id or "not set"),
+            ("Initial entrance", world.initial_entrance_id or "not set"),
+            ("Concurrent loads", str(world.streaming.max_concurrent_loads)),
+            ("Resident Level budget", str(world.streaming.max_loaded_levels)),
+        )
+
+    def render_world(self, world: World, selection: str | None = None) -> None:
+        """Inspect World metadata or one selected descriptor/connection read-only."""
+        render_key = (world, selection)
+        if render_key == self._world_render_key:
+            return
+        self._cancel_pending_render()
+        for child in self._content.winfo_children():
+            child.destroy()
+        self._current_entity = None
+        self._current_entity_id = None
+        self._structure_key = ("world", selection)
+        self._world_render_key = render_key
+        self._header_label.configure(text="WORLD INSPECTOR")
+        self._world_origin_x_var = None
+        self._world_origin_y_var = None
+        self._world_selected_level_id = (
+            selection.removeprefix("level:")
+            if selection and selection.startswith("level:")
+            else None
+        )
+        selected_descriptor = next(
+            (
+                item
+                for item in world.levels
+                if item.instance_id == self._world_selected_level_id
+            ),
+            None,
+        )
+        for row, (name, value) in enumerate(self._world_inspection_values(world, selection)):
+            tk.Label(
+                self._content,
+                text=name,
+                font=FONTS["detail_row"],
+                bg=self._colors["panel_bg"],
+                fg=self._colors["ink_2"],
+                anchor="w",
+            ).grid(row=row, column=0, sticky="nw", padx=(0, 8), pady=3)
+            if name == "Origin" and selected_descriptor is not None:
+                self._world_origin_x_var = tk.StringVar(value=str(selected_descriptor.origin[0]))
+                self._world_origin_y_var = tk.StringVar(value=str(selected_descriptor.origin[1]))
+                for column, variable in enumerate(
+                    (self._world_origin_x_var, self._world_origin_y_var), start=1
+                ):
+                    ttk.Entry(
+                        self._content,
+                        textvariable=variable,
+                        width=9,
+                        style=STYLE_ENTRY,
+                        state=(
+                            "normal"
+                            if self._on_world_level_placement is not None
+                            else "readonly"
+                        ),
+                    ).grid(row=row, column=column, sticky="ew", padx=(0, 4), pady=3)
+            else:
+                tk.Label(
+                    self._content,
+                    text=value,
+                    font=FONTS["detail_row"],
+                    bg=self._colors["panel_bg"],
+                    fg=self._colors["ink"],
+                    anchor="w",
+                    justify="left",
+                    wraplength=190,
+                ).grid(row=row, column=1, sticky="nw", pady=3)
+        if selected_descriptor is not None:
+            ttk.Button(
+                self._content,
+                text="Apply Placement",
+                style=STYLE_NEUTRAL_BUTTON,
+                command=self._apply_world_placement,
+                state=(
+                    "normal" if self._on_world_level_placement is not None else "disabled"
+                ),
+            ).grid(row=len(self._world_inspection_values(world, selection)), column=0, columnspan=3, sticky="ew", pady=(8, 2))
+            button_row = len(self._world_inspection_values(world, selection)) + 1
+            if (
+                selected_descriptor.instance_id != world.initial_level_id
+                and self._on_world_set_initial_level is not None
+            ):
+                ttk.Button(
+                    self._content,
+                    text="Set Initial Level",
+                    style=STYLE_NEUTRAL_BUTTON,
+                    command=lambda instance_id=selected_descriptor.instance_id: self._on_world_set_initial_level(instance_id),
+                ).grid(row=button_row, column=0, columnspan=3, sticky="ew", pady=(4, 2))
+                button_row += 1
+            if self._on_world_remove_item is not None:
+                ttk.Button(
+                    self._content,
+                    text="Remove Level Reference",
+                    style=STYLE_NEUTRAL_BUTTON,
+                    command=lambda identifier=selection: self._on_world_remove_item(identifier),
+                ).grid(row=button_row, column=0, columnspan=3, sticky="ew", pady=(4, 2))
+        elif (
+            selection is not None
+            and selection.startswith("connection:")
+            and self._on_world_remove_item is not None
+        ):
+            ttk.Button(
+                self._content,
+                text="Delete Connection",
+                style=STYLE_NEUTRAL_BUTTON,
+                command=lambda identifier=selection: self._on_world_remove_item(identifier),
+            ).grid(
+                row=len(self._world_inspection_values(world, selection)),
+                column=0,
+                columnspan=3,
+                sticky="ew",
+                pady=(8, 2),
+            )
+        self._content.columnconfigure(1, weight=1)
+        self._content.columnconfigure(2, weight=1)
+        self._scroll_canvas.configure(scrollregion=self._scroll_canvas.bbox("all"))
+
+    def _apply_world_placement(self) -> None:
+        if (
+            self._on_world_level_placement is None
+            or self._world_selected_level_id is None
+            or self._world_origin_x_var is None
+            or self._world_origin_y_var is None
+        ):
+            return
+        try:
+            origin = (float(self._world_origin_x_var.get()), float(self._world_origin_y_var.get()))
+            self._on_world_level_placement(self._world_selected_level_id, origin)
+        except (TypeError, ValueError) as error:
+            messagebox.showerror("World Placement", str(error), parent=self.winfo_toplevel())
 
     def render(self, entity: Entity | None) -> None:
         """Reuse controls when the selected entity has the same schema."""
+        self._world_render_key = None
+        self._header_label.configure(text="INSPECTOR")
         signature = self._schema_signature(entity)
         if self._has_focused_control() and (
             (entity.entity_id if entity is not None else None) != self._current_entity_id

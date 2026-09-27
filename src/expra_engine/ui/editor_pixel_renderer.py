@@ -10,6 +10,7 @@ from io import BytesIO
 from typing import Any, cast
 
 from expra_engine.observability import ObservabilityWatcher
+from expra_engine.runtime.pygame_lighting import PygameLightingPass
 from expra_engine.runtime.pygame_renderer import PygameRenderer, PygameResourceProvider
 from expra_engine.runtime.render_diagnostics import RenderDiagnostics
 from expra_engine.runtime.rendering import (
@@ -409,6 +410,7 @@ def render_editor_frame_to_tk_image(
     entity_names: Mapping[str, str] | None = None,
     observer: ObservabilityWatcher | None = None,
     photo_image_reuse: Any | None = None,
+    lighting_pass: PygameLightingPass | None = None,
 ) -> Any | None:
     """Render a complete editor frame, or return ``None`` for Tk fallback.
 
@@ -460,6 +462,7 @@ def render_editor_frame_to_tk_image(
                 clear_color=None,
                 diagnostics=diagnostics,
                 observer=observer,
+                lighting_pass=lighting_pass,
             )
 
         return _render_pillow_bridge(
@@ -520,6 +523,7 @@ class EditorPixelRenderer:
         # image is bound to the Tk interpreter it was created under.
         self._photo_image: Any | None = None
         self._photo_image_master: Any | None = None
+        self._lighting_pass: PygameLightingPass | None = None
 
     @property
     def resource_service(self) -> Any | None:
@@ -544,6 +548,8 @@ class EditorPixelRenderer:
         self._last_image = None
         self._photo_image = None
         self._photo_image_master = None
+        if self._lighting_pass is not None:
+            self._lighting_pass.clear()
 
     def clear(self) -> None:
         """Discard backend state and any image retained for failure recovery."""
@@ -553,6 +559,8 @@ class EditorPixelRenderer:
         self._last_image = None
         self._photo_image = None
         self._photo_image_master = None
+        if self._lighting_pass is not None:
+            self._lighting_pass.clear()
 
     def render(
         self,
@@ -566,6 +574,9 @@ class EditorPixelRenderer:
     ) -> Any | None:
         try:
             import pygame  # type: ignore[reportMissingImports]
+
+            if self._lighting_pass is None or self._lighting_pass.pygame is not pygame:
+                self._lighting_pass = PygameLightingPass(pygame)
 
             if (
                 self._resource_service is not None
@@ -591,6 +602,7 @@ class EditorPixelRenderer:
                 entity_names=entity_names,
                 observer=self._observer,
                 photo_image_reuse=self._photo_image,
+                lighting_pass=self._lighting_pass,
             )
             if image is not None:
                 self._last_image = image

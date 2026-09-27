@@ -3,6 +3,7 @@ syntax = "proto3";
 package expra.schema.v1;
 
 import "scene.proto";
+import "world.proto";
 
 message LevelMetadata {
   optional string display_name = 1;
@@ -21,5 +22,6 @@ message DocumentEnvelope {
   oneof document {
     SceneDocument scene = 1;
     LevelDocument level = 2;
+    WorldDocument world = 3;
   }
 }

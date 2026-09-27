@@ -4,14 +4,17 @@ from __future__ import annotations
 
 import logging
 import math
+from collections import OrderedDict
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import replace
 from typing import Any, cast
 
-from expra_engine.observability import ObservabilityWatcher
+from expra_engine.observability import ObservabilityWatcher, observe_stage
 from expra_engine.runtime.canvas_effects import modulate_color
+from expra_engine.runtime.material_lighting import LightingMode, MaterialLightResponse
 from expra_engine.runtime.pygame_geometry import draw_rounded_rectangle, projected_rectangle_points
+from expra_engine.runtime.pygame_lighting import PygameLightingPass
 from expra_engine.runtime.pygame_renderer_legacy import (
     LegacyPygameRenderMixin,
     RenderFrame,
@@ -57,6 +60,7 @@ class PygameRenderer(LegacyPygameRenderMixin):
         clear_color: tuple[int, ...] | None = (10, 14, 30),
         diagnostics: RenderDiagnostics | None = None,
         observer: ObservabilityWatcher | None = None,
+        lighting_pass: PygameLightingPass | None = None,
     ) -> None:
         self.pygame = pygame_module
         self.surface = surface
@@ -73,6 +77,12 @@ class PygameRenderer(LegacyPygameRenderMixin):
         self._observer = observer
         self._diagnostics = diagnostics if diagnostics is not None else RenderDiagnostics(_LOGGER)
         self._screen_pipeline = PygameScreenPipeline(pygame_module)
+        self._material_scratch: Any | None = None
+        if lighting_pass is not None and lighting_pass.pygame is not pygame_module:
+            raise ValueError("lighting_pass belongs to a different Pygame module")
+        self._owns_lighting_pass = lighting_pass is None
+        self._lighting_pass = lighting_pass or PygameLightingPass(pygame_module)
+        self._lighting_failed = False
         try:
             self.font = self._font_provider(None, font_size)
         except Exception:  # noqa: BLE001 - backend/font failures must not abort a frame
@@ -91,6 +101,7 @@ class PygameRenderer(LegacyPygameRenderMixin):
             screen_capture=False,
             screen_texture=False,
             screen_texture_mipmaps=False,
+            lighting_2d=self._lighting_pass.supported,
         )
         self._update_screen_capabilities()
 
@@ -106,6 +117,7 @@ class PygameRenderer(LegacyPygameRenderMixin):
 
     def resize(self, viewport: Any) -> None:
         self._screen_pipeline.clear()
+        self._material_scratch = None
         self._diagnostics.clear()
         self.context = (
             RenderContext(viewport, self.context.camera)
@@ -122,12 +134,16 @@ class PygameRenderer(LegacyPygameRenderMixin):
 
     def set_surface(self, surface: Any) -> None:
         self.surface = surface
+        self._material_scratch = None
         self._screen_pipeline.clear()
         self._diagnostics.clear()
         self._update_screen_capabilities()
 
     def stop(self) -> None:
         self._screen_pipeline.clear()
+        self._material_scratch = None
+        if self._owns_lighting_pass:
+            self._lighting_pass.clear()
         self._diagnostics.clear()
         self._engine = None
         self.context = None
@@ -179,6 +195,7 @@ class PygameRenderer(LegacyPygameRenderMixin):
         self._screen_pipeline.clear()
         self._draw_failed = False
         self._backend_failure_detail = None
+        self._lighting_failed = False
         observer = self._observer
         token = observer.begin("render:backend") if observer is not None else None
         try:
@@ -188,7 +205,9 @@ class PygameRenderer(LegacyPygameRenderMixin):
                 observer.finish(
                     token,
                     outcome="failure" if self._draw_failed else "success",
-                    detail=self._backend_failure_detail or "draw_item_failed" if self._draw_failed else None,
+                    detail=self._backend_failure_detail or "draw_item_failed"
+                    if self._draw_failed
+                    else None,
                 )
 
     def _render_frame(self, frame: ContractRenderFrame) -> None:
@@ -219,25 +238,244 @@ class PygameRenderer(LegacyPygameRenderMixin):
                 "[Render] renderer could not clear target surface",
             )
             return
+        cache_hits_before = self._lighting_pass.cache_hits
+        cache_misses_before = self._lighting_pass.cache_misses
+        material_lighting = self._material_lighting_active(frame)
+        material_maps: OrderedDict[tuple[object, ...], Any] = OrderedDict()
+
+        def draw_item(item: RenderItem, target: Any) -> None:
+            if material_lighting:
+                self._draw_material_item(item, target, frame, context, material_maps)
+            else:
+                self._draw_contract_item(item, target, frame.modulation, context)
+
         if frame.submissions:
             self._screen_pipeline.execute(
                 RenderPlanBuilder.from_frame(frame, context),
                 surface=surface,
                 context=context,
-                draw_item=lambda item, target: self._draw_contract_item(
-                    item, target, frame.modulation, context
-                ),
+                draw_item=draw_item,
             )
         else:
             for item in frame.visible_items(context):
-                self._draw_contract_item(item, surface, frame.modulation, context)
+                draw_item(item, surface)
+        if material_lighting and self._observer is not None and frame.items:
+            self._observer.increment(
+                "render:material-light", "material_items_total", len(frame.items)
+            )
+        if frame.lights and frame.lighting_enabled and not material_lighting:
+            self._do_lighting(frame, context, cache_hits_before, cache_misses_before)
         if isinstance(frame.payload, RenderFrame):
             self.on_render(frame.payload, clear=False)
         if not self._draw_failed:
             self._diagnostics.clear()
+            if self._lighting_failed:
+                self._diagnostics.report(
+                    ("renderer", "lighting", "unsupported"),
+                    "[Render] Pygame local-light compositing is unavailable; rendering without local lights",
+                )
             reset_diagnostics = getattr(self._resource_provider, "reset_diagnostics", None)
             if callable(reset_diagnostics):
                 reset_diagnostics()
+
+    @staticmethod
+    def _material_lighting_active(frame: ContractRenderFrame) -> bool:
+        configured = tuple(
+            item.material.light_response
+            for item in frame.items
+            if item.material.light_response is not None
+        )
+        if not configured:
+            return False
+        default = MaterialLightResponse()
+        return (
+            (bool(frame.lights) and frame.lighting_enabled)
+            or frame.modulation != Color(1.0, 1.0, 1.0, 1.0)
+            or any(response != default for response in configured)
+        )
+
+    def _do_lighting(self, frame, context, hits_b, misses_b):
+        obs, lp = self._observer, self._lighting_pass
+        if obs is not None:
+            obs.increment("render:lighting", "lights_considered", len(frame.lights))
+        with observe_stage(obs, "render:lighting:compose"):
+            if not self.capabilities.lighting_2d or not lp.render(
+                frame.lights,
+                surface=self.surface,
+                context=context,
+            ):
+                self._lighting_failed = True
+            elif obs is not None:
+                vl = len(frame.visible_lights(context))
+                obs.increment("render:lighting", "lights_visible", vl)
+                obs.increment("render:lighting", "light_cache_hits", lp.cache_hits - hits_b)
+                obs.increment("render:lighting", "light_cache_misses", lp.cache_misses - misses_b)
+
+    def _draw_material_item(
+        self,
+        item: RenderItem,
+        surface: Any,
+        frame: ContractRenderFrame,
+        context: RenderContext,
+        maps: OrderedDict[tuple[object, ...], Any],
+    ) -> None:
+        response = item.material.light_response or MaterialLightResponse()
+        receiving = response.receives_light
+        emission = response.emission
+        if not receiving and emission == 0.0:
+            self._draw_contract_item(
+                item,
+                surface,
+                Color(1.0, 1.0, 1.0, frame.modulation.alpha),
+                context,
+            )
+            return
+
+        try:
+            size = surface.get_size()
+            bounds = self._material_bounds(item, context, size)
+            if bounds is None:
+                return
+            scratch = self._material_scratch
+            if scratch is None or scratch.get_size() != size:
+                scratch = self.pygame.Surface(
+                    size,
+                    self.pygame.SRCALPHA,
+                    32,
+                )
+                self._material_scratch = scratch
+            scratch.fill((0, 0, 0, 0), bounds)
+            alpha_modulation = frame.modulation.alpha if receiving else 1.0
+            self._draw_contract_item(
+                item,
+                scratch,
+                Color(1.0, 1.0, 1.0, alpha_modulation),
+                context,
+            )
+            source = scratch.subsurface(bounds)
+            emission_source = source.copy() if emission > 0.0 else None
+
+            if receiving:
+                ambient = Color(
+                    frame.modulation.red * response.ambient_response,
+                    frame.modulation.green * response.ambient_response,
+                    frame.modulation.blue * response.ambient_response,
+                    1.0,
+                )
+                local_lights = frame.lights if frame.lighting_enabled else ()
+                toon_steps = response.toon_steps if response.mode is LightingMode.TOON else None
+                # The cache exists for one RenderFrame only, so its light tuple
+                # is invariant and must not be repeated in each key: hashing a
+                # large descriptor tuple once per visual scales as visuals x lights.
+                map_key = (ambient, response.diffuse, toon_steps)
+                illumination = maps.get(map_key)
+                if illumination is None:
+                    illumination = self._lighting_pass.material_map(
+                        local_lights,
+                        size=size,
+                        context=context,
+                        ambient=ambient,
+                        diffuse=response.diffuse,
+                        toon_steps=toon_steps,
+                    )
+                    map_bytes = size[0] * size[1] * 4
+                    cache_budget = 8 * 1024 * 1024
+                    while maps and (
+                        len(maps) >= 8
+                        or sum(
+                            value.get_width() * value.get_height() * 4 for value in maps.values()
+                        )
+                        + map_bytes
+                        > cache_budget
+                    ):
+                        maps.popitem(last=False)
+                    if map_bytes > cache_budget:
+                        maps.clear()
+                    maps[map_key] = illumination
+                else:
+                    maps.move_to_end(map_key)
+                source.blit(
+                    illumination.subsurface(bounds),
+                    (0, 0),
+                    special_flags=self.pygame.BLEND_RGBA_MULT,
+                )
+
+            if emission > 0.0:
+                color = response.emission_color
+                emission_layer = emission_source
+                if emission_layer is not None:
+                    emission_layer.fill(
+                        (
+                            round(color.red * emission * color.alpha * 255),
+                            round(color.green * emission * color.alpha * 255),
+                            round(color.blue * emission * color.alpha * 255),
+                            255,
+                        ),
+                        special_flags=self.pygame.BLEND_RGBA_MULT,
+                    )
+                    source.blit(
+                        emission_layer,
+                        (0, 0),
+                        special_flags=self.pygame.BLEND_RGB_ADD,
+                    )
+            surface.blit(source, bounds.topleft)
+        except (AttributeError, TypeError, ValueError, OverflowError, RuntimeError):
+            self._lighting_failed = True
+            fallback = (
+                frame.modulation if receiving else Color(1.0, 1.0, 1.0, frame.modulation.alpha)
+            )
+            self._draw_contract_item(item, surface, fallback, context)
+
+    def _material_bounds(
+        self,
+        item: RenderItem,
+        context: RenderContext,
+        size: tuple[int, int],
+    ) -> Any | None:
+        width, height = size
+        if item.text is not None:
+            text = item.text
+            text_size = self.measure_text(
+                TextDescriptor(
+                    text.text,
+                    text.font,
+                    text.size,
+                    text.color,
+                    text.max_width,
+                    text.align,
+                )
+            )
+            transform = item.visual_transform
+            center_x, center_y = context.camera.project(transform.position[:2], context.viewport)
+            text_x = round(center_x)
+            if text.align == "center":
+                text_x -= text_size[0] // 2
+            elif text.align == "right":
+                text_x -= text_size[0]
+            left = text_x - 4
+            top = round(center_y) - 4
+            right = text_x + text_size[0] + 5
+            bottom = round(center_y) + text_size[1] + 5
+        elif item.nine_slice is not None:
+            rect = item.nine_slice.rect
+            geometry = item.nine_slice.geometry
+            left = math.floor(rect.x - geometry.outset.left) - 4
+            top = math.floor(rect.y - geometry.outset.bottom) - 4
+            right = math.ceil(rect.x + rect.width + geometry.outset.right) + 5
+            bottom = math.ceil(rect.y + rect.height + geometry.outset.top) + 5
+        else:
+            left_bound, top_bound, right_bound, bottom_bound = item._projected_bounds(context)
+            left = math.floor(left_bound) - 4
+            top = math.floor(top_bound) - 4
+            right = math.ceil(right_bound) + 5
+            bottom = math.ceil(bottom_bound) + 5
+        left = max(0, left)
+        top = max(0, top)
+        right = min(width, right)
+        bottom = min(height, bottom)
+        if left >= right or top >= bottom:
+            return None
+        return self._rect((left, top, right - left, bottom - top))
 
     def _draw_contract_item(
         self,
