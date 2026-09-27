@@ -65,6 +65,12 @@ class TestBadChildException(unittest.TestCase):
         exc = BadChildException(int)
         self.assertIn("int", str(exc))
 
+    def test_does_not_crash_on_non_type_input(self) -> None:
+        for bad in (None, object()):
+            exc = BadChildException(bad)  # type: ignore[arg-type]
+            self.assertIsInstance(exc, Exception)
+            self.assertIn("instance", str(exc))
+
 
 class TestNotMyChildError(unittest.TestCase):
     def test_is_exception(self) -> None:

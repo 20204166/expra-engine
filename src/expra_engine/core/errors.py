@@ -33,8 +33,11 @@ class BadChildException(Exception):
     """Raised when a type (not an instance) is used as a child object."""
 
     def __init__(self, child: type) -> None:
-        type_name = child.__name__
-        message = f"child must be an instance, not the type {type_name!r}. Try: {type_name}()"
+        type_name = getattr(child, "__name__", None)
+        if type_name:
+            message = f"child must be an instance, not the type {type_name!r}. Try: {type_name}()"
+        else:
+            message = "child must be an instance, not a type"
         super().__init__(message)
 
 
