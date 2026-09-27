@@ -51,7 +51,11 @@ def run_project(project_dir: Path | str = ".") -> None:
     )
 
     def frame_factory(current_engine: Engine, dt: float) -> RenderFrame:
-        world_system = current_engine.world_streaming_system
+        world_system = (
+            current_engine.world_streaming_system
+            if current_engine.active_scene is not None
+            else None
+        )
         extracted = (
             extract_render_frame(
                 current_engine.active_scene,

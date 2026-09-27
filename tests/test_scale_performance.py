@@ -86,14 +86,12 @@ class StructuralScaleTests(unittest.TestCase):
             self.assertEqual(len(scene.walk_hierarchy()), n)
             timings[n] = _best_of(scene.walk_hierarchy)
 
-        # A doubling of n should roughly double the cost (linear), not
-        # roughly quadruple it (quadratic). Generous 3x slack per doubling
-        # so this isn't flaky on a loaded CI box -- it exists specifically
-        # to catch a REGRESSION back to O(n^2), not to enforce a tight bound.
-        ratio_500_1000 = timings[1000] / max(timings[500], 1e-6)
-        ratio_1000_2000 = timings[2000] / max(timings[1000], 1e-6)
-        self.assertLess(ratio_500_1000, 3.0, f"walk_hierarchy timings: {timings}")
-        self.assertLess(ratio_1000_2000, 3.0, f"walk_hierarchy timings: {timings}")
+        # Compare over a 4x input range so one noisy sub-millisecond sample
+        # cannot dominate a single doubling. Linear growth is about 4x here;
+        # quadratic growth is about 16x. The 8x ceiling leaves room for a
+        # loaded CI host while still detecting a return to O(n^2).
+        ratio_500_2000 = timings[2000] / max(timings[500], 1e-6)
+        self.assertLess(ratio_500_2000, 8.0, f"walk_hierarchy timings: {timings}")
 
     def test_children_of_returns_a_fresh_list_never_the_cached_one(self) -> None:
         """The derived index must never let a caller mutate cached state."""

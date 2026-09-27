@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 
 from expra_engine.core.engine import Engine, EngineRunState
 from expra_engine.core.scene import Scene
+from expra_engine.editor.active_document import ActiveDocument
 from expra_engine.observability import ObservabilityWatcher
 from expra_engine.runtime.input import ActionId, InputMap, PhysicalInput
 from expra_engine.ui.editor_window import EditorWindow
@@ -22,6 +23,7 @@ class EditorWindowAutosaveTests(unittest.TestCase):
         window = object.__new__(EditorWindow)
         window._root = MagicMock()
         window._is_closing = False
+        window._active_document = ActiveDocument()
         window._preferences = SimpleNamespace(
             autosave_interval_ms=1234,
             recent_projects=("/one", "/two"),
