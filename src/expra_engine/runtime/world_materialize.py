@@ -14,6 +14,7 @@ from expra_engine.core.component import TransformComponent
 from expra_engine.core.entity import Entity
 from expra_engine.core.scene import Level
 from expra_engine.core.world import LevelDescriptor
+from expra_engine.messages import world as world_messages
 from expra_engine.runtime.level_anchor import WorldPersistentActorComponent
 
 __all__ = (
@@ -108,7 +109,7 @@ def _materialize_world_level(
         if entity.parent_id is not None:
             raise ValueError("World-persistent actor marker must be placed on a Level root Entity")
         if any(owner == marker.persistent_id for owner in persistent_owner.values()):
-            raise ValueError(f"duplicate persistent actor ID: {marker.persistent_id!r}")
+            raise ValueError(world_messages.duplicate_persistent_actor(marker.persistent_id))
         for member in authored.walk_hierarchy(entity.entity_id):
             persistent_owner[member.entity_id] = marker.persistent_id
     id_map = {

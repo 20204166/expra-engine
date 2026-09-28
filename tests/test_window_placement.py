@@ -1,8 +1,27 @@
 from __future__ import annotations
 
+import importlib.util
 import unittest
 
+from expra_engine.editor import window_placement
 from expra_engine.editor.window_placement import WindowGeometry
+
+
+class InitialHierarchyWidthTests(unittest.TestCase):
+    def test_initial_hierarchy_width_is_responsive_and_clamped(self) -> None:
+        choose_width = getattr(window_placement, "initial_hierarchy_width", None)
+        self.assertTrue(callable(choose_width), "window placement must own the pane width policy")
+        assert callable(choose_width)
+        self.assertEqual(choose_width(1648), 494)
+        self.assertEqual(choose_width(1280), 384)
+        self.assertEqual(choose_width(900), 360)
+        self.assertEqual(choose_width(3000), 500)
+        self.assertEqual(choose_width(700), 190)
+
+    def test_window_placement_owns_responsive_sidebar_policy(self) -> None:
+        spec = importlib.util.find_spec("expra_engine.editor.window_placement")
+        self.assertIsNotNone(spec)
+        self.assertTrue(callable(getattr(window_placement, "initial_hierarchy_width", None)))
 
 
 class WindowGeometryTests(unittest.TestCase):

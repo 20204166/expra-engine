@@ -190,18 +190,24 @@ def test_world_streaming_explicit_save_load_uses_user_data_and_restores_before_s
 def test_world_save_restores_persistent_actor_transform_before_level_activation(
     tmp_path: Path,
 ) -> None:
+    from expra_engine.runtime.level_anchor import LevelAnchorComponent, LevelAnchorKind
+
     authored = Level("Town")
     courier = authored.create_entity("Courier", entity_id="courier")
     courier.add_component(TransformComponent(x=1.0, y=2.0))
     courier.add_component(WorldPersistentActorComponent("player"))
     courier.add_component(StreamingAnchorComponent("party"))
     courier.add_component(WorldSessionStateComponent({"health": 8}))
+    entrance = authored.create_entity("Start", entity_id="start")
+    entrance.add_component(TransformComponent(x=12.0, y=18.0))
+    entrance.add_component(LevelAnchorComponent("start", kind=LevelAnchorKind.ENTRANCE))
     world = World(
         "Main",
         world_id="main",
         levels=(LevelDescriptor("town", "levels/town.level.pb"),),
         primary_anchor_id="party",
         initial_level_id="town",
+        initial_entrance_id="start",
     )
     store = UserDataStore(tmp_path / "userdata")
     first_executor = ManualExecutor(1)

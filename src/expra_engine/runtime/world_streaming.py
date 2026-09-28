@@ -15,8 +15,11 @@ from expra_engine.core.component import TransformComponent
 from expra_engine.core.entity import Entity
 from expra_engine.core.scene import Level, Scene
 from expra_engine.core.world import LevelDescriptor, World
+from expra_engine.messages import world as world_messages
 from expra_engine.observability import ObservabilityWatcher
 from expra_engine.runtime.level_anchor import (
+    LevelAnchorKind,
+    StreamingAnchorComponent,
     WorldPersistentActorComponent,
 )
 from expra_engine.runtime.system import RuntimeSystem
@@ -117,7 +120,7 @@ class WorldStreamingSystem(
                 document = project.read_document(descriptor.resource_path, observer=observer)
                 if not isinstance(document, Level):
                     raise ValueError(
-                        f"World resource {descriptor.resource_path!r} did not contain a Level"
+                        world_messages.world_resource_not_level(descriptor.resource_path)
                     )
                 return document
 
@@ -167,6 +170,8 @@ class WorldStreamingSystem(
         self._session_state = WorldSessionState(world.world_id)
         self._session_state.world_resource = world_resource_path
         self._last_session_error: str | None = None
+        self._startup_error: str | None = None
+        self._startup_diagnostic: str | None = None
         self._camera_initialized = False
         self._camera_context_level_id: str | None = None
         self._camera_recenter_generation = 0
@@ -291,6 +296,13 @@ class WorldStreamingSystem(
                     completion.level_id, completion.generation, completion.error
                 ):
                     self._record("failed")
+                    if completion.level_id == self._startup_level_id:
+                        self._startup_error = world_messages.startup_level_load_failed(
+                            completion.level_id,
+                            type(completion.error).__name__,
+                            str(completion.error),
+                        )
+                        self._startup_diagnostic = self._startup_error
                 else:
                     self._discard_stale()
             elif completion.prepared is not None:
@@ -396,7 +408,10 @@ class WorldStreamingSystem(
             if self._engine is not None:
                 notify = getattr(self._engine, "notify_world_level_activated", None)
                 if callable(notify):
-                    notify(level_id, (*persistent_added, *added))
+                    # Start authored Level services/behaviours before transferred
+                    # World-persistent actors that may resolve those services in
+                    # their own on_start callbacks.
+                    notify(level_id, (*added, *persistent_added))
         except Exception as error:  # noqa: BLE001 - roll back partial runtime activation
             self._residency.fail_activation(level_id, error)
             for entity_id in reversed(added):
@@ -413,9 +428,14 @@ class WorldStreamingSystem(
             if _obs is not None and _at is not None:
                 _obs.finish(_at, outcome="failure")  # type: ignore[arg-type]
             self._record("failed")
-            self._last_transition_error = (
-                f"Level {level_id!r} activation failed: {type(error).__name__}: {str(error)[:160]}"
+            self._last_transition_error = world_messages.level_activation_failed(
+                level_id,
+                type(error).__name__,
+                str(error),
             )
+            if level_id == self._startup_level_id:
+                self._startup_error = self._last_transition_error
+                self._startup_diagnostic = self._startup_error
             return False
         if _obs is not None and _at is not None:
             _obs.finish(_at)  # type: ignore[arg-type]
@@ -436,6 +456,8 @@ class WorldStreamingSystem(
             self._camera_context_level_id = level_id
             self._environment_context_level_id = None
             self._environment_entity_ids = frozenset()
+        if level_id == self._startup_level_id:
+            self._validate_startup_anchor()
         return True
 
     def deactivate_level(self, level_id: str) -> bool:
@@ -469,7 +491,7 @@ class WorldStreamingSystem(
     def unload_level(self, level_id: str) -> bool:
         self._assert_owner()
         if level_id in self._pinned_levels:
-            raise RuntimeError(f"World Level {level_id!r} is pinned; unpin it before unloading")
+            raise RuntimeError(world_messages.world_level_pinned(level_id))
         self._manual_requests.discard(level_id)
         snapshot = self._residency.state(level_id)
         if snapshot.state is LevelResidencyState.ACTIVE:
@@ -523,6 +545,11 @@ class WorldStreamingSystem(
             if entity.has_tag("expra_world_level_root")
         }
         source_path = self._descriptors[level_id].resource_path
+        entrance_pose = None
+        if level_id == self.world.initial_level_id and self.world.initial_entrance_id is not None:
+            entrance = runtime_level.find_anchor(self.world.initial_entrance_id)
+            if entrance is not None:
+                entrance_pose = runtime_level.world_transform(entrance[0].entity_id)
         seen: set[str] = set()
         staged: list[tuple[str, str, Entity, tuple[Entity, ...]]] = []
         for entity in tuple(runtime_level.entities):
@@ -530,7 +557,7 @@ class WorldStreamingSystem(
             if marker is None:
                 continue
             if marker.persistent_id in seen:
-                raise ValueError(f"duplicate persistent actor ID: {marker.persistent_id!r}")
+                raise ValueError(world_messages.duplicate_persistent_actor(marker.persistent_id))
             seen.add(marker.persistent_id)
             if entity.parent_id not in root_ids:
                 raise ValueError(
@@ -541,7 +568,9 @@ class WorldStreamingSystem(
             if previous_source is not None:
                 if previous_source != source_path:
                     raise ValueError(
-                        f"persistent actor ID {marker.persistent_id!r} is declared by multiple Levels"
+                        world_messages.persistent_actor_declared_by_multiple_levels(
+                            marker.persistent_id
+                        )
                     )
                 runtime_level.remove_entity(entity.entity_id, recursive=True)
                 continue
@@ -567,14 +596,59 @@ class WorldStreamingSystem(
             )
             if saved_actor_levels is not None and saved_actor_levels[0] != level_id:
                 raise WorldSessionStateError(
-                    f"persistent actor {marker.persistent_id!r} source Level changed"
+                    world_messages.persistent_actor_source_level_changed(marker.persistent_id)
                 )
             if saved_actor_levels is not None:
                 self._persistent_actor_levels[marker.persistent_id] = saved_actor_levels[1]
+            primary_anchor = entity.get_component(StreamingAnchorComponent)
+            if (
+                saved_actor_levels is None
+                and entrance_pose is not None
+                and self.world.primary_anchor_id is not None
+                and primary_anchor is not None
+                and primary_anchor.anchor_id == self.world.primary_anchor_id
+            ):
+                transform = entity.get_component(TransformComponent)
+                assert transform is not None
+                transform.x, transform.y = entrance_pose.position
+                transform.rotation = entrance_pose.rotation
+                transform.scale_x, transform.scale_y = entrance_pose.scale
             entity.parent_id = None
             runtime_level.remove_entity(entity.entity_id, recursive=True)
             staged.append((marker.persistent_id, source_path, entity, subtree))
         return staged
+
+    def _validate_startup_anchor(self) -> None:
+        """Diagnose a broken primary actor without suppressing initial Level rendering."""
+        previous_diagnostic = self._startup_diagnostic
+        anchor_id = self.world.primary_anchor_id
+        if anchor_id is None:
+            if self.world.initial_entrance_id is not None:
+                message = world_messages.initial_entrance_without_primary_anchor(
+                    self.world.initial_entrance_id
+                )
+                self._last_transition_error = message
+                self._startup_diagnostic = message
+            return
+        anchor = next(
+            (item for item in self.streaming_anchors() if item.anchor_id == anchor_id), None
+        )
+        if anchor is None:
+            message = world_messages.primary_anchor_missing(
+                anchor_id,
+                self._startup_level_id,
+            )
+            self._last_transition_error = message
+            self._startup_diagnostic = message
+            return
+        if anchor.entity_id is None or self._persistent_id_for_entity(anchor.entity_id) is None:
+            message = world_messages.primary_anchor_not_persistent(anchor_id)
+            self._last_transition_error = message
+            self._startup_diagnostic = message
+            return
+        self._startup_diagnostic = None
+        if previous_diagnostic is not None and self._last_transition_error == previous_diagnostic:
+            self._last_transition_error = None
 
     def state(self, level_id: str) -> LevelResidencySnapshot:
         return self._residency.state(level_id)
@@ -639,6 +713,21 @@ class WorldStreamingSystem(
             transition=self.transition,
         )
 
+    @property
+    def startup_level_id(self) -> str | None:
+        """The Level selected for this fresh or restored World session."""
+        return self._startup_level_id
+
+    @property
+    def startup_error(self) -> str | None:
+        """A failure that prevented the selected startup Level from activating."""
+        return self._startup_error
+
+    @property
+    def startup_diagnostic(self) -> str | None:
+        """A non-fatal startup configuration issue, if the Level can still render."""
+        return self._startup_diagnostic
+
     def stop(self) -> None:
         if not self._started:
             return
@@ -680,6 +769,8 @@ class WorldStreamingSystem(
         self._session_state.persistent_actors.clear()
         self._session_state.current_levels.clear()
         self._last_session_error = None
+        self._startup_error = None
+        self._startup_diagnostic = None
         self._pinned_levels.clear()
         self._manual_requests.clear()
         self._last_safe_anchor_positions.clear()
@@ -745,6 +836,21 @@ class WorldStreamingSystem(
                     authored = level_loader(item)
                     if not isinstance(authored, Level):
                         raise TypeError("World Level loader must return a Level")
+                    if (
+                        item.instance_id == self.world.initial_level_id
+                        and self.world.initial_entrance_id is not None
+                    ):
+                        entrance = authored.find_anchor(self.world.initial_entrance_id)
+                        if entrance is None or entrance[1].kind not in {
+                            LevelAnchorKind.ENTRANCE,
+                            LevelAnchorKind.BOTH,
+                        }:
+                            raise ValueError(
+                                world_messages.initial_entrance_invalid(
+                                    self.world.initial_entrance_id,
+                                    item.instance_id,
+                                )
+                            )
                     runtime = level_materializer(authored, item, world_id=active_world_id)
                     if not isinstance(runtime, Level):
                         raise TypeError("World Level materializer must return a Level")

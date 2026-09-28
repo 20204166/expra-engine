@@ -501,14 +501,15 @@ class TestProjectWorkflow(unittest.TestCase):
             with patch("expra_engine.editor.project_workflow.subprocess.Popen") as launch:
                 workflow.run_project()
 
-            launch.assert_called_once_with(
-                [sys.executable, str(project.path / "__main__.py")],
-                cwd=project.path,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            launch.assert_called_once()
+            args, kwargs = launch.call_args
+            self.assertEqual(args[0], [sys.executable, str(project.path / "__main__.py")])
+            self.assertEqual(kwargs["cwd"], project.path)
+            self.assertIs(kwargs["stdin"], subprocess.DEVNULL)
+            self.assertIs(kwargs["stdout"], subprocess.DEVNULL)
+            self.assertIs(kwargs["stderr"], workflow._project_output_file)
             self.assertIs(workflow._project_process, launch.return_value)
+            workflow._close_project_output()
 
     def test_double_run_keeps_one_live_child(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -609,6 +610,49 @@ class TestProjectWorkflow(unittest.TestCase):
             self.assertIsNone(workflow._project_process)
             window._console.log.assert_called()
             self.assertIn("7", window._console.log.call_args.args[0])
+
+    def test_child_failure_reports_bounded_stderr_and_both_entrypoints(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Project.create("Runtime", Path(tmp) / "runtime")
+            level = Level("Start")
+            project.save_document(level, "levels/start.level.pb")
+            project.set_entrypoint("levels/start.level.pb")
+            project.save()
+            script = project.path / "__main__.py"
+            script.write_text(
+                "import sys\n"
+                "sys.stderr.write('diagnostic-noise-' * 1000 + '\\n')\n"
+                "print('useful startup failure', file=sys.stderr, flush=True)\n"
+                "raise SystemExit(7)\n",
+                encoding="utf-8",
+            )
+            timer = RecordingTimer()
+            window = SimpleNamespace(
+                _engine=SimpleNamespace(project=project),
+                _console=MagicMock(),
+                _root=MagicMock(),
+                _timer=timer,
+            )
+            workflow = ProjectWorkflow(window)
+
+            workflow.run_project()
+            process = workflow._project_process
+            output_file = workflow._project_output_file
+            self.assertIsNotNone(process)
+            self.assertIsNotNone(output_file)
+            assert process is not None
+            assert output_file is not None
+            self.assertEqual(process.wait(timeout=5), 7)
+            timer.fire_next()
+
+            messages = [call.args[0] for call in window._console.log.call_args_list]
+            failure = next(message for message in messages if "exited with status 7" in message)
+            self.assertIn("useful startup failure", failure)
+            self.assertIn("\nuseful startup failure", failure)
+            self.assertIn("__main__.py", failure)
+            self.assertIn("levels/start.level.pb", failure)
+            self.assertLessEqual(len(failure), 2400)
+            self.assertTrue(output_file.closed)
 
     def test_poll_failure_stops_child_instead_of_repeating_poll_errors(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -5,6 +5,27 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+_HIERARCHY_WIDTH_RATIO = 0.30
+_HIERARCHY_DEFAULT_MIN_WIDTH = 360
+_HIERARCHY_DEFAULT_MAX_WIDTH = 500
+_HIERARCHY_MIN_WIDTH = 190
+_INSPECTOR_MIN_WIDTH = 260
+_VIEWPORT_MIN_WIDTH = 260
+
+
+def initial_hierarchy_width(content_width: int) -> int:
+    """Choose a responsive startup width for the editor's left navigation pane."""
+    available = max(
+        _HIERARCHY_MIN_WIDTH,
+        content_width - _INSPECTOR_MIN_WIDTH - _VIEWPORT_MIN_WIDTH,
+    )
+    preferred = round(content_width * _HIERARCHY_WIDTH_RATIO)
+    return min(
+        max(_HIERARCHY_DEFAULT_MIN_WIDTH, preferred),
+        _HIERARCHY_DEFAULT_MAX_WIDTH,
+        available,
+    )
+
 
 @dataclass(frozen=True, slots=True)
 class WindowGeometry:
@@ -36,4 +57,4 @@ class WindowGeometry:
             return None
 
 
-__all__ = ["WindowGeometry"]
+__all__ = ["WindowGeometry", "initial_hierarchy_width"]

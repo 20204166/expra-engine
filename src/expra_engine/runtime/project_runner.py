@@ -8,6 +8,7 @@ from expra_engine.core.engine import Engine
 from expra_engine.core.project import Project, ProjectError
 from expra_engine.core.scene import Scene
 from expra_engine.core.world import World
+from expra_engine.messages import project as project_messages
 from expra_engine.observability import ObservabilityWatcher
 from expra_engine.runtime.pygame_renderer import (
     PygameRenderer,
@@ -39,7 +40,7 @@ def run_project(project_dir: Path | str = ".") -> None:
     elif isinstance(document, Scene):
         engine.set_scene(document)
     else:
-        raise ProjectError("Project entrypoint must be a Scene, Level, or World")
+        raise ProjectError(project_messages.project_entrypoint_document_unsupported())
     renderer = PygameRenderer(
         pygame,
         None,
@@ -56,6 +57,8 @@ def run_project(project_dir: Path | str = ".") -> None:
             if current_engine.active_scene is not None
             else None
         )
+        if world_system is not None and world_system.startup_error is not None:
+            raise RuntimeError(world_system.startup_error)
         extracted = (
             extract_render_frame(
                 current_engine.active_scene,
@@ -94,7 +97,7 @@ def run_project(project_dir: Path | str = ".") -> None:
     world_system = engine.world_streaming_system
     try:
         if not engine.play():
-            raise RuntimeError("Project Engine could not enter Play")
+            raise RuntimeError(project_messages.project_engine_could_not_play())
         runtime.run()
     finally:
         if engine.run_state.value != "edit":

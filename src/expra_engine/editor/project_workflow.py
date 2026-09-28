@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import subprocess
 import sys
+import tempfile
 import uuid
 from dataclasses import replace
 from pathlib import Path, PureWindowsPath
@@ -17,10 +19,13 @@ from expra_engine.core.scene import Level, Scene
 from expra_engine.core.scene.document_codec import canonical_pb_path
 from expra_engine.core.world import World, WorldConnection
 from expra_engine.editor.world_authoring import WorldAuthoringWorkflow
+from expra_engine.messages import project as project_messages
 from expra_engine.runtime.input import ActionId, PhysicalInput
 from expra_engine.runtime.script_registry import ScriptRegistry
 
 _PROJECT_POLL_INTERVAL_MS = 100
+_PROJECT_OUTPUT_TAIL_BYTES = 8192
+_PROJECT_OUTPUT_MAX_CHARS = 2048
 
 
 class ProjectWorkflow:
@@ -31,6 +36,9 @@ class ProjectWorkflow:
         self._pending_restore: tuple[Any, Path | None] | None = None
         self._project_process: subprocess.Popen[bytes] | None = None
         self._project_poll_id: str | None = None
+        self._project_output_file: Any | None = None
+        self._project_script_path: Path | None = None
+        self._project_document_entrypoint: str | None = None
         self.world_authoring = WorldAuthoringWorkflow(window)
 
     def new_project(self) -> None:
@@ -99,6 +107,23 @@ class ProjectWorkflow:
             window._console.log(f"[Editor] Imported asset: {resource}")
         window._assets.refresh()
 
+    def open_asset(self, entry: Any) -> None:
+        """Open a Scene, Level, or World asset through the typed Project workflow."""
+        window = self.window
+        project = window._engine.project
+        if project is not None and entry.kind in {"Scene", "Level", "World"}:
+            try:
+                relative = entry.path.resolve().relative_to(project.path.resolve()).as_posix()
+            except ValueError:
+                window._console.log(
+                    "[Assets] Document is outside the current project", level="error"
+                )
+                return
+            self.open_document(relative)
+            return
+        if entry.logical_id is not None:
+            window._console.log(f"[Assets] Open: {entry.logical_id}", level="info")
+
     def configure_input(self) -> None:
         window = self.window
         project = window._engine.project
@@ -150,6 +175,8 @@ class ProjectWorkflow:
     def _confirm_switch(self) -> bool:
         """Guard project transitions when the command history has edits."""
         window = self.window
+        if window._engine.project is None:
+            return True
         active_document = getattr(window, "_active_document", None)
         dirty = (
             active_document.is_dirty
@@ -621,32 +648,56 @@ class ProjectWorkflow:
                 return
             if return_code is None:
                 return
-            self._forget_project_process(process)
             self._report_project_exit(return_code)
+            self._forget_project_process(process)
+            self._close_project_output()
         try:
             script = self._script_entry_point_path(project)
         except (OSError, ProjectError, ValueError) as exc:
+            window._console.log(
+                project_messages.project_script_start_failed(
+                    project.script_entry_point, project.entrypoint, str(exc)
+                ),
+                level="error",
+            )
             messagebox.showerror("Run Project", str(exc), parent=window._root)
             return
         if not script.is_file():
+            error = project_messages.project_script_entrypoint_missing(project.script_entry_point)
+            window._console.log(
+                project_messages.project_script_start_failed(
+                    project.script_entry_point, project.entrypoint, error
+                ),
+                level="error",
+            )
             messagebox.showerror(
                 "Run Project",
-                f"Script entry point not found: {project.script_entry_point}",
+                error,
                 parent=window._root,
             )
             return
+        # The workflow owns this file until the launched child exits.
+        output_file = tempfile.TemporaryFile(mode="w+b")  # noqa: SIM115
         try:
             process = subprocess.Popen(
                 [sys.executable, str(script)],
                 cwd=project.path,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stderr=output_file,
             )
         except OSError as exc:
+            output_file.close()
+            window._console.log(
+                project_messages.project_launch_failed(str(script), project.entrypoint, str(exc)),
+                level="error",
+            )
             messagebox.showerror("Run Project", str(exc), parent=window._root)
             return
         self._project_process = process
+        self._project_output_file = output_file
+        self._project_script_path = script
+        self._project_document_entrypoint = project.entrypoint
         if not self._schedule_project_poll(process):
             try:
                 self.stop_project()
@@ -656,13 +707,18 @@ class ProjectWorkflow:
                 detail = "Could not monitor project process; it was stopped."
             messagebox.showerror("Run Project", detail, parent=window._root)
             return
-        window._console.log(f"[Editor] Started project: {project.script_entry_point}")
+        window._console.log(
+            project_messages.project_started(
+                project.script_entry_point,
+                project.entrypoint,
+            )
+        )
 
     @staticmethod
     def _script_entry_point_path(project: Project) -> Path:
         entry_point = project.script_entry_point
         if not isinstance(entry_point, str) or not entry_point.strip():
-            raise ProjectError("project script entry point must be a non-empty relative path")
+            raise ProjectError(project_messages.project_script_entrypoint_required())
         candidate = Path(entry_point)
         windows_candidate = PureWindowsPath(entry_point)
         if (
@@ -672,13 +728,15 @@ class ProjectWorkflow:
             or ".." in candidate.parts
             or ".." in windows_candidate.parts
         ):
-            raise ProjectError("project script entry point must remain inside the project")
+            raise ProjectError(project_messages.project_script_entrypoint_outside_project())
         project_root = project.path.resolve()
         script = (project_root / candidate).resolve()
         try:
             script.relative_to(project_root)
         except ValueError as error:
-            raise ProjectError("project script entry point escapes the project") from error
+            raise ProjectError(
+                project_messages.project_script_entrypoint_escapes_project()
+            ) from error
         return script
 
     def _schedule_project_poll(self, process: subprocess.Popen[bytes]) -> bool:
@@ -721,8 +779,9 @@ class ProjectWorkflow:
                 )
             return
         if return_code is not None:
-            self._forget_project_process(process)
             self._report_project_exit(return_code)
+            self._forget_project_process(process)
+            self._close_project_output()
             return
         if not self._schedule_project_poll(process):
             try:
@@ -739,9 +798,43 @@ class ProjectWorkflow:
                 )
 
     def _report_project_exit(self, return_code: int) -> None:
-        status = "exited" if return_code == 0 else f"exited with status {return_code}"
         level = "info" if return_code == 0 else "error"
-        self.window._console.log(f"[Editor] Project {status}", level=level)
+        detail = self._read_project_output_tail() if return_code != 0 else ""
+        self.window._console.log(
+            project_messages.project_exited(
+                return_code,
+                str(self._project_script_path or "(unknown)"),
+                self._project_document_entrypoint,
+                detail,
+            ),
+            level=level,
+        )
+
+    def _read_project_output_tail(self) -> str:
+        output_file = self._project_output_file
+        if output_file is None:
+            return ""
+        try:
+            output_file.flush()
+            output_file.seek(0, 2)
+            size = output_file.tell()
+            output_file.seek(max(0, size - _PROJECT_OUTPUT_TAIL_BYTES))
+            data = output_file.read(_PROJECT_OUTPUT_TAIL_BYTES)
+        except (OSError, ValueError):
+            return ""
+        text = data.decode("utf-8", errors="replace").strip()
+        if len(text) > _PROJECT_OUTPUT_MAX_CHARS:
+            text = text[-_PROJECT_OUTPUT_MAX_CHARS:]
+        return text
+
+    def _close_project_output(self) -> None:
+        output_file = self._project_output_file
+        self._project_output_file = None
+        self._project_script_path = None
+        self._project_document_entrypoint = None
+        if output_file is not None:
+            with contextlib.suppress(OSError):
+                output_file.close()
 
     def _cancel_project_poll(self) -> None:
         identifier = self._project_poll_id
@@ -768,15 +861,23 @@ class ProjectWorkflow:
         process = self._project_process
         self._cancel_project_poll()
         if process is None:
+            self._close_project_output()
             return
-        if self._process_exited(process):
+        try:
+            return_code = process.poll()
+        except OSError:
+            return_code = None
+        if return_code is not None:
+            self._report_project_exit(return_code)
             self._forget_project_process(process)
+            self._close_project_output()
             return
         try:
             process.terminate()
         except OSError:
             if self._process_exited(process):
                 self._forget_project_process(process)
+                self._close_project_output()
                 return
             self._schedule_project_poll(process)
             raise
@@ -789,16 +890,19 @@ class ProjectWorkflow:
             except (OSError, subprocess.TimeoutExpired):
                 if self._process_exited(process):
                     self._forget_project_process(process)
+                    self._close_project_output()
                     return
                 self._schedule_project_poll(process)
                 raise
         except OSError:
             if self._process_exited(process):
                 self._forget_project_process(process)
+                self._close_project_output()
                 return
             self._schedule_project_poll(process)
             raise
         self._forget_project_process(process)
+        self._close_project_output()
 
     def restore_after_run_project(self) -> None:
         """Undo ``run_project``'s scene swap once the run has stopped."""

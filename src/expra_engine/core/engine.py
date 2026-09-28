@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, Any
 
 from expra_engine.core.scene import Scene
 from expra_engine.core.utils import get_time
+from expra_engine.messages import engine as engine_messages
 from expra_engine.observability import ObservabilityWatcher
 from expra_engine.runtime.behaviour import Behaviour, BehaviourFactory
 from expra_engine.runtime.input import ActionId, InputMap, PhysicalInput
@@ -326,7 +327,12 @@ class Engine:
         self, phase: str, level_id: str, error: Exception
     ) -> None:
         self._world_lifecycle_errors.append(
-            f"{phase} {level_id}: {type(error).__name__}: {str(error)[:160]}"
+            engine_messages.world_lifecycle_failed(
+                phase,
+                level_id,
+                type(error).__name__,
+                str(error),
+            )
         )
         del self._world_lifecycle_errors[:-64]
 

@@ -15,6 +15,7 @@ from expra_engine.core.engine import Engine, EngineRunState
 from expra_engine.core.scene import Scene, SceneInstanceComponent
 from expra_engine.editor.assets import AssetEntry
 from expra_engine.editor.runtime_preview import RuntimePreviewLoop
+from expra_engine.editor.window_placement import initial_hierarchy_width
 from expra_engine.filesystem import ResourceId
 from expra_engine.observability import ObservabilityWatcher
 from expra_engine.runtime.collider import ColliderComponent
@@ -601,6 +602,39 @@ class EditorPanelTests(unittest.TestCase):
         self.assertEqual(panel._tree.selection(), (entity.entity_id,))
         self.assertEqual(panel._tree.item(entity.entity_id, "text"), "[PLY] Player")
         self.assertTrue(panel._tree.item(entity.entity_id, "open"))
+
+    def test_large_hierarchy_selection_uses_retained_rows_without_tk_exists_per_id(self) -> None:
+        panel = HierarchyPanel(self.root)
+        panel.pack(fill="both", expand=True)
+        scene = Scene("Large selection")
+        entity_ids = tuple(scene.create_entity(f"Entity {index}").entity_id for index in range(1000))
+        panel.render(scene)
+        exists_calls = 0
+        original_exists = panel._tree.exists
+
+        def count_exists(item: str) -> bool:
+            nonlocal exists_calls
+            exists_calls += 1
+            return original_exists(item)
+
+        panel._tree.exists = count_exists
+
+        panel.select_many(entity_ids)
+
+        self.assertEqual(panel._tree.selection(), entity_ids)
+        self.assertEqual(exists_calls, 0)
+
+    def test_large_hierarchy_selection_skips_a_row_removed_outside_reconciliation(self) -> None:
+        panel = HierarchyPanel(self.root)
+        panel.pack(fill="both", expand=True)
+        scene = Scene("Stale row")
+        entities = tuple(scene.create_entity(f"Entity {index}") for index in range(2))
+        panel.render(scene)
+        panel._tree.delete(entities[0].entity_id)
+
+        panel.select_many(tuple(entity.entity_id for entity in entities))
+
+        self.assertEqual(panel._tree.selection(), (entities[1].entity_id,))
 
     def test_unchanged_hierarchy_render_does_not_update_or_move_rows(self) -> None:
         panel = HierarchyPanel(self.root)
@@ -1205,6 +1239,81 @@ class EditorPanelTests(unittest.TestCase):
 
 @unittest.skipUnless(DISPLAY_AVAILABLE, "no display for real Tk editor tests")
 class EditorWindowLayoutTests(unittest.TestCase):
+    def test_initial_sidebar_width_is_responsive_and_clamped(self) -> None:
+        self.assertEqual(initial_hierarchy_width(1648), 494)
+        self.assertEqual(initial_hierarchy_width(1280), 384)
+        self.assertEqual(initial_hierarchy_width(900), 360)
+        self.assertEqual(initial_hierarchy_width(3000), 500)
+        self.assertEqual(initial_hierarchy_width(700), 190)
+
+    def test_initial_sidebar_is_applied_once_and_survives_refresh_and_document_changes(self) -> None:
+        window = EditorWindow(Engine())
+        try:
+            window._root.update()
+            initial = window._content_paned.sashpos(0)
+            self.assertGreaterEqual(
+                initial,
+                360,
+                f"content width={window._content_paned.winfo_width()}, "
+                f"root geometry={window._root.geometry()}, timer={window._sash_after_id}",
+            )
+            self.assertLessEqual(initial, 500)
+
+            window._content_paned.sashpos(0, 275)
+            window._root.update_idletasks()
+            window._assets.refresh()
+            window._engine.set_scene(Scene("Layout check"))
+            window._present_all()
+            window._root.update_idletasks()
+
+            self.assertEqual(window._content_paned.sashpos(0), 275)
+            window._content_paned.sashpos(0, 460)
+            window._root.geometry("1100x800")
+            window._root.update()
+            self.assertEqual(window._content_paned.sashpos(0), 460)
+            window._act_play()
+            window._act_stop()
+            window._root.update_idletasks()
+            self.assertEqual(window._content_paned.sashpos(0), 460)
+        finally:
+            window._on_close()
+
+    def test_world_startup_diagnostic_is_written_to_console_once(self) -> None:
+        window = EditorWindow(Engine())
+        try:
+            window._engine._world_streaming_system = SimpleNamespace(
+                startup_diagnostic="World primary anchor 'player' is missing",
+                startup_error=None,
+            )
+            with patch.object(window._console, "log") as log:
+                window._runtime_preview._report_world_startup_state()
+                window._runtime_preview._report_world_startup_state()
+
+            log.assert_called_once_with(
+                "[World] World primary anchor 'player' is missing", level="error"
+            )
+        finally:
+            window._on_close()
+
+    def test_fatal_world_startup_error_is_logged_and_stops_embedded_play(self) -> None:
+        window = EditorWindow(Engine())
+        try:
+            message = "World startup Level 'town' failed to load: ProjectError: missing"
+            window._engine._world_streaming_system = SimpleNamespace(
+                startup_diagnostic=message,
+                startup_error=message,
+            )
+            with (
+                patch.object(window._console, "log") as log,
+                patch.object(window._project_workflow, "stop_project") as stop_project,
+            ):
+                window._runtime_preview._report_world_startup_state()
+
+            log.assert_called_once_with(f"[World] {message}", level="error")
+            stop_project.assert_called_once_with()
+        finally:
+            window._on_close()
+
     @unittest.skipUnless(DISPLAY_AVAILABLE, "no display for real Tk editor tests")
     def test_add_entity_does_not_recurse_through_tree_selection(self) -> None:
         window = EditorWindow(Engine())
@@ -1271,7 +1380,8 @@ class EditorWindowLayoutTests(unittest.TestCase):
             entities = []
             for index in range(12):
                 entity = scene.create_entity(f"Entity {index}")
-                entity.add_component(TransformComponent(x=float(index * 2)))
+                # Keep the selected RenderItem visible with the responsive sidebars.
+                entity.add_component(TransformComponent(x=float(index)))
                 entity.add_component(PrimitiveComponent())
                 entities.append(entity)
             window._engine.set_scene(scene)

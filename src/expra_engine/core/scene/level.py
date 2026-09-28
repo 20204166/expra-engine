@@ -7,6 +7,7 @@ from typing import Any, cast
 
 from expra_engine.core.document_kind import DocumentKind
 from expra_engine.core.scene.scene import Scene
+from expra_engine.messages import world as world_messages
 from expra_engine.observability import ObservabilityWatcher
 
 __all__ = ("Level", "LevelMetadata")
@@ -101,7 +102,7 @@ class Level(Scene):
             if component is None:
                 continue
             if component.anchor_id in seen:
-                raise ValueError(f"duplicate Level anchor ID: {component.anchor_id!r}")
+                raise ValueError(world_messages.duplicate_level_anchor(component.anchor_id))
             seen.add(component.anchor_id)
 
     @classmethod

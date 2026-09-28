@@ -5,12 +5,13 @@ records after/after_cancel calls so no display is needed.
 """
 
 import threading
+import time
 import tkinter as tk
 import unittest
 from collections.abc import Callable
 from queue import Queue
 from typing import TYPE_CHECKING, cast
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 if TYPE_CHECKING:
     from expra_engine.editor.delivery import TkDeliveryQueue
@@ -133,6 +134,67 @@ class TkDeliveryQueueTests(unittest.TestCase):
         self.assertEqual(order, ["first", "nested"])
         self.assertEqual(len(widget.after_calls), 1)
 
+    def test_self_replenishing_callbacks_yield_between_drain_turns(self) -> None:
+        q, _widget = self._make_queue()
+        delivered = 0
+        total = 500
+
+        def enqueue_next() -> None:
+            nonlocal delivered
+            delivered += 1
+            if delivered < total:
+                q(enqueue_next)
+
+        q(enqueue_next)
+        q._drain()  # type: ignore[attr-defined]
+
+        first_turn = delivered
+        self.assertGreater(first_turn, 0)
+        self.assertLess(first_turn, total, "one Tk turn must not drain an unbounded backlog")
+
+        while delivered < total:
+            q._drain()  # type: ignore[attr-defined]
+
+        self.assertEqual(delivered, total)
+
+    def test_drain_yields_after_time_budget_even_below_callback_count_limit(self) -> None:
+        q, _widget = self._make_queue()
+        delivered: list[int] = []
+        for index in range(50):
+            q(lambda index=index: delivered.append(index))
+
+        with patch.object(time, "monotonic", side_effect=(0.0, 0.006)):
+            q._drain()  # type: ignore[attr-defined]
+
+        first_turn = len(delivered)
+        self.assertGreater(first_turn, 0)
+        self.assertLess(first_turn, 50)
+
+        while len(delivered) < 50:
+            q._drain()  # type: ignore[attr-defined]
+
+        self.assertEqual(delivered, list(range(50)))
+
+    def test_app_coordinator_posts_are_delivered_across_bounded_turns(self) -> None:
+        from expra_engine.coordinators.app_coordinator import AppCoordinator
+
+        q, _widget = self._make_queue()
+        coordinator = AppCoordinator(deliver=q, runner=lambda _worker: None)
+        delivered: list[int] = []
+
+        for index in range(250):
+            coordinator.post(lambda index=index: delivered.append(index))
+
+        q._drain()  # type: ignore[attr-defined]
+        first_turn = len(delivered)
+        self.assertGreater(first_turn, 0)
+        self.assertLess(first_turn, 250)
+
+        while len(delivered) < 250:
+            q._drain()  # type: ignore[attr-defined]
+
+        self.assertEqual(delivered, list(range(250)))
+
     def test_close_from_within_callback_stops_drain_without_reschedule(self) -> None:
         q, widget = self._make_queue()
         ran: list[str] = []
@@ -196,7 +258,8 @@ class TkDeliveryQueueTests(unittest.TestCase):
         for t in threads:
             t.join()
 
-        q._drain()  # type: ignore[attr-defined]
+        while len(results) < 200:
+            q._drain()  # type: ignore[attr-defined]
 
         self.assertEqual(errors, [])
         self.assertEqual(len(results), 200)

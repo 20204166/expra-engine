@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from expra_engine.core.scene import Level
 from expra_engine.core.world import World, WorldConnection
+from expra_engine.messages import world as world_messages
 
 if TYPE_CHECKING:
     from expra_engine.runtime.world_transition import WorldTransitionSnapshot
@@ -89,7 +90,7 @@ class WorldStreamingPolicy:
             raise TypeError("anchors must contain StreamingAnchor values")
         for anchor in anchor_values:
             if anchor.level_id not in descriptors:
-                raise ValueError(f"streaming anchor references an unknown Level: {anchor.level_id!r}")
+                raise ValueError(world_messages.streaming_anchor_unknown_level(anchor.level_id))
         pinned = set(pinned_level_ids)
         if pinned - descriptors.keys():
             raise ValueError("pinned Level set contains an unknown Level")

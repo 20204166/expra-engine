@@ -64,7 +64,7 @@ from expra_engine.editor.preferences import PreferencesStore
 from expra_engine.editor.project_workflow import ProjectWorkflow
 from expra_engine.editor.runtime_preview import RuntimePreviewLoop
 from expra_engine.editor.script_tools import attach_script, create_behaviour_script
-from expra_engine.editor.window_placement import WindowGeometry
+from expra_engine.editor.window_placement import WindowGeometry, initial_hierarchy_width
 from expra_engine.editor.world_authoring import WorldEditorActionsMixin
 from expra_engine.observability import ObservabilityWatcher
 from expra_engine.runtime.input import PhysicalInput
@@ -89,7 +89,6 @@ _WINDOW_WIDTH = 1280
 _WINDOW_HEIGHT = 800
 _WINDOW_MIN_WIDTH = 980
 _WINDOW_MIN_HEIGHT = 640
-_HIERARCHY_WIDTH = 230
 _HIERARCHY_MIN_WIDTH = 190
 _INSPECTOR_WIDTH = 300
 _INSPECTOR_MIN_WIDTH = 260
@@ -181,6 +180,10 @@ class EditorWindow(EditorDocumentSurface, WorldEditorActionsMixin):
                 "viewport", (self._engine.active_scene, None), priority=20
             ),
             observer=self._observer,
+            on_world_startup_diagnostic=lambda message: self._console.log(
+                f"[World] {message}", level="error"
+            ),
+            on_world_startup_error=self._act_stop,
         )
 
         self._register_actions()
@@ -244,7 +247,11 @@ class EditorWindow(EditorDocumentSurface, WorldEditorActionsMixin):
         self._content_paned.pack(fill="both", expand=True)
 
         # Left pane: hierarchy and project assets
-        hier_frame = ttk.Frame(self._content_paned, width=_HIERARCHY_WIDTH, style=STYLE_PANEL_FRAME)
+        hier_frame = ttk.Frame(
+            self._content_paned,
+            width=500,
+            style=STYLE_PANEL_FRAME,
+        )
         left_paned = ttk.Panedwindow(hier_frame, orient="vertical")
         left_paned.pack(fill="both", expand=True)
         hierarchy_host = ttk.Frame(left_paned, style=STYLE_PANEL_FRAME)
@@ -333,21 +340,12 @@ class EditorWindow(EditorDocumentSurface, WorldEditorActionsMixin):
         self._console = ConsolePanel(self._console_host, colors=self._colors)
         self._console.pack(fill="both", expand=True)
         self._register_render_targets()
+        self._root.update_idletasks()
         self._sash_after_id = self._root.after_idle(self._set_initial_sashes)
         self._assets.refresh()
 
     def _on_asset_open(self, entry: Any) -> None:
-        project = self._engine.project
-        if project is not None and entry.kind in {"Scene", "Level", "World"}:
-            try:
-                relative = entry.path.resolve().relative_to(project.path.resolve()).as_posix()
-            except ValueError:
-                self._console.log("[Assets] Document is outside the current project", level="error")
-                return
-            self._project_workflow.open_document(relative)
-            return
-        if entry.logical_id is not None:
-            self._console.log(f"[Assets] Open: {entry.logical_id}", level="info")
+        self._project_workflow.open_asset(entry)
 
     def _set_initial_sashes(self) -> None:
         """Place side panes after Tk has measured the initial shell."""
@@ -356,11 +354,11 @@ class EditorWindow(EditorDocumentSurface, WorldEditorActionsMixin):
             width = self._content_paned.winfo_width()
             height = self._main_paned.winfo_height()
             if width <= 1 or height <= 1:
-                self._sash_after_id = self._root.after(25, self._set_initial_sashes)
                 return
 
-            self._content_paned.sashpos(0, _HIERARCHY_WIDTH)
-            self._content_paned.sashpos(1, max(_HIERARCHY_WIDTH + 260, width - _INSPECTOR_WIDTH))
+            hierarchy_width = initial_hierarchy_width(width)
+            self._content_paned.sashpos(0, hierarchy_width)
+            self._content_paned.sashpos(1, max(hierarchy_width + 260, width - _INSPECTOR_WIDTH))
             self._main_paned.sashpos(0, max(300, height - _BOTTOM_HEIGHT))
             self._clamp_horizontal_sashes()
             self._clamp_vertical_sash()

@@ -92,7 +92,7 @@ def test_level_rejects_duplicate_anchor_ids() -> None:
     for name in ("North Gate", "North Window"):
         level.create_entity(name).add_component(LevelAnchorComponent("north"))
 
-    with pytest.raises(ValueError, match="anchor"):
+    with pytest.raises(ValueError, match="duplicate Level anchor ID: 'north'"):
         level.validate_anchors()
 
 

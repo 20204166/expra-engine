@@ -139,7 +139,7 @@ class HierarchyPanel(tk.Frame):
                 self._actions.set_enabled("delete_entity", False)
                 self._actions.set_enabled("duplicate_selection", False)
             if self._world_document is scene:
-                self.select_many(tuple(item for item in selected if self._tree.exists(item)))
+                self.select_many(tuple(item for item in selected if item in self._row_state))
                 return
             self._world_document = scene
             incoming = self._collect_world_rows(scene)
@@ -230,20 +230,26 @@ class HierarchyPanel(tk.Frame):
     def select_many(self, entity_ids: tuple[str, ...]) -> None:
         """Select exactly ``entity_ids`` (deduped, order-preserving)."""
         ids = tuple(dict.fromkeys(entity_ids))
-        self._selected_ids = ids
         current = self._tree.selection()
-        if not ids:
-            if current:
-                self._tree.selection_remove(current)
-            return
-        valid = tuple(entity_id for entity_id in ids if self._tree.exists(entity_id))
+        valid = tuple(entity_id for entity_id in ids if entity_id in self._row_state)
         if not valid:
+            self._selected_ids = ()
             if current:
                 self._tree.selection_remove(current)
             return
         if current != valid:
             self._tree.selection_remove(current)
-            self._tree.selection_set(valid)
+            try:
+                self._tree.selection_set(valid)
+            except tk.TclError:
+                # A row may have disappeared outside reconciliation. Keep the
+                # retained-state fast path, but verify against Tk on this error.
+                valid = tuple(entity_id for entity_id in valid if self._tree.exists(entity_id))
+                if valid:
+                    self._tree.selection_set(valid)
+        self._selected_ids = valid
+        if not valid:
+            return
         self._tree.focus(valid[0])
         self._tree.see(valid[0])
 

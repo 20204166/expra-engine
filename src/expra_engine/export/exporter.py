@@ -302,6 +302,7 @@ def _stage_pygame_runtime(site_packages: Path) -> None:
         shutil.copy2(source_root / "core" / module, destination)
 
     shutil.copytree(source_root / "filesystem", package_root / "filesystem")
+    shutil.copytree(source_root / "messages", package_root / "messages")
     shutil.copytree(source_root / "schema", package_root / "schema")
 
     shutil.copytree(source_root / "ui_model", package_root / "ui_model")

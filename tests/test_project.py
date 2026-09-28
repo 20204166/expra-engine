@@ -50,6 +50,16 @@ class TestProjectCreateAndSave(unittest.TestCase):
             self.assertTrue(project.scenes_dir.exists())
             self.assertTrue(project.assets_dir.exists())
 
+    def test_default_launcher_delegates_gameplay_startup_to_project_runner(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Project.create("My Game", Path(tmp) / "my_project")
+
+            launcher = (project.path / project.script_entry_point).read_text(encoding="utf-8")
+
+            self.assertEqual(project.entrypoint, "scenes/main.scene.pb")
+            self.assertIn("from expra_engine.runtime.project_runner import run_project", launcher)
+            self.assertIn("    run_project()", launcher)
+
     def test_save_writes_project_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "proj"

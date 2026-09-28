@@ -55,7 +55,10 @@ def reconcile_treeview(
         if tree.exists(iid):
             tree.delete(iid)
 
-    existing_ids = {iid for iid in desired_ids if tree.exists(iid)}
+    if previous or tree.get_children(""):
+        existing_ids = {iid for iid in desired_ids if tree.exists(iid)}
+    else:
+        existing_ids = set()
 
     children_by_parent: dict[str, list[str]] = {}
     for iid, row in desired:

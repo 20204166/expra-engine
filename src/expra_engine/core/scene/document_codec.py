@@ -12,6 +12,7 @@ from google.protobuf.message import DecodeError
 from expra_engine.core.document_kind import DocumentKind
 from expra_engine.core.scene import Level, Scene
 from expra_engine.core.world import World
+from expra_engine.messages import document as document_messages
 from expra_engine.observability import ObservabilityWatcher
 from expra_engine.schema.generated import common_pb2, level_pb2
 
@@ -102,9 +103,9 @@ def from_document_data(
         try:
             return World.from_dict(working)
         except (TypeError, KeyError, ValueError) as exc:
-            raise DocumentCodecError(f"invalid World document: {exc}") from exc
+            raise DocumentCodecError(document_messages.invalid_world_document(str(exc))) from exc
     if kind not in {DocumentKind.LEVEL.value, DocumentKind.SCENE.value}:
-        raise DocumentCodecError(f"unsupported document kind: {kind!r}")
+        raise DocumentCodecError(document_messages.unsupported_document_kind(kind))
     try:
         if kind == DocumentKind.LEVEL.value:
             return Level.from_dict(working, observer=observer)
@@ -226,10 +227,10 @@ def _validate_document_data(data: dict[str, Any], kind: str) -> None:
         try:
             World.from_dict(data)
         except (TypeError, KeyError, ValueError) as exc:
-            raise DocumentCodecError(f"invalid World document: {exc}") from exc
+            raise DocumentCodecError(document_messages.invalid_world_document(str(exc))) from exc
         return
     if kind not in {DocumentKind.SCENE.value, DocumentKind.LEVEL.value}:
-        raise DocumentCodecError(f"unsupported document kind: {kind!r}")
+        raise DocumentCodecError(document_messages.unsupported_document_kind(kind))
     if not isinstance(data.get("scene_id"), str) or not data["scene_id"].strip():
         raise DocumentCodecError("document requires a non-empty scene_id")
     if not isinstance(data.get("name"), str) or not data["name"].strip():

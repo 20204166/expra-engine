@@ -151,6 +151,7 @@ class InspectorPanel(tk.Frame):
             ("Connections", str(len(world.connections))),
             ("Initial Level", world.initial_level_id or "not set"),
             ("Initial entrance", world.initial_entrance_id or "not set"),
+            ("Primary anchor", world.primary_anchor_id or "not set"),
             ("Concurrent loads", str(world.streaming.max_concurrent_loads)),
             ("Resident Level budget", str(world.streaming.max_loaded_levels)),
         )

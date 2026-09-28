@@ -12,9 +12,13 @@ from __future__ import annotations
 
 import contextlib
 import threading
+import time
 import tkinter as tk
 from collections.abc import Callable
 from queue import Empty, Queue
+
+_MAX_CALLBACKS_PER_DRAIN = 100
+_MAX_DRAIN_DURATION_SECONDS = 0.005
 
 
 class TkDeliveryQueue:
@@ -91,11 +95,16 @@ class TkDeliveryQueue:
         except (RuntimeError, tk.TclError):
             self._close()
             return
-        while True:
+        drain_started = time.monotonic()
+        delivered = 0
+        while delivered < _MAX_CALLBACKS_PER_DRAIN:
+            if delivered and time.monotonic() - drain_started >= _MAX_DRAIN_DURATION_SECONDS:
+                break
             try:
                 callback = self._callbacks.get_nowait()
             except Empty:
                 break
+            delivered += 1
             # A faulty callback must not stop delivery of later callbacks or
             # the periodic poll; callbacks are application-owned code.
             with contextlib.suppress(Exception):

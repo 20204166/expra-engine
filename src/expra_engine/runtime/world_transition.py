@@ -11,6 +11,7 @@ from expra_engine.core.component import TransformComponent
 from expra_engine.core.entity import Entity
 from expra_engine.core.scene import Level
 from expra_engine.core.world import TransitionMode, WorldConnection
+from expra_engine.messages import world as world_messages
 from expra_engine.runtime.level_anchor import LevelAnchorComponent, LevelAnchorKind
 from expra_engine.runtime.world_geometry import (
     _inside_anchor_trigger,
@@ -193,12 +194,12 @@ class WorldTraversalMixin:
         self._assert_owner()
         anchor_id = anchor_id or self.world.primary_anchor_id
         if anchor_id is None:
-            raise ValueError("World travel requires a registered streaming anchor")
+            raise ValueError(world_messages.world_travel_anchor_required())
         anchor = next(
             (item for item in self.streaming_anchors() if item.anchor_id == anchor_id), None
         )
         if anchor is None or anchor.entity_id is None:
-            raise ValueError(f"streaming anchor is unavailable: {anchor_id}")
+            raise ValueError(world_messages.streaming_anchor_unavailable(anchor_id))
         connection = next(
             (
                 item
@@ -208,11 +209,11 @@ class WorldTraversalMixin:
             None,
         )
         if connection is None:
-            raise ValueError(f"connection is not reachable from Level {anchor.level_id!r}")
+            raise ValueError(world_messages.connection_unreachable(anchor.level_id))
         actor = self.runtime_scene.find_entity(anchor.entity_id)
         persistent_id = self._persistent_id_for_entity(anchor.entity_id)
         if actor is None or persistent_id is None:
-            raise ValueError("World travel requires an active World-persistent actor")
+            raise ValueError(world_messages.world_travel_requires_persistent_actor())
         source_key = (connection.source_level_id, connection.source_anchor_id)
         source_entity = self._active_anchor_entity(*source_key)
         source_marker = (
@@ -220,9 +221,9 @@ class WorldTraversalMixin:
         )
         source_position = self.portal_positions().get(source_key)
         if source_entity is None or source_marker is None or source_position is None:
-            raise ValueError("World travel source anchor is not active")
+            raise ValueError(world_messages.world_travel_source_anchor_inactive())
         if not self._connection_is_bidirectionally_valid(connection, source_marker):
-            raise ValueError("World travel source anchor is not a connected exit")
+            raise ValueError(world_messages.world_travel_source_anchor_not_exit())
         position = self.runtime_scene.world_transform(actor.entity_id).position
         if connection.transition is TransitionMode.SEAMLESS and not _inside_anchor_trigger(
             position,
@@ -230,7 +231,7 @@ class WorldTraversalMixin:
             self.runtime_scene.world_transform(source_entity.entity_id),
             source_marker,
         ):
-            raise ValueError("seamless travel requires the actor to be at the connected exit")
+            raise ValueError(world_messages.world_travel_requires_actor_at_exit())
         pending = PendingWorldTransition(
             anchor_id,
             connection,
@@ -274,7 +275,9 @@ class WorldTraversalMixin:
                 if marker is None or portal is None:
                     self._pending_transitions.pop(anchor.anchor_id, None)
                     self._last_transition_error = (
-                        f"pending connection {connection.connection_id!r} lost its source anchor"
+                        world_messages.pending_connection_source_anchor_lost(
+                            connection.connection_id
+                        )
                     )
                     continue
                 pose = self.runtime_scene.world_transform(portal_entity.entity_id)
@@ -297,13 +300,12 @@ class WorldTraversalMixin:
                         _set_root_world_position(actor, pending.blocking_position)
                         self._last_safe_anchor_positions[anchor.anchor_id] = pending.blocking_position
                     if destination_state.state is LevelResidencyState.FAILED:
-                        self._last_transition_error = (
-                            f"destination Level {connection.destination_level_id!r} failed to load; "
-                            "retry explicitly"
+                        self._last_transition_error = world_messages.destination_level_failed_retry(
+                            connection.destination_level_id
                         )
                     else:
-                        self._last_transition_error = (
-                            f"waiting for destination Level {connection.destination_level_id!r}"
+                        self._last_transition_error = world_messages.destination_level_waiting(
+                            connection.destination_level_id
                         )
                     self._start_world_transition(pending, actor)
                     continue
@@ -339,8 +341,8 @@ class WorldTraversalMixin:
                 ):
                     continue
                 if not self._connection_is_bidirectionally_valid(connection, marker):
-                    self._last_transition_error = (
-                        f"connection {connection.connection_id!r} source anchor is not an exit"
+                    self._last_transition_error = world_messages.connection_source_anchor_not_exit(
+                        connection.connection_id
                     )
                     continue
                 destination_state = self._residency.state(connection.destination_level_id)
@@ -365,10 +367,13 @@ class WorldTraversalMixin:
                     _set_root_world_position(actor, source_position)
                     self._last_safe_anchor_positions[anchor.anchor_id] = source_position
                     self._last_transition_error = (
-                        f"destination Level {connection.destination_level_id!r} failed to load; "
-                        "retry explicitly"
+                        world_messages.destination_level_failed_retry(
+                            connection.destination_level_id
+                        )
                         if destination_state.state is LevelResidencyState.FAILED
-                        else f"waiting for destination Level {connection.destination_level_id!r}"
+                        else world_messages.destination_level_waiting(
+                            connection.destination_level_id
+                        )
                     )
                     self._start_world_transition(pending, actor)
                     continue
@@ -427,8 +432,8 @@ class WorldTraversalMixin:
             self._advance_active_transition(0.0)
             return True
         if destination_state is LevelResidencyState.FAILED:
-            self._last_transition_error = (
-                f"destination Level {connection.destination_level_id!r} failed to load; retry explicitly"
+            self._last_transition_error = world_messages.destination_level_failed_retry(
+                connection.destination_level_id
             )
             return False
         self._transition_controller.begin(
@@ -452,11 +457,13 @@ class WorldTraversalMixin:
             anchor_id = self._active_transition_anchor_id
             pending = self._pending_transitions.get(anchor_id)
             if pending is None:
-                controller.fail("pending transition data was lost")
+                controller.fail(world_messages.pending_transition_data_lost())
                 return
             destination = self._residency.state(pending.connection.destination_level_id)
             if destination.state is LevelResidencyState.FAILED:
-                controller.fail(destination.error or "destination Level failed to load")
+                controller.fail(
+                    destination.error or world_messages.destination_level_failed_to_load()
+                )
                 self._last_transition_error = controller.error
                 return
             if destination.state in {
@@ -470,7 +477,7 @@ class WorldTraversalMixin:
                 )
                 if destination_anchor is None:
                     controller.fail(
-                        f"connection {pending.connection.connection_id!r} destination anchor is missing"
+                        world_messages.destination_anchor_missing(pending.connection.connection_id)
                     )
                     self._last_transition_error = controller.error
                     self._pending_transitions.pop(anchor_id, None)
@@ -480,7 +487,7 @@ class WorldTraversalMixin:
                     pending.connection.transition is TransitionMode.SEAMLESS
                     and math.dist(pending.blocking_position, destination_anchor) > 0.01
                 ):
-                    controller.fail("seamless connection endpoints are not physically adjacent")
+                    controller.fail(world_messages.seamless_connection_not_adjacent())
                     self._last_transition_error = controller.error
                     self._pending_transitions.pop(anchor_id, None)
                     self._active_transition_anchor_id = None
@@ -492,19 +499,21 @@ class WorldTraversalMixin:
             anchor_id = self._active_transition_anchor_id
             pending = self._pending_transitions.get(anchor_id)
             if pending is None:
-                controller.fail("pending transition data was lost")
+                controller.fail(world_messages.pending_transition_data_lost())
                 self._last_transition_error = controller.error
                 return
             actor = self.runtime_scene.find_entity(pending.actor_entity_id)
             if actor is None:
-                controller.fail("World-persistent actor is no longer active")
+                controller.fail(world_messages.world_persistent_actor_inactive())
                 self._last_transition_error = controller.error
                 self._pending_transitions.pop(anchor_id, None)
                 return
             try:
                 self._commit_world_transition(pending, actor)
             except (RuntimeError, ValueError) as error:
-                controller.fail(f"{type(error).__name__}: {str(error)[:180]}")
+                controller.fail(
+                    world_messages.transition_commit_failed(type(error).__name__, str(error))
+                )
                 self._last_transition_error = controller.error
                 self._pending_transitions.pop(anchor_id, None)
                 return
@@ -530,18 +539,20 @@ class WorldTraversalMixin:
             connection.destination_anchor_id,
         )
         if destination_anchor is None:
-            raise ValueError(f"connection {connection.connection_id!r} destination anchor is missing")
+            raise ValueError(world_messages.destination_anchor_missing(connection.connection_id))
         if (
             connection.transition is TransitionMode.SEAMLESS
             and math.dist(source_position, destination_anchor) > 0.01
         ):
-            raise ValueError("seamless connection endpoints are not physically adjacent")
+            raise ValueError(world_messages.seamless_connection_not_adjacent())
         if (
             self._residency.state(connection.destination_level_id).state
             is not LevelResidencyState.ACTIVE
             and not self.activate_level(connection.destination_level_id)
         ):
-            raise RuntimeError(f"destination Level {connection.destination_level_id!r} could not activate")
+            raise RuntimeError(
+                world_messages.destination_level_activation_failed(connection.destination_level_id)
+            )
         if connection.transition is not TransitionMode.SEAMLESS:
             _set_root_world_position(actor, destination_anchor)
             destination_entity = self._active_anchor_entity(

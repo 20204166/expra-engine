@@ -60,6 +60,23 @@ def test_world_inspector_resolves_descriptor_and_connection_without_level_entiti
     assert ("Transition", "seamless") in connection_values
 
 
+def test_world_inspector_exposes_primary_anchor_for_startup_configuration() -> None:
+    world = World(
+        "Main",
+        world_id="main",
+        levels=(LevelDescriptor("town", "levels/town.level.pb"),),
+        initial_level_id="town",
+        initial_entrance_id="west",
+        primary_anchor_id="player",
+    )
+
+    values = InspectorPanel._world_inspection_values(world, None)
+
+    assert ("Initial Level", "town") in values
+    assert ("Initial entrance", "west") in values
+    assert ("Primary anchor", "player") in values
+
+
 def test_hierarchy_renders_world_rows_and_exposes_world_add_level_action() -> None:
     root = tk.Tk()
     root.withdraw()

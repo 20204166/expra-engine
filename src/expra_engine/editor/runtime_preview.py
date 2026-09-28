@@ -21,15 +21,21 @@ class RuntimePreviewLoop:
         render: Callable[[], None],
         *,
         observer: ObservabilityWatcher | None = None,
+        on_world_startup_diagnostic: Callable[[str], None] | None = None,
+        on_world_startup_error: Callable[[], None] | None = None,
     ) -> None:
         self._root = root
         self._engine = engine
         self._render = render
         self._after_id: str | None = None
         self._observer = observer
+        self._on_world_startup_diagnostic = on_world_startup_diagnostic
+        self._on_world_startup_error = on_world_startup_error
+        self._last_world_startup_diagnostic: str | None = None
 
     def start(self) -> None:
         self.stop()
+        self._last_world_startup_diagnostic = None
         if not self._root_exists():
             self._stop_engine()
             return
@@ -58,6 +64,8 @@ class RuntimePreviewLoop:
             outcome: Literal["success", "failure"] = "success"
             try:
                 self._engine.tick()
+                if self._report_world_startup_state():
+                    return
                 self._render()
             except Exception:
                 outcome = "failure"
@@ -77,6 +85,31 @@ class RuntimePreviewLoop:
                     raise
                 self._after_id = None
                 self._stop_engine()
+
+    def _report_world_startup_state(self) -> bool:
+        """Deliver World startup diagnostics after each real Engine tick.
+
+        Return True when a fatal startup error was handled and the current
+        preview frame should not be rendered.
+        """
+        world_system = getattr(self._engine, "world_streaming_system", None)
+        if world_system is None:
+            self._last_world_startup_diagnostic = None
+            return False
+        diagnostic = getattr(world_system, "startup_diagnostic", None)
+        if diagnostic is not None and diagnostic != self._last_world_startup_diagnostic:
+            callback = self._on_world_startup_diagnostic
+            if callback is not None:
+                callback(diagnostic)
+        self._last_world_startup_diagnostic = diagnostic
+        if getattr(world_system, "startup_error", None) is None:
+            return False
+        callback = self._on_world_startup_error
+        if callback is None:
+            self._stop_engine()
+        else:
+            callback()
+        return True
 
     def _stop_engine(self) -> None:
         """Fail closed: stop the engine when the preview can no longer drive it."""

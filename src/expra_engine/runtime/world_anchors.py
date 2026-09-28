@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from expra_engine.messages import world as world_messages
 from expra_engine.runtime.level_anchor import LevelAnchorComponent, StreamingAnchorComponent
 from expra_engine.runtime.world_policy import (
     LevelResidencyState,
@@ -104,7 +105,7 @@ class WorldAnchorPolicyMixin:
         if entity is None or marker is None or not entity.enabled or not marker.enabled:
             return
         if marker.anchor_id in resolved:
-            raise ValueError(f"duplicate World streaming anchor ID: {marker.anchor_id!r}")
+            raise ValueError(world_messages.duplicate_streaming_anchor(marker.anchor_id))
         resolved[marker.anchor_id] = StreamingAnchor(
             marker.anchor_id,
             level_id,
@@ -124,7 +125,9 @@ class WorldAnchorPolicyMixin:
             return
         key = (level_id, marker.anchor_id)
         if key in result:
-            raise ValueError(f"duplicate active Level anchor: {key!r}")
+            raise ValueError(
+                world_messages.duplicate_active_level_anchor(level_id, marker.anchor_id)
+            )
         result[key] = self.runtime_scene.world_transform(entity_id).position
 
     def current_level(self, anchor_id: str) -> str | None:
@@ -275,7 +278,7 @@ class WorldAnchorPolicyMixin:
         except ResidencyCapacityError as error:
             if pending_destinations:
                 self._last_transition_error = (
-                    f"pending seamless travel exceeds World residency budget: {error}"
+                    world_messages.pending_destination_over_residency_budget(str(error))
                 )
                 return self._policy.decide(
                     self.world,

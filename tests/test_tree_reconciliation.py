@@ -18,6 +18,7 @@ class TreeviewDouble:
         self.open_states: dict[str, bool] = {}
         self.calls = {"insert": 0, "delete": 0, "item": 0, "move": 0}
         self.get_children_calls = 0
+        self.exists_calls = 0
 
     def insert(
         self,
@@ -79,6 +80,7 @@ class TreeviewDouble:
         return dict(self.rows[iid])
 
     def exists(self, iid: str) -> bool:
+        self.exists_calls += 1
         return iid in self.rows
 
     def parent(self, iid: str) -> str:
@@ -92,6 +94,7 @@ class TreeviewDouble:
         for name in self.calls:
             self.calls[name] = 0
         self.get_children_calls = 0
+        self.exists_calls = 0
 
 
 def _load_api() -> tuple[type[Any], Callable[..., dict[str, Any]]]:
@@ -117,7 +120,39 @@ def test_reconciler_inserts_ordered_nested_rows() -> None:
     assert tree.children[""] == ["parent"]
     assert tree.children["parent"] == ["child"]
     assert tree.calls == {"insert": 2, "delete": 0, "item": 0, "move": 0}
-    assert tree.get_children_calls == 0
+    assert tree.get_children_calls == 1
+
+
+def test_reconciler_initial_empty_population_skips_per_row_tk_existence_checks() -> None:
+    TreeRow, reconcile_treeview = _load_api()
+    tree = TreeviewDouble()
+    desired = tuple((f"row-{index}", TreeRow(parent="", text=str(index))) for index in range(5000))
+
+    result = reconcile_treeview(tree, {}, desired)
+
+    assert len(result) == 5000
+    assert len(tree.rows) == 5000
+    assert tree.calls["insert"] == 5000
+    assert tree.exists_calls == 0
+    assert tree.get_children_calls == 1
+
+
+def test_reconciler_with_untracked_existing_rows_still_detects_them() -> None:
+    TreeRow, reconcile_treeview = _load_api()
+    tree = TreeviewDouble()
+    tree.insert("", "end", iid="existing", text="old")
+    tree.clear_calls()
+
+    result = reconcile_treeview(
+        tree,
+        {},
+        (("existing", TreeRow(parent="", text="new")),),
+    )
+
+    assert result["existing"].text == "new"
+    assert tree.rows["existing"]["text"] == "old"
+    assert tree.calls == {"insert": 0, "delete": 0, "item": 0, "move": 0}
+    assert tree.exists_calls == 1
 
 
 def test_reconciler_updates_only_changed_row_content() -> None:

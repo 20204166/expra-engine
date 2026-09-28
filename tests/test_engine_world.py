@@ -7,9 +7,9 @@ from concurrent.futures import Future
 from expra_engine.core.engine import Engine
 from expra_engine.core.scene import Level, Scene
 from expra_engine.core.world import LevelDescriptor, World
-from expra_engine.runtime.system import RuntimeSystem
 from expra_engine.runtime.script_component import ScriptComponent
 from expra_engine.runtime.script_registry import ScriptRegistry
+from expra_engine.runtime.system import RuntimeSystem
 
 
 class ManualExecutor:
@@ -66,7 +66,6 @@ def test_engine_play_runs_world_runtime_and_stop_restores_edit_scene() -> None:
 
 def test_world_level_activation_starts_and_deactivation_stops_behaviours(tmp_path) -> None:
     from expra_engine.core.project import Project
-    from expra_engine.runtime.behaviour import Behaviour
     from expra_engine.runtime.world_streaming import WorldStreamingSystem
 
     project = Project.create("World Behaviours", tmp_path / "project")
@@ -111,6 +110,68 @@ def test_world_level_activation_starts_and_deactivation_stops_behaviours(tmp_pat
 
     assert system.activate_level("town")
     assert len(engine.behaviour_system.instances) == 1
+    engine.stop()
+    system.close()
+
+
+def test_world_level_services_start_before_a_persistent_player_behaviour(tmp_path) -> None:
+    from expra_engine.core.component import TransformComponent
+    from expra_engine.core.project import Project
+    from expra_engine.runtime.level_anchor import (
+        StreamingAnchorComponent,
+        WorldPersistentActorComponent,
+    )
+    from expra_engine.runtime.world_streaming import LevelResidencyState, WorldStreamingSystem
+
+    project = Project.create("World Bootstrap Ordering", tmp_path / "project")
+    (project.scripts_dir / "actors.py").write_text(
+        "from expra_engine.runtime.behaviour import Behaviour\n"
+        "class CombatRulesBehaviour(Behaviour):\n"
+        "    pass\n"
+        "class PlayerBehaviour(Behaviour):\n"
+        "    def on_start(self):\n"
+        "        service = self.scene.get_entities_by_tag('combat_rules')[0]\n"
+        "        if not any(type(item).__name__ == 'CombatRulesBehaviour' "
+        "for item in service.behaviours):\n"
+        "            raise LookupError('combat service must start before player')\n",
+        encoding="utf-8",
+    )
+    level = Level("Town")
+    player = level.create_entity("Courier", entity_id="courier")
+    player.add_component(TransformComponent())
+    player.add_component(WorldPersistentActorComponent("courier"))
+    player.add_component(StreamingAnchorComponent("player"))
+    player.add_component(ScriptComponent("project://scripts/actors.py", "PlayerBehaviour"))
+    rules = level.create_entity("Combat Rules", entity_id="combat-rules")
+    rules.add_tag("combat_rules")
+    rules.add_component(ScriptComponent("project://scripts/actors.py", "CombatRulesBehaviour"))
+    executor = ManualExecutor(1)
+    world = World(
+        "Main",
+        world_id="main",
+        levels=(LevelDescriptor("town", "levels/town.level.pb"),),
+        primary_anchor_id="player",
+        initial_level_id="town",
+    )
+    system = WorldStreamingSystem(
+        project,
+        world,
+        loader=lambda _descriptor: level,
+        executor_factory=lambda workers: executor,
+    )
+    engine = Engine()
+    engine.set_world(world, project=project, streaming_system=system)
+    engine.set_script_registry(ScriptRegistry(project.path))
+
+    assert engine.play()
+    executor.complete()
+    engine.tick(0.0)
+
+    assert system.state("town").state is LevelResidencyState.ACTIVE
+    assert {type(item).__name__ for item in engine.behaviour_system.instances} == {
+        "PlayerBehaviour",
+        "CombatRulesBehaviour",
+    }
     engine.stop()
     system.close()
 
@@ -212,6 +273,8 @@ def test_world_activation_hook_failure_never_exposes_a_partial_active_level() ->
 
     assert system.state("town").state is LevelResidencyState.FAILED
     assert not any(entity.name == "Courier" for entity in engine.active_scene.entities)
-    assert engine.world_lifecycle_errors
+    assert engine.world_lifecycle_errors == (
+        "activation town: RuntimeError: test activation failure",
+    )
     engine.stop()
     system.close()

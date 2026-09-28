@@ -153,7 +153,6 @@ def _seamless_world() -> World:
         ),
         primary_anchor_id="party",
         initial_level_id="town",
-        initial_entrance_id="start",
         streaming=WorldStreamingSettings(max_concurrent_loads=2, max_loaded_levels=2),
     )
 
@@ -559,6 +558,210 @@ def test_world_persistent_actor_survives_level_unload_and_source_reload() -> Non
         if entity.get_component(WorldPersistentActorComponent) is not None
     ]
     assert actors == [actor_before]
+    system.close()
+
+
+def test_fresh_world_start_places_primary_actor_at_initial_entrance_in_world_space() -> None:
+    from expra_engine.runtime.level_anchor import (
+        LevelAnchorComponent,
+        LevelAnchorKind,
+        StreamingAnchorComponent,
+        WorldPersistentActorComponent,
+    )
+
+    _Manager, _State, _CapacityError, System = _residency_types()
+    executor = ManualExecutor(1)
+    authored = Level("Town")
+    parent = authored.create_entity("Entrance Group", entity_id="entrance-group")
+    parent.add_component(TransformComponent(x=5.0, y=7.0))
+    entrance = authored.create_entity(
+        "Start Entrance", entity_id="start-entrance", parent_id=parent.entity_id
+    )
+    entrance.add_component(TransformComponent(x=2.0, y=-3.0))
+    entrance.add_component(LevelAnchorComponent("start", kind=LevelAnchorKind.ENTRANCE))
+    actor = authored.create_entity("Courier", entity_id="courier")
+    actor.add_component(TransformComponent(x=1.0, y=2.0))
+    actor.add_component(WorldPersistentActorComponent("courier"))
+    actor.add_component(StreamingAnchorComponent("party"))
+    world = World(
+        "Main",
+        world_id="main",
+        levels=(LevelDescriptor("town", "levels/town.level.pb", origin=(100.0, 200.0)),),
+        primary_anchor_id="party",
+        initial_level_id="town",
+        initial_entrance_id="start",
+    )
+    system = System(
+        None,
+        world,
+        loader=lambda _descriptor: authored,
+        executor_factory=lambda workers: executor,
+    )
+
+    system.start(object())
+    executor.complete()
+    system.update()
+
+    runtime_actor = next(
+        entity
+        for entity in system.runtime_scene.entities
+        if entity.get_component(WorldPersistentActorComponent) is not None
+    )
+    transform = runtime_actor.get_component(TransformComponent)
+    assert transform is not None
+    assert (transform.x, transform.y) == (107.0, 204.0)
+    assert system.current_level("party") == "town"
+    assert system.state("town").state is _State.ACTIVE
+    assert system.camera_context.follow_target_entity_id == runtime_actor.entity_id
+    # Runtime bootstrap must not move the authored actor or entrance.
+    assert (
+        authored.find_entity("courier").get_component(TransformComponent).x,
+        authored.find_entity("courier").get_component(TransformComponent).y,
+    ) == (1.0, 2.0)
+    system.close()
+
+
+def test_world_without_initial_entrance_starts_at_authored_primary_actor_position() -> None:
+    from expra_engine.runtime.level_anchor import (
+        StreamingAnchorComponent,
+        WorldPersistentActorComponent,
+    )
+
+    _Manager, State, _CapacityError, System = _residency_types()
+    executor = ManualExecutor(1)
+    authored = Level("Town")
+    actor = authored.create_entity("Courier", entity_id="courier")
+    actor.add_component(TransformComponent(x=3.0, y=4.0))
+    actor.add_component(WorldPersistentActorComponent("courier"))
+    actor.add_component(StreamingAnchorComponent("party"))
+    system = System(
+        None,
+        World(
+            "Main",
+            world_id="main",
+            levels=(LevelDescriptor("town", "levels/town.level.pb"),),
+            initial_level_id="town",
+            primary_anchor_id="party",
+            initial_entrance_id=None,
+        ),
+        loader=lambda _descriptor: authored,
+        executor_factory=lambda workers: executor,
+    )
+
+    system.start(object())
+    executor.complete()
+    system.update()
+
+    runtime_actor = next(
+        entity
+        for entity in system.runtime_scene.entities
+        if entity.get_component(WorldPersistentActorComponent) is not None
+    )
+    transform = runtime_actor.get_component(TransformComponent)
+    assert transform is not None
+    assert (transform.x, transform.y) == (3.0, 4.0)
+    assert system.state("town").state is State.ACTIVE
+    system.close()
+
+
+def test_configured_missing_primary_anchor_keeps_initial_level_active_and_reports_error() -> None:
+    _Manager, State, _CapacityError, System = _residency_types()
+    executor = ManualExecutor(1)
+    authored = Level("Town")
+    authored.create_entity("Visible Level Content")
+    system = System(
+        None,
+        World(
+            "Main",
+            world_id="main",
+            levels=(LevelDescriptor("town", "levels/town.level.pb"),),
+            initial_level_id="town",
+            primary_anchor_id="missing-player",
+        ),
+        loader=lambda _descriptor: authored,
+        executor_factory=lambda workers: executor,
+    )
+
+    system.start(object())
+    executor.complete()
+    system.update()
+
+    assert system.state("town").state is State.ACTIVE
+    assert any(entity.name == "Visible Level Content" for entity in system.runtime_scene.entities)
+    assert system.snapshot().last_transition_error == (
+        "World primary anchor 'missing-player' is not present in the active startup Level "
+        "'town'; the Level remains active for rendering"
+    )
+    system.close()
+
+
+def test_configured_primary_anchor_without_persistent_actor_is_nonfatal_but_reported() -> None:
+    from expra_engine.runtime.level_anchor import StreamingAnchorComponent
+
+    _Manager, State, _CapacityError, System = _residency_types()
+    executor = ManualExecutor(1)
+    authored = Level("Town")
+    actor = authored.create_entity("Temporary Anchor")
+    actor.add_component(StreamingAnchorComponent("player"))
+    system = System(
+        None,
+        World(
+            "Main",
+            world_id="main",
+            levels=(LevelDescriptor("town", "levels/town.level.pb"),),
+            initial_level_id="town",
+            primary_anchor_id="player",
+        ),
+        loader=lambda _descriptor: authored,
+        executor_factory=lambda workers: executor,
+    )
+
+    system.start(object())
+    executor.complete()
+    system.update()
+
+    assert system.state("town").state is State.ACTIVE
+    assert system.current_level("player") == "town"
+    assert system.snapshot().last_transition_error == (
+        "World primary anchor 'player' is not attached to an active "
+        "World-persistent actor; the Level remains active for rendering"
+    )
+    system.close()
+
+
+def test_missing_initial_entrance_fails_initial_level_with_specific_error() -> None:
+    _Manager, State, _CapacityError, System = _residency_types()
+    executor = ManualExecutor(1)
+    authored = Level("Town")
+    authored.create_entity("Visible Level Content")
+    system = System(
+        None,
+        World(
+            "Main",
+            world_id="main",
+            levels=(LevelDescriptor("town", "levels/town.level.pb"),),
+            initial_level_id="town",
+            initial_entrance_id="missing-entry",
+        ),
+        loader=lambda _descriptor: authored,
+        executor_factory=lambda workers: executor,
+    )
+
+    system.start(object())
+    executor.complete()
+    system.update()
+
+    startup = system.state("town")
+    assert startup.state is State.FAILED
+    assert startup.error == (
+        "ValueError: World initial entrance 'missing-entry' is not an entrance anchor "
+        "in Level 'town'"
+    )
+    assert system.startup_error == (
+        "World startup Level 'town' failed to load: ValueError: "
+        "World initial entrance 'missing-entry' is not an entrance anchor in Level 'town'"
+    )
+    assert system.runtime_scene.entities == ()
     system.close()
 
 
