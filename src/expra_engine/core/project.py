@@ -267,18 +267,22 @@ class Project:
     def world_paths(self) -> tuple[str, ...]:
         return tuple(self._world_paths)
 
+    def _resolve_project_path(self, relative_path: str) -> Path:
+        """Resolve a project-relative path and reject symlink escapes."""
+        path = (self.path / relative_path).resolve()
+        path.relative_to(self.path)
+        return path
+
     def scene_file(self, relative_path: str | None = None) -> Path:
         """Return a validated Scene resource path (legacy JSON or typed PB)."""
         value = relative_path or self.start_scene
         if value is None:
             raise ProjectError("project has no start scene")
         self._validate_scene_path(value)
-        path = (self.path / value).resolve()
         try:
-            path.relative_to(self.path)
+            return self._resolve_project_path(value)
         except ValueError as exc:
             raise ProjectError(f"scene escapes project: {value!r}") from exc
-        return path
 
     def document_file(self, relative_path: str | None = None) -> Path:
         """Return a validated project-owned Scene, Level, or World document path."""
@@ -286,12 +290,10 @@ class Project:
         if value is None:
             raise ProjectError("project has no document entrypoint")
         self._validate_entrypoint(value)
-        path = (self.path / value).resolve()
         try:
-            path.relative_to(self.path)
+            return self._resolve_project_path(value)
         except ValueError as exc:
             raise ProjectError(f"document escapes project: {value!r}") from exc
-        return path
 
     def read_document(
         self,

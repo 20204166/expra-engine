@@ -15,12 +15,20 @@ def _valid_behaviour_class_name(class_name: object) -> bool:
     return isinstance(class_name, str) and class_name.isidentifier() and not keyword.iskeyword(class_name)
 
 
+def _is_behaviour_script_resource(resource: ResourceId) -> bool:
+    return (
+        resource.scheme == "project"
+        and resource.path.startswith("scripts/")
+        and resource.path.endswith(".py")
+    )
+
+
 def create_behaviour_script(project_root: Path, relative_path: str, class_name: str) -> ResourceId:
     """Create a minimal script without overwriting or escaping the project."""
     if not _valid_behaviour_class_name(class_name):
         raise ValueError(f"invalid Behaviour class name: {class_name!r}")
     resource = ResourceId.from_project_path(relative_path, scheme="project")
-    if not resource.path.startswith("scripts/") or not resource.path.endswith(".py"):
+    if not _is_behaviour_script_resource(resource):
         raise ValueError("scripts must be project://scripts/*.py")
     path = (project_root.resolve() / resource.path).resolve()
     try:
@@ -44,11 +52,7 @@ def create_behaviour_script(project_root: Path, relative_path: str, class_name: 
 def attach_script(entity: Entity, script_id: ResourceId | str, class_name: str) -> ScriptComponent:
     """Attach one declarative script component, rejecting duplicates."""
     resource = script_id if isinstance(script_id, ResourceId) else ResourceId.parse(script_id)
-    if (
-        resource.scheme != "project"
-        or not resource.path.startswith("scripts/")
-        or not resource.path.endswith(".py")
-    ):
+    if not _is_behaviour_script_resource(resource):
         raise ValueError("scripts must be project://scripts/*.py")
     if not _valid_behaviour_class_name(class_name):
         raise ValueError(f"invalid Behaviour class name: {class_name!r}")

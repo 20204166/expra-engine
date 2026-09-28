@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import inspect
 import uuid
+from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any, TypeVar
 
 from expra_engine.core.component import (
@@ -113,16 +114,20 @@ class Entity:
                 return behaviour
         return None
 
-    def on_update(self, event: Update, signal: Any) -> None:
-        """Dispatch an update to the currently eligible behaviours."""
+    def _eligible_behaviours(self) -> Iterator[Behaviour]:
+        """Yield attached behaviours eligible at each point of Entity dispatch."""
         for behaviour in tuple(self._behaviours):
             if (
-                not self.enabled
-                or behaviour.entity is not self
-                or not behaviour.enabled
-                or getattr(behaviour, "_system_owned", False)
+                self.enabled
+                and behaviour.entity is self
+                and behaviour.enabled
+                and not getattr(behaviour, "_system_owned", False)
             ):
-                continue
+                yield behaviour
+
+    def on_update(self, event: Update, signal: Any) -> None:
+        """Dispatch an update to the currently eligible behaviours."""
+        for behaviour in self._eligible_behaviours():
             method = behaviour.on_update
             try:
                 inspect.signature(method).bind(event, signal)
@@ -135,14 +140,7 @@ class Entity:
 
     def on_frame_update(self, event: Any, signal: Any) -> None:
         """Dispatch a variable frame update to modern behaviours."""
-        for behaviour in tuple(self._behaviours):
-            if (
-                not self.enabled
-                or behaviour.entity is not self
-                or not behaviour.enabled
-                or getattr(behaviour, "_system_owned", False)
-            ):
-                continue
+        for behaviour in self._eligible_behaviours():
             method = behaviour.on_update
             try:
                 inspect.signature(method).bind(event.time_delta)
@@ -152,14 +150,7 @@ class Entity:
 
     def on_action_event(self, event: ActionEvent, signal: Any) -> bool:
         """Dispatch input until an eligible behaviour consumes it."""
-        for behaviour in tuple(self._behaviours):
-            if (
-                not self.enabled
-                or behaviour.entity is not self
-                or not behaviour.enabled
-                or getattr(behaviour, "_system_owned", False)
-            ):
-                continue
+        for behaviour in self._eligible_behaviours():
             method = behaviour.on_input
             try:
                 inspect.signature(method).bind(event)

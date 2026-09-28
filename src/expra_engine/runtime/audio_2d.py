@@ -31,6 +31,7 @@ from expra_engine.observability import ObservabilityWatcher
 from expra_engine.runtime.audio import AudioClip, AudioMixer
 from expra_engine.runtime.events import SceneContinued, SceneStarted, SceneStopped, Update
 from expra_engine.runtime.system import RuntimeSystem
+from expra_engine.runtime.validation import coerce_finite_float as _finite
 
 _AUDIO_TARGET = "runtime:audio:update"
 
@@ -60,16 +61,6 @@ class PlaybackType2D(StrEnum):
     DEFAULT = "default"
     STREAM = "stream"
     SAMPLE = "sample"
-
-
-def _finite(value: object, name: str) -> float:
-    try:
-        result = float(cast(Any, value))
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError(f"{name} must be finite") from exc
-    if not math.isfinite(result):
-        raise ValueError(f"{name} must be finite")
-    return result
 
 
 def _non_negative(value: object, name: str) -> float:

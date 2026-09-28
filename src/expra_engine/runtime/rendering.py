@@ -11,6 +11,7 @@ from typing import Protocol, runtime_checkable
 from expra_engine.core.math_utils import compose_2d_pose
 from expra_engine.core.scene.camera import Camera2D
 from expra_engine.runtime.animation import SpriteRegion
+from expra_engine.runtime.validation import finite_float as _finite
 from expra_engine.ui_model.geometry import Rect
 from expra_engine.ui_model.nine_slice import NineSlice
 
@@ -35,13 +36,6 @@ __all__ = (
 
 Vec2 = tuple[float, float]
 Vec3 = tuple[float, float, float]
-
-
-def _finite(value: float, name: str) -> float:
-    value = float(value)
-    if not math.isfinite(value):
-        raise ValueError(f"{name} must be finite")
-    return value
 
 
 def _tuple(values: tuple[float, ...] | list[float], size: int, name: str) -> tuple[float, ...]:

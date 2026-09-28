@@ -2,19 +2,12 @@
 
 from __future__ import annotations
 
-import math
 from typing import Any
 
 from expra_engine.core.component import Component
+from expra_engine.runtime.validation import finite_float as _finite
 
 __all__ = ("ColliderComponent",)
-
-
-def _finite(value: float, name: str) -> float:
-    converted = float(value)
-    if not math.isfinite(converted):
-        raise ValueError(f"{name} must be finite")
-    return converted
 
 
 class ColliderComponent(Component):

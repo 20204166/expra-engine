@@ -22,13 +22,13 @@ Concepts adapted from the Godot Engine renderer (MIT licensed).
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
 from expra_engine.core.component import Component
 from expra_engine.runtime.rendering import Color, RenderPhase, Transform
+from expra_engine.runtime.validation import coerce_finite_float as _finite
 from expra_engine.ui_model.geometry import Rect
 
 __all__ = (
@@ -72,16 +72,6 @@ class ScreenTextureFilter(str, Enum):
             ScreenTextureFilter.LINEAR,
             ScreenTextureFilter.LINEAR_MIPMAP,
         }
-
-
-def _finite(value: object, name: str) -> float:
-    try:
-        result = float(value)
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError(f"{name} must be finite") from exc
-    if not math.isfinite(result):
-        raise ValueError(f"{name} must be finite")
-    return result
 
 
 def _non_negative(value: object, name: str) -> float:

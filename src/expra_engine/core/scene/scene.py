@@ -10,6 +10,7 @@ from __future__ import annotations
 import copy
 import math
 import uuid
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
@@ -27,6 +28,35 @@ def _clone_components_and_tags(source: Entity, target: Entity) -> None:
         target.add_component(copy.deepcopy(comp))
     for tag in source.tags:
         target.add_tag(tag)
+
+
+def _clone_entity_tree(
+    target: Scene,
+    originals: Iterable[Entity],
+    *,
+    root_parent_id: str | None,
+) -> tuple[list[Entity], dict[str, str]]:
+    """Clone entities with fresh IDs and remapped parents into ``target``."""
+    source_entities = tuple(originals)
+    id_map = {entity.entity_id: str(uuid.uuid4()) for entity in source_entities}
+    clones: list[Entity] = []
+    for original in source_entities:
+        new_parent_id = (
+            id_map.get(original.parent_id, original.parent_id)
+            if original.parent_id is not None
+            else root_parent_id
+        )
+        cloned = Entity(
+            original.name,
+            entity_id=id_map[original.entity_id],
+            enabled=original.enabled,
+            layer=original.layer,
+            parent_id=new_parent_id,
+        )
+        _clone_components_and_tags(original, cloned)
+        target.add_entity(cloned)
+        clones.append(cloned)
+    return clones, id_map
 
 
 @dataclass(frozen=True, slots=True)
@@ -242,25 +272,7 @@ class Scene:
             return new_root
 
         subtree = self.walk_hierarchy(entity_id)
-        id_map: dict[str, str] = {}
-        for original in subtree:
-            id_map[original.entity_id] = str(uuid.uuid4())
-
-        for original in subtree:
-            new_id = id_map[original.entity_id]
-            new_parent_id = (
-                id_map.get(original.parent_id) if original.parent_id else original.parent_id
-            )
-            cloned = Entity(
-                original.name,
-                entity_id=new_id,
-                enabled=original.enabled,
-                layer=original.layer,
-                parent_id=new_parent_id,
-            )
-            _clone_components_and_tags(original, cloned)
-            self.add_entity(cloned)
-
+        _clones, id_map = _clone_entity_tree(self, subtree, root_parent_id=None)
         return self.find_entity(id_map[entity_id])
 
     def find_entity(self, entity_id: str) -> Entity | None:

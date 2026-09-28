@@ -8,15 +8,10 @@ from typing import Any
 from expra_engine.core.component import Component
 from expra_engine.runtime.animation import SpriteRegion
 from expra_engine.runtime.rendering import Color
+from expra_engine.runtime.validation import finite_float as _finite
+from expra_engine.runtime.validation import pair_values
 
 __all__ = ("PrimitiveComponent", "SpriteComponent", "TextComponent")
-
-
-def _finite(value: float, name: str) -> float:
-    value = float(value)
-    if not math.isfinite(value):
-        raise ValueError(f"{name} must be finite")
-    return value
 
 
 def _color(value: Color | tuple[float, ...] | list[float]) -> Color:
@@ -35,15 +30,8 @@ def _color_dict(value: Color | None) -> list[float] | None:
 
 
 def _vec2(value: object, name: str) -> tuple[float, float]:
-    if isinstance(value, (str, bytes)):
-        raise ValueError(f"{name} must contain two finite numbers")
-    try:
-        values = tuple(value)  # type: ignore[arg-type]
-    except TypeError as exc:
-        raise ValueError(f"{name} must contain two finite numbers") from exc
-    if len(values) != 2:
-        raise ValueError(f"{name} must contain two finite numbers")
-    return (_finite(values[0], f"{name}.x"), _finite(values[1], f"{name}.y"))
+    x, y = pair_values(value, name)
+    return (_finite(x, f"{name}.x"), _finite(y, f"{name}.y"))
 
 
 def _region(value: object) -> SpriteRegion | None:

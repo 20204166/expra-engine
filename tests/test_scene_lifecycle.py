@@ -4,6 +4,7 @@ import unittest
 
 from expra_engine.core.component import Component
 from expra_engine.core.scene import Scene
+from expra_engine.core.scene.scene import _clone_entity_tree
 
 
 class DummyComponent(Component):
@@ -82,6 +83,29 @@ class RecursiveDeleteTests(unittest.TestCase):
 
 
 class CloneEntityTests(unittest.TestCase):
+    def test_shared_clone_helper_remaps_hierarchy_and_instance_root(self) -> None:
+        source = Scene("source")
+        root = source.create_entity("root", entity_id="source-root")
+        child = source.create_entity("child", entity_id="source-child", parent_id=root.entity_id)
+        target = Scene("target")
+
+        clones, id_map = _clone_entity_tree(target, (root, child), root_parent_id="instance-root")
+
+        self.assertEqual(len(clones), 2)
+        self.assertEqual(clones[0].parent_id, "instance-root")
+        self.assertEqual(clones[1].parent_id, id_map[root.entity_id])
+        self.assertNotEqual(clones[0].entity_id, root.entity_id)
+        self.assertEqual(tuple(target.entities), tuple(clones))
+
+    def test_shared_clone_helper_preserves_external_root_parent(self) -> None:
+        source = Scene("source")
+        root = source.create_entity("root", entity_id="source-root", parent_id="outside-root")
+        target = Scene("target")
+
+        clones, _id_map = _clone_entity_tree(target, (root,), root_parent_id=None)
+
+        self.assertEqual(clones[0].parent_id, "outside-root")
+
     def test_clone_returns_new_entity(self) -> None:
         s = Scene("test")
         src = s.create_entity("hero")

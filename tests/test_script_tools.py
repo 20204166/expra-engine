@@ -2,12 +2,35 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from expra_engine.core.entity import Entity
-from expra_engine.editor.script_tools import attach_script, create_behaviour_script
+from expra_engine.editor.script_tools import (
+    _is_behaviour_script_resource,
+    attach_script,
+    create_behaviour_script,
+)
+from expra_engine.filesystem import ResourceId
 
 
 class ScriptToolsTests(unittest.TestCase):
+    def test_behaviour_script_resource_policy_is_shared(self) -> None:
+        self.assertTrue(_is_behaviour_script_resource(ResourceId.parse("project://scripts/player.py")))
+        self.assertFalse(_is_behaviour_script_resource(ResourceId.parse("assets://scripts/player.py")))
+        self.assertFalse(_is_behaviour_script_resource(ResourceId.parse("project://assets/player.py")))
+        self.assertFalse(_is_behaviour_script_resource(ResourceId.parse("project://scripts/player.txt")))
+
+    def test_create_and_attach_both_use_the_shared_resource_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as directory, patch(
+            "expra_engine.editor.script_tools._is_behaviour_script_resource",
+            return_value=False,
+            create=True,
+        ):
+            with self.assertRaisesRegex(ValueError, "project://scripts/\\*.py"):
+                create_behaviour_script(Path(directory), "scripts/player.py", "Player")
+            with self.assertRaisesRegex(ValueError, "project://scripts/\\*.py"):
+                attach_script(Entity("Player"), "project://scripts/player.py", "Player")
+
     def test_create_template_rejects_overwrite_and_escape(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

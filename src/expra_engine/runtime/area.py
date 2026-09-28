@@ -12,6 +12,7 @@ from enum import Enum
 from typing import Any
 
 from expra_engine.core.component import Component
+from expra_engine.runtime.validation import pair_values
 
 __all__ = ("AreaComponent", "SpaceOverride")
 
@@ -46,15 +47,8 @@ def _non_negative(value: object, name: str) -> float:
 
 
 def _vec2(value: object, name: str) -> Vec2:
-    if isinstance(value, (str, bytes)):
-        raise ValueError(f"{name} must contain exactly two finite numbers")
-    try:
-        items = tuple(value)  # type: ignore[arg-type]
-    except TypeError as exc:
-        raise ValueError(f"{name} must contain exactly two finite numbers") from exc
-    if len(items) != 2:
-        raise ValueError(f"{name} must contain exactly two finite numbers")
-    return (_finite(items[0], f"{name}.x"), _finite(items[1], f"{name}.y"))
+    x, y = pair_values(value, name, expectation="exactly two finite numbers")
+    return (_finite(x, f"{name}.x"), _finite(y, f"{name}.y"))
 
 
 def _mode(value: SpaceOverride | str, name: str) -> SpaceOverride:

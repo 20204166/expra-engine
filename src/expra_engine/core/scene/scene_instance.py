@@ -17,7 +17,6 @@ to this module) makes an independent copy with no source link.
 from __future__ import annotations
 
 import json
-import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -165,34 +164,14 @@ def _materialize_source_scene(
 ) -> list[Entity]:
     """Deep-copy every entity in ``source_scene`` into ``scene`` under a fresh root parent.
 
-    Mirrors ``Scene.clone_entity(recursive=True)``'s remap algorithm, except
-    the source entities come from a different Scene and the source's own
-    root-level entities (``parent_id is None``) are reparented under
-    ``instance_root_id`` instead of staying rootless.
+    Shares Entity ID/parent remapping with ``Scene.clone_entity`` while
+    parenting source roots under ``instance_root_id``.
     """
-    from expra_engine.core.scene.scene import _clone_components_and_tags
-
+    from expra_engine.core.scene.scene import _clone_entity_tree
     subtree = source_scene.walk_hierarchy()
-    id_map: dict[str, str] = {original.entity_id: str(uuid.uuid4()) for original in subtree}
-
-    cloned_entities: list[Entity] = []
-    for original in subtree:
-        new_id = id_map[original.entity_id]
-        new_parent_id = (
-            instance_root_id
-            if original.parent_id is None
-            else id_map.get(original.parent_id, original.parent_id)
-        )
-        cloned = Entity(
-            original.name,
-            entity_id=new_id,
-            enabled=original.enabled,
-            layer=original.layer,
-            parent_id=new_parent_id,
-        )
-        _clone_components_and_tags(original, cloned)
-        scene.add_entity(cloned)
-        cloned_entities.append(cloned)
+    cloned_entities, _id_map = _clone_entity_tree(
+        scene, subtree, root_parent_id=instance_root_id
+    )
     return cloned_entities
 
 

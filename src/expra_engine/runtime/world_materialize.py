@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import copy
-import hashlib
 import queue
 import uuid
 from concurrent.futures import Future
@@ -16,6 +15,7 @@ from expra_engine.core.scene import Level
 from expra_engine.core.world import LevelDescriptor
 from expra_engine.messages import world as world_messages
 from expra_engine.runtime.level_anchor import WorldPersistentActorComponent
+from expra_engine.runtime.world_state import _world_session_store_path
 
 __all__ = (
     "_LoadCompletion",
@@ -77,18 +77,6 @@ def _session_owned_entity_ids(level: Level | None) -> tuple[str, ...]:
     return tuple(
         sorted(entity.entity_id for entity in level.entities if entity.entity_id not in persistent_ids)
     )
-
-
-def _world_session_store_path(world_id: str, slot: str) -> str:
-    if (
-        not isinstance(slot, str)
-        or not slot
-        or slot in {".", ".."}
-        or any(character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-" for character in slot)
-    ):
-        raise ValueError("World save slot must use letters, numbers, dot, underscore, or hyphen")
-    digest = hashlib.sha256(world_id.encode("utf-8")).hexdigest()
-    return f"world-sessions/{digest}/{slot}.json"
 
 
 def _materialize_world_level(

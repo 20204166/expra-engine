@@ -4,6 +4,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from expra_engine.core.component import TransformComponent
 from expra_engine.core.project import Project, ProjectError
@@ -23,6 +24,42 @@ from expra_engine.filesystem import ResourceId
 
 
 class TestProjectCreateAndSave(unittest.TestCase):
+    def test_scene_and_document_paths_share_project_containment_resolution(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Project.create("Game", Path(tmp) / "project")
+            original = Project._resolve_project_path
+            resolved: list[str] = []
+
+            def record_resolution(owner: Project, relative_path: str) -> Path:
+                resolved.append(relative_path)
+                return original(owner, relative_path)
+
+            with patch.object(Project, "_resolve_project_path", record_resolution):
+                project.scene_file("scenes/legacy.json")
+                project.document_file("scenes/main.scene.pb")
+
+            self.assertEqual(
+                resolved,
+                ["scenes/legacy.json", "scenes/main.scene.pb"],
+            )
+
+    def test_scene_and_document_paths_reject_symlink_escapes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            project = Project.create("Game", root / "project")
+            outside = root / "outside.scene.pb"
+            outside.write_text("outside")
+            scene_link = project.scenes_dir / "escape.scene.pb"
+            try:
+                scene_link.symlink_to(outside)
+            except OSError as error:
+                self.skipTest(f"symlinks unavailable: {error}")
+
+            with self.assertRaisesRegex(ProjectError, "scene escapes project"):
+                project.scene_file("scenes/escape.scene.pb")
+            with self.assertRaisesRegex(ProjectError, "document escapes project"):
+                project.document_file("scenes/escape.scene.pb")
+
     def test_asset_path_has_stable_project_relative_logical_id(self) -> None:
         project = Project("Game", Path("/project"))
 

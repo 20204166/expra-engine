@@ -14,6 +14,7 @@ from expra_engine.core.project import Project, ProjectError
 from expra_engine.core.scene import Level, Scene
 from expra_engine.core.scene.document_codec import canonical_pb_path
 from expra_engine.core.world import World, WorldConnection
+from expra_engine.editor.project_paths import resolved_project_relative_path
 from expra_engine.editor.project_process import ProjectProcessController
 from expra_engine.editor.world_authoring import WorldAuthoringWorkflow
 from expra_engine.messages import project as project_messages
@@ -102,7 +103,7 @@ class ProjectWorkflow:
         project = window._engine.project
         if project is not None and entry.kind in {"Scene", "Level", "World"}:
             try:
-                relative = entry.path.resolve().relative_to(project.path.resolve()).as_posix()
+                relative = resolved_project_relative_path(project.path, entry.path).as_posix()
             except ValueError:
                 window._console.log(
                     "[Assets] Document is outside the current project", level="error"
@@ -226,7 +227,9 @@ class ProjectWorkflow:
         if window._last_save_path is None:
             return None
         try:
-            return window._last_save_path.resolve().relative_to(project.path).as_posix()
+            return resolved_project_relative_path(
+                project.path, window._last_save_path
+            ).as_posix()
         except ValueError:
             return None
 
@@ -268,7 +271,9 @@ class ProjectWorkflow:
             if not selected:
                 return
             try:
-                relative_path = Path(selected).resolve().relative_to(project.path).as_posix()
+                relative_path = resolved_project_relative_path(
+                    project.path, Path(selected)
+                ).as_posix()
             except ValueError:
                 messagebox.showerror(
                     "Open Document", "Document must be inside the project.", parent=window._root
@@ -480,7 +485,7 @@ class ProjectWorkflow:
             window._console.log(f"[Editor] Scene saved as: {target}")
             return
         try:
-            relative = target.resolve().relative_to(project.path.resolve()).as_posix()
+            relative = resolved_project_relative_path(project.path, target).as_posix()
             project.save_document(document, relative)
         except (OSError, ProjectError, ValueError) as exc:
             messagebox.showerror("Save Scene As", str(exc), parent=window._root)
@@ -502,7 +507,7 @@ class ProjectWorkflow:
             return
         project = window._engine.project
         if project is not None and window._last_save_path is not None:
-            relative = window._last_save_path.resolve().relative_to(project.path)
+            relative = resolved_project_relative_path(project.path, window._last_save_path)
             if relative.suffix.casefold() == ".json":
                 mapping = project.migrate_to_protobuf()
                 relative = Path(mapping.get(relative.as_posix(), relative.as_posix()))
@@ -541,7 +546,9 @@ class ProjectWorkflow:
             )
             window._active_document.mark_saved(window._last_save_path)
             return
-        relative = window._last_save_path.resolve().relative_to(project.path).as_posix()
+        relative = resolved_project_relative_path(
+            project.path, window._last_save_path
+        ).as_posix()
         if relative.casefold().endswith(".json"):
             mapping = project.migrate_to_protobuf()
             relative = mapping.get(relative, relative)

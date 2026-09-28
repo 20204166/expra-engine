@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+import expra_engine.runtime.world_materialize as world_materialize_module
+import expra_engine.runtime.world_state as world_state_module
 from expra_engine.core.component import TransformComponent
 from expra_engine.core.scene import Level
 from expra_engine.core.world import LevelDescriptor, World
@@ -17,6 +19,8 @@ from expra_engine.runtime.level_anchor import (
 from expra_engine.runtime.world_state import WorldSessionState, WorldSessionStateComponent
 from expra_engine.runtime.world_streaming import WorldStreamingSystem
 
+materialization_session_path = world_materialize_module._world_session_store_path
+persistence_session_path = world_state_module._world_session_store_path
 
 class ManualExecutor:
     def __init__(self, _workers: int) -> None:
@@ -35,6 +39,11 @@ class ManualExecutor:
     def shutdown(self, *, wait: bool = False, cancel_futures: bool = True) -> None:
         for future, _function in self.jobs:
             future.cancel()
+
+
+def test_world_session_path_has_one_canonical_owner() -> None:
+    assert materialization_session_path is persistence_session_path
+    assert persistence_session_path("main", "quick").endswith("/quick.json")
 
 
 def test_world_session_json_is_deterministic_and_preserves_all_gameplay_state() -> None:

@@ -23,6 +23,7 @@ from expra_engine.editor.commands import (
     ReparentEntityCommand,
     SetComponentPropertyCommand,
 )
+from expra_engine.editor.project_paths import project_relative_path
 from expra_engine.runtime.visual_components import SpriteComponent
 
 
@@ -153,7 +154,7 @@ def _current_scene_relative_path(window: Any, project: Any) -> str | None:
     if last_save is None:
         return None
     try:
-        return last_save.relative_to(project.path).as_posix()
+        return project_relative_path(project.path, last_save).as_posix()
     except ValueError:
         return None
 

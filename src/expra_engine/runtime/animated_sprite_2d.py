@@ -28,6 +28,8 @@ from typing import Any, ClassVar, cast
 
 from expra_engine.core.component import Component
 from expra_engine.runtime.animation import SpriteRegion
+from expra_engine.runtime.validation import coerce_finite_float as _finite
+from expra_engine.runtime.validation import pair_values
 
 __all__ = (
     "AnimatedSprite2DComponent",
@@ -58,16 +60,6 @@ _EVENT_KINDS = frozenset(
 )
 
 
-def _finite(value: object, name: str) -> float:
-    try:
-        result = float(cast(Any, value))
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError(f"{name} must be finite") from exc
-    if not math.isfinite(result):
-        raise ValueError(f"{name} must be finite")
-    return result
-
-
 def _positive(value: object, name: str) -> float:
     result = _finite(value, name)
     if result <= 0.0:
@@ -83,15 +75,8 @@ def _progress(value: object) -> float:
 
 
 def _vec2(value: object, name: str) -> tuple[float, float]:
-    if isinstance(value, (str, bytes)):
-        raise ValueError(f"{name} must contain two finite numbers")
-    try:
-        items: tuple[Any, ...] = tuple(cast(Any, value))
-    except TypeError as exc:
-        raise ValueError(f"{name} must contain two finite numbers") from exc
-    if len(items) != 2:
-        raise ValueError(f"{name} must contain two finite numbers")
-    return (_finite(items[0], f"{name}.x"), _finite(items[1], f"{name}.y"))
+    x, y = pair_values(value, name)
+    return (_finite(x, f"{name}.x"), _finite(y, f"{name}.y"))
 
 
 def _region_dict(region: SpriteRegion | None) -> list[int] | None:

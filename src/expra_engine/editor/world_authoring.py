@@ -18,6 +18,7 @@ from expra_engine.core.world import (
 )
 from expra_engine.editor.commands import ReplaceWorldDocumentCommand
 from expra_engine.editor.interactions import drop_asset_on_viewport
+from expra_engine.editor.project_paths import resolved_project_relative_path
 from expra_engine.runtime.level_anchor import LevelAnchorComponent, LevelAnchorKind
 
 
@@ -269,7 +270,7 @@ def _active_world_path(window: Any, project: Any) -> str | None:
     if path is None:
         return None
     try:
-        return Path(path).resolve().relative_to(project.path.resolve()).as_posix()
+        return resolved_project_relative_path(project.path, Path(path)).as_posix()
     except ValueError:
         return None
 
@@ -311,7 +312,7 @@ class WorldEditorActionsMixin:
             and entry.kind == "Level"
         ):
             try:
-                relative = entry.path.resolve().relative_to(project.path.resolve()).as_posix()
+                relative = resolved_project_relative_path(project.path, entry.path).as_posix()
                 canvas = self._viewport._canvas
                 canvas_x = root_x - canvas.winfo_rootx()
                 canvas_y = root_y - canvas.winfo_rooty()
@@ -336,7 +337,7 @@ class WorldEditorActionsMixin:
         if not selected:
             return
         try:
-            relative = Path(selected).resolve().relative_to(project.path.resolve()).as_posix()
+            relative = resolved_project_relative_path(project.path, Path(selected)).as_posix()
             self._project_workflow.add_level_to_world(relative)
         except (OSError, ProjectError, ValueError) as error:
             messagebox.showerror("Add Level to World", str(error), parent=self._root)

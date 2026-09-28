@@ -78,6 +78,26 @@ class TestEntityBasics(unittest.TestCase):
 
 
 class TestEntityBehaviours(unittest.TestCase):
+    def test_eligible_behaviours_uses_shared_dispatch_policy(self) -> None:
+        entity = Entity("Hero")
+        eligible = RecordingBehaviour()
+        disabled = RecordingBehaviour()
+        disabled.enabled = False
+        system_owned = RecordingBehaviour()
+        system_owned._system_owned = True
+        detached = RecordingBehaviour()
+        other_entity = Entity("Other")
+        detached.entity = other_entity
+        for behaviour in (eligible, disabled, system_owned, detached):
+            if behaviour is detached:
+                continue
+            entity.add_behaviour(behaviour, runtime_factory=RecordingBehaviour)
+        entity._behaviours.append(detached)
+
+        self.assertEqual(tuple(entity._eligible_behaviours()), (eligible,))
+        entity.enabled = False
+        self.assertEqual(tuple(entity._eligible_behaviours()), ())
+
     def test_add_behaviour_preserves_order_and_supports_type_lookup(self) -> None:
         entity = Entity("Hero")
         first = RecordingBehaviour()
