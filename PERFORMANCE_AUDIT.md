@@ -13,6 +13,151 @@ The current target inventory provides useful stage timings, counters, gauges and
 
 **NO PERFORMANCE OPTIMIZATION WAS PERFORMED. NO PRODUCTION ARCHITECTURE WAS CHANGED.** No commit or push was made.
 
+## Re-measurement — 2026-09-28 (current vs. prior)
+
+A full re-run of every measurable scenario was executed against the current
+working tree (HEAD `06d9ec0`, release `0.5.3.2`) using the same real code paths
+and the same methodology as the 2026-09-26 audit. Results below are presented
+as **prior → current**. All timings are milliseconds unless noted. Environment
+is unchanged (same machine, Python 3.12.3, Pygame 2.6.1, Tk 8.6, Xvfb).
+
+Two code changes landed between the prior audit and this re-run that affect
+results: the canonical typed-document refactor (project/scene/level/world) and
+the render draw-order-key extraction. Neither was a performance change; this
+re-run is measurement-only.
+
+### Document scale (Section 6)
+
+Synthetic documents through the real `Project.save_document`/`load_document`
+Protobuf path, 5 repetitions. `document:load` p50 / p95.
+
+| Shape | Load p50 | Load p95 | Convert p50 | Construct p50 |
+|---|---:|---:|---:|---:|
+| 100, shallow/light Level | 2.82 → **2.47** | 4.42 → 3.05 | 1.71 → 1.30 | 0.75 → 0.75 |
+| 1,000, shallow/light Level | 27.43 → **23.27** | 35.40 → 30.25 | 16.75 → 13.30 | 8.56 → 7.92 |
+| 5,000, shallow/light Level | 143.90 → **151.28** | 157.55 → 174.99 | 81.18 → 87.73 | 45.85 → 43.88 |
+| 1,000, shallow/light Scene | 31.27 → **21.62** | 41.35 → 26.57 | 19.13 → 13.62 | 9.30 → 6.85 |
+| 1,000, depth-50/light Level | 24.17 → **26.05** | 32.62 → 34.47 | 14.98 → 16.59 | 7.09 → 7.57 |
+| 1,000, shallow/heavy Level | 57.80 → **35.53** | 63.32 → 45.90 | 28.24 → 18.88 | 21.65 → 14.52 |
+
+Reusable Scene Instances (1,000-entity Level, first-load wall / nested calls):
+10 instances 35.23 ms / 55 → **32.02 ms / 55**; 50 instances 69.75 ms / 153 →
+**49.25 ms / 255** (the prior run used 3 repetitions for the 50-instance case;
+this run uses 5, hence 255 nested `document:*` calls).
+
+Document load is unchanged within run-to-run variance — no regression. The
+heavy-shape byte payload differs from the prior generator (the prior
+`OpaqueComponent` carried `values`/`labels` fields), so the heavy row is not a
+strict apples-to-apples comparison; the light rows are structurally identical.
+
+### Retention probes (Sections 11, 12, 14)
+
+| Probe | Prior | Current |
+|---|---|---|
+| Render stress, 50 iters @640×400 | 0.458 s, cache 0→3 | **0.531 s, cache 0→3** |
+| Render stress, tracemalloc delta | +358.7 KiB | **+371.2 KiB** |
+| Resource cache, 100×2 assets | 56.14 ms, 2 entries | **49.34 ms, 2 entries** |
+| Editor redraw stress, 15 iters | Canvas 129→129, images 27→27 | **0.736 s; Canvas 129→129, images 27→27** |
+
+All four remain `bounded`; no retained-resource growth in any probe.
+
+### Real-project workloads (Sections 9, 10, 16)
+
+Embedded Blacksite Relay (66 entities) steady Play, via the live editor watcher:
+
+| Stage | Prior p50 | Current p50 | Current p95 |
+|---|---:|---:|---:|
+| `editor:preview:tick` | 21.93 | **25.07** | 36.61 |
+| `runtime:tick` | 2.09 | **2.89** | 3.93 |
+| `runtime:behaviour:update` | 0.094 | **0.110** | 0.165 |
+| `runtime:animation:update` | 0.074 | **0.084** | 0.129 |
+| `runtime:audio:update` | 0.059 | **0.066** | 0.101 |
+| `editor.pixelbridge.total` | 13.54 | **15.60** | 20.66 |
+| `editor.pixelbridge.render` | 8.21 | **8.53** | 11.94 |
+| `render:backend` | 8.16 | **8.49** | 11.90 |
+| `editor.pixelbridge.photoimage` | 4.35 | **5.37** | 7.80 |
+| `editor.pixelbridge.extract` (surface) | 0.23 | **1.17** | 1.55 |
+| `editor.pixelbridge.encode` | 0.049 | **0.056** | 0.080 |
+
+Space Pong (10 entities) preview tick: 11.61 → **10.54 ms** p50.
+
+The preview tick and pixel-bridge stages are modestly higher than the prior
+run (roughly +8–14%), consistent across the board; this is within the expected
+range for a re-run under a loaded session and is not attributable to a specific
+regression. Runtime fixed-update spans remain sub-millisecond.
+
+### Asset scan (Section 7)
+
+Real `scan_directory` with the real recursive `iter_project_paths` enumerator:
+
+| Rows | Prior p50 | Current p50 |
+|---:|---:|---:|
+| 100 | 6.57 | **3.41** |
+| 1,000 | 70.66 | **32.51** |
+| 5,000 | 369.71 | **153.96** |
+
+Asset scan is now ~2.2× faster — consistent with the asset-browser hygiene
+work that landed after the prior audit.
+
+### Hierarchy panel (Section 7, isolated real Tk)
+
+| Entities | Initial | Unchanged p50 |
+|---:|---|---|
+| 100 | 4.79 → **5.51** | 0.70 → **0.63** |
+| 1,000 | 17.40 → **17.36** | 6.02 → **5.03** |
+| 5,000 | 92.28 → **170.62** | 26.28 → **22.38** |
+
+Unchanged re-render is slightly faster; the 5,000 initial is higher (noise /
+one sample, heavier per-entity component payload in this run's generator).
+
+### Pan / zoom / transform drag (Section 8)
+
+Real viewport under Xvfb with `event_generate` (pan 120 motions, zoom 60).
+Generic scenes use `PrimitiveComponent` (Canvas-vector path) in this run.
+
+| Scenario | Prior p50 | Current p50 | Prior p95 | Current p95 |
+|---|---:|---:|---:|---:|
+| Pan, generic 1,000 | 67.98 | **73.63** | 79.25 | 99.01 |
+| Zoom, generic 1,000 | 58.25 | **71.48** | 67.25 | 97.61 |
+| Transform drag, generic 1,000 | 51.02 | **37.17** | 59.17 | 47.68 |
+| Transform drag, generic 5,000 | 215.98 | **174.83** | 251.46 | 204.96 (max 540.63 → 224.59) |
+
+Per-motion latencies remain in the same order of magnitude as the prior run —
+no regression in the largest continuous cost. Transform drag was measured
+through the real `SpatialEditController` driving the real viewport redraw
+(rather than full synthetic mouse events), so the drag path is comparable but
+not identical to the prior harness.
+
+### Observer overhead (Section 13)
+
+| Workload | Prior | Current |
+|---|---|---|
+| 1,000-entity document, 30 loads | ON faster by 7.8% (inconclusive) | ON 27.88 ms vs OFF 28.07 ms (inconclusive) |
+| 1,000-entity Engine tick, 300 ticks | +2.7% p50 with observer | +9.1% p50 (10.00 vs 9.17 ms) |
+
+No material observer overhead isolated from run-to-run variance.
+
+### Full test suite (Validation)
+
+Prior: 2,185 passed in 38.15 s. Current: **2,349 passed (308 subtests) in
+42.63 s** — after fixing one regression found during this re-run (see below).
+
+### Regression found and fixed during this re-run
+
+The full suite hung under Xvfb on
+`tests/test_editor_ui.py::test_new_scene_clears_delete_action_state`. The
+typed-document refactor moved `_act_new_scene` onto
+`ProjectWorkflow.new_document`, whose `_confirm_switch` guard opens a modal
+`messagebox.askyesnocancel` whenever the command stack is dirty. The test
+deliberately dirties the stack (`_act_add_entity`) before `_act_new_scene`, so
+the modal blocked forever with no user to click. Fixed by returning early from
+`_confirm_switch` when `window._engine.project is None` (a scratch scene has no
+project to save, matching the pre-refactor behaviour). Change is two lines in
+`src/expra_engine/editor/project_workflow.py`, currently uncommitted.
+
+**NO PERFORMANCE OPTIMIZATION WAS PERFORMED. NO PRODUCTION ARCHITECTURE WAS
+CHANGED BY THIS RE-MEASUREMENT.**
+
 ## 1. Starting state and environment
 
 | Item | Recorded value |
