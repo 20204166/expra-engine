@@ -8,6 +8,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from expra_engine.messages import component as component_messages
+
 
 @dataclass(frozen=True)
 class PropertyDescriptor:
@@ -105,7 +107,7 @@ def component_type_spec(name: str) -> ComponentTypeSpec:
     try:
         return _COMPONENT_SPECS[name]
     except KeyError as exc:
-        raise KeyError(f"Unknown component type: {name!r}") from exc
+        raise KeyError(component_messages.unknown_component_type(name)) from exc
 
 
 def registered_component_specs() -> tuple[ComponentTypeSpec, ...]:

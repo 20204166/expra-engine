@@ -16,6 +16,7 @@ from expra_engine.core.component_schema import (
     component_type_spec,
     register_component_spec,
 )
+from expra_engine.messages import component as component_messages
 
 
 class Component:
@@ -153,7 +154,7 @@ def component_from_dict(data: dict[str, Any]) -> Component:
             return UnresolvedScriptComponent(data)
     cls = _COMPONENT_REGISTRY.get(component_type)
     if cls is None:
-        raise ValueError(f"Unknown component type: {component_type!r}")
+        raise ValueError(component_messages.unknown_component_type(component_type))
     return cls.from_dict(data)
 
 
