@@ -16,27 +16,38 @@ from expra_engine.runtime.dialogue import (
 
 class RuntimeDialogueTests(unittest.TestCase):
     def test_runtime_dialogue_does_not_import_editor_modules(self) -> None:
-        for module_name in tuple(sys.modules):
-            if module_name == "expra_engine.editor" or module_name.startswith(
-                "expra_engine.editor."
-            ):
-                del sys.modules[module_name]
-        sys.modules.pop("expra_engine.runtime.dialogue", None)
+        removed_editor = {
+            name: module
+            for name, module in sys.modules.items()
+            if name == "expra_engine.editor" or name.startswith("expra_engine.editor.")
+        }
+        original_dialogue = sys.modules.pop("expra_engine.runtime.dialogue", None)
+        for name in removed_editor:
+            del sys.modules[name]
+        try:
+            importlib.import_module("expra_engine.runtime.dialogue")
 
-        importlib.import_module("expra_engine.runtime.dialogue")
-
-        self.assertFalse(
-            any(
-                module_name == "expra_engine.editor"
-                or module_name.startswith("expra_engine.editor.")
-                for module_name in sys.modules
+            self.assertFalse(
+                any(
+                    module_name == "expra_engine.editor"
+                    or module_name.startswith("expra_engine.editor.")
+                    for module_name in sys.modules
+                )
             )
-        )
-        core_safe_expression = importlib.import_module("expra_engine.core.safe_expression")
-        editor_safe_expression = importlib.import_module("expra_engine.editor.safe_expression")
-        self.assertIs(editor_safe_expression.ExpressionError, core_safe_expression.ExpressionError)
-        self.assertIs(editor_safe_expression.evaluate, core_safe_expression.evaluate)
-        self.assertEqual(editor_safe_expression.evaluate("2 + 2"), 4)
+            core_safe_expression = importlib.import_module("expra_engine.core.safe_expression")
+            editor_safe_expression = importlib.import_module("expra_engine.editor.safe_expression")
+            self.assertIs(editor_safe_expression.ExpressionError, core_safe_expression.ExpressionError)
+            self.assertIs(editor_safe_expression.evaluate, core_safe_expression.evaluate)
+            self.assertEqual(editor_safe_expression.evaluate("2 + 2"), 4)
+        finally:
+            for name in tuple(sys.modules):
+                if (
+                    name == "expra_engine.editor" or name.startswith("expra_engine.editor.")
+                ) and name not in removed_editor:
+                    del sys.modules[name]
+            sys.modules.update(removed_editor)
+            if original_dialogue is not None:
+                sys.modules["expra_engine.runtime.dialogue"] = original_dialogue
 
     def test_parses_typed_nodes_choices_conditions_and_actions(self) -> None:
         graph = parse_dialogue(

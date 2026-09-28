@@ -22,8 +22,8 @@ from expra_engine.core.project import Project
 from expra_engine.editor.commands import (
     SetExposedValueCommand,
     TransformEntityCommand,
-    duplicate_selection,
 )
+from expra_engine.editor.interactions import duplicate_selection
 from expra_engine.runtime.area import AreaComponent
 from expra_engine.runtime.collider import ColliderComponent
 from expra_engine.ui.editor_window import EditorWindow

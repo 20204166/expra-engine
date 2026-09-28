@@ -1479,11 +1479,11 @@ class EditorWindowLayoutTests(unittest.TestCase):
             window._observer.reset()
             with (
                 patch(
-                    "expra_engine.ui.editor_window.simpledialog.askstring",
+                    "expra_engine.editor.script_actions.simpledialog.askstring",
                     side_effect=("project://scripts/example.py", "ExampleBehaviour"),
                 ),
                 patch(
-                    "expra_engine.ui.editor_window.ScriptRegistry.resolve",
+                    "expra_engine.editor.script_actions.ScriptRegistry.resolve",
                     return_value=SimpleNamespace(exposed_schema=lambda: {}),
                 ),
             ):

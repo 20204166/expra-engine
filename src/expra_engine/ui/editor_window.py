@@ -20,7 +20,7 @@ import tkinter as tk
 from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
-from tkinter import messagebox, simpledialog
+from tkinter import messagebox
 from tkinter import ttk as tkttk
 from typing import Any
 
@@ -61,29 +61,21 @@ from expra_engine.editor.interactions import (
     remove_component,
     reparent_selection_to,
 )
-from expra_engine.editor.normal_mapping_workflow import (
-    apply_level_auto_map,
-    build_level_auto_map_plan,
-)
+from expra_engine.editor.normal_map_actions import NormalMapEditorActionsMixin
 from expra_engine.editor.preferences import PreferencesStore
 from expra_engine.editor.project_workflow import ProjectWorkflow
 from expra_engine.editor.render_targets import RenderTargetRegistry
 from expra_engine.editor.runtime_preview import RuntimePreviewLoop
-from expra_engine.editor.script_tools import attach_script, create_behaviour_script
+from expra_engine.editor.script_actions import ScriptEditorActionsMixin
 from expra_engine.editor.window_placement import WindowGeometry, initial_hierarchy_width
 from expra_engine.editor.world_authoring import WorldEditorActionsMixin
 from expra_engine.observability import ObservabilityWatcher
 from expra_engine.runtime.input import PhysicalInput
-from expra_engine.runtime.material_component import MaterialComponent
-from expra_engine.runtime.normal_mapping import NormalMapResolver, normal_texture_sources
-from expra_engine.runtime.pygame_resource_provider import PygameResourceProvider
 from expra_engine.runtime.script_component import ScriptComponent
-from expra_engine.runtime.script_registry import ScriptRegistry
 from expra_engine.ui.asset_browser import AssetBrowserPanel
 from expra_engine.ui.console import ConsolePanel
 from expra_engine.ui.hierarchy import HierarchyPanel
 from expra_engine.ui.inspector import InspectorPanel
-from expra_engine.ui.normal_map_preview import build_normal_map_preview, show_normal_map_preview
 from expra_engine.ui.styles import (
     STYLE_APP_FRAME,
     STYLE_PANEL_FRAME,
@@ -108,7 +100,12 @@ _PREFERENCES_PATH = Path.home() / ".expra" / "preferences.json"
 _VIEWPORT_CAMERA_SAVE_DEBOUNCE_MS = 400
 
 
-class EditorWindow(EditorDocumentSurface, WorldEditorActionsMixin):
+class EditorWindow(
+    EditorDocumentSurface,
+    WorldEditorActionsMixin,
+    NormalMapEditorActionsMixin,
+    ScriptEditorActionsMixin,
+):
     """Root editor window."""
 
     def __init__(self, engine: Engine, *, theme: str = "bootstrap-dark") -> None:
@@ -360,123 +357,6 @@ class EditorWindow(EditorDocumentSurface, WorldEditorActionsMixin):
     def _on_asset_open(self, entry: Any) -> None:
         self._project_workflow.open_asset(entry)
 
-    def _on_normal_map_preview(self, entity_id: str, component_index: int) -> None:
-        project = self._engine.project
-        document = self._active_document.document
-        if project is None or not isinstance(document, Scene):
-            messagebox.showwarning(
-                "Normal Map Preview", "Open a Scene or Level in a project first.", parent=self._root
-            )
-            return
-        entity = document.find_entity(entity_id)
-        if entity is None or not 0 <= component_index < len(entity.components):
-            return
-        material = entity.components[component_index]
-        if not isinstance(material, MaterialComponent) or material.normal_map_descriptor is None:
-            messagebox.showinfo(
-                "Normal Map Preview",
-                "Enable Explicit or Auto Pair normal mapping on this Material first.",
-                parent=self._root,
-            )
-            return
-        sources = normal_texture_sources(entity)
-        if not sources:
-            messagebox.showwarning(
-                "Normal Map Preview",
-                "This Entity has no textured Sprite or AnimatedSprite2D frame.",
-                parent=self._root,
-            )
-            return
-        base_texture_id = sources[0][1]
-        resources = project.resource_service(observer=self._observer)
-        resolver = NormalMapResolver(resources)
-        resolution = resolver.inspect(
-            base_texture_id,
-            material.normal_map_mode,
-            explicit_texture_id=material.normal_texture_id,
-        )
-        if resolution.normal_texture_id is None or resolution.status.value != "resolved":
-            messagebox.showerror(
-                "Normal Map Preview",
-                resolution.detail or f"Normal map is {resolution.status.value}.",
-                parent=self._root,
-            )
-            return
-        try:
-            import pygame
-
-            provider = PygameResourceProvider(pygame, resources, observer=self._observer)
-            albedo = provider(base_texture_id)
-            normal = provider(resolution.normal_texture_id)
-            if albedo is None or normal is None:
-                raise ValueError("normal or albedo texture could not be decoded")
-            preview = build_normal_map_preview(
-                pygame,
-                albedo,
-                normal,
-                material.normal_map_descriptor,
-            )
-            width, height = normal.get_size()
-            show_normal_map_preview(
-                self._root,
-                preview,
-                "\n".join(
-                    (
-                        f"Resource: {resolution.normal_texture_id}",
-                        f"Resolution: {width} x {height} (8-bit backend channels)",
-                        f"Convention: {material.normal_y_convention}",
-                        f"Encoding: {material.normal_encoding}",
-                        f"Strength: {material.normal_strength:g}",
-                        f"Base source: {base_texture_id}",
-                    )
-                ),
-            )
-        except Exception as exc:  # noqa: BLE001 - preview failures stay editor-local
-            messagebox.showerror("Normal Map Preview", str(exc), parent=self._root)
-
-    def _on_normal_map_auto_map(self) -> None:
-        project = self._engine.project
-        document = self._active_document.document
-        if project is None or not isinstance(document, Scene):
-            messagebox.showwarning(
-                "Auto-map Normal Textures",
-                "Open a Scene or Level in a project first.",
-                parent=self._root,
-            )
-            return
-        try:
-            plan = build_level_auto_map_plan(
-                document,
-                project.resource_service(observer=self._observer),
-            )
-        except Exception as exc:  # noqa: BLE001 - resource inspection is user-facing
-            messagebox.showerror("Auto-map Normal Textures", str(exc), parent=self._root)
-            return
-        counts: dict[str, int] = {}
-        for finding in plan.findings:
-            counts[finding.state.value] = counts.get(finding.state.value, 0) + 1
-        summary = "\n".join(
-            f"{name.replace('_', ' ').title()}: {count}" for name, count in sorted(counts.items())
-        ) or "No eligible textured visuals were found."
-        details = "\n".join(
-            f"{finding.entity_name} / {finding.visual_name}: {finding.state.value}"
-            + (f" ({finding.detail})" if finding.detail else "")
-            for finding in plan.findings[:40]
-        )
-        if details:
-            summary = f"{summary}\n\n{details}"
-            if len(plan.findings) > 40:
-                summary += f"\n...and {len(plan.findings) - 40} more"
-        if not plan.can_apply:
-            messagebox.showinfo("Auto-map Normal Textures", summary, parent=self._root)
-            return
-        if messagebox.askyesno(
-            "Auto-map Normal Textures",
-            f"{summary}\n\nApply auto-pair mapping as one undoable edit?",
-            parent=self._root,
-        ):
-            apply_level_auto_map(self, plan)
-
     def _set_initial_sashes(self) -> None:
         """Place side panes after Tk has measured the initial shell."""
         self._sash_after_id = None
@@ -716,73 +596,6 @@ class EditorWindow(EditorDocumentSurface, WorldEditorActionsMixin):
 
     def _act_duplicate_selection(self) -> None:
         duplicate_selection(self)
-
-    # ------------------------------------------------------------------
-    # Scripting actions
-    # ------------------------------------------------------------------
-
-    def _act_new_script(self) -> None:
-        project = self._engine.project
-        if project is None:
-            messagebox.showwarning("New Script", "Open a project before creating scripts.")
-            return
-        relative_path = simpledialog.askstring(
-            "New Script", "Path under scripts/", parent=self._root
-        )
-        class_name = simpledialog.askstring("New Script", "Behaviour class name", parent=self._root)
-        if not relative_path or not class_name:
-            return
-        try:
-            resource = create_behaviour_script(project.path, f"scripts/{relative_path}", class_name)
-        except (ValueError, FileExistsError) as exc:
-            messagebox.showerror("New Script", str(exc), parent=self._root)
-            return
-        self._console.log(f"[Editor] Created script: {resource}")
-        self._assets.refresh()
-
-    def _act_attach_script(self) -> None:
-        if self._selected_id is None:
-            return
-        scene = self._engine.edit_scene
-        entity = scene.find_entity(self._selected_id) if scene else None
-        if entity is None:
-            return
-        script_id = simpledialog.askstring(
-            "Attach Script", "project://scripts/example.py", parent=self._root
-        )
-        class_name = simpledialog.askstring(
-            "Attach Script", "Behaviour class name", parent=self._root
-        )
-        if not script_id or not class_name:
-            return
-        try:
-            component = attach_script(entity, script_id, class_name)
-            with contextlib.suppress(OSError, ImportError, AttributeError, TypeError, ValueError):
-                project_root = self._engine.project.path if self._engine.project else Path.cwd()
-                behaviour_type = ScriptRegistry(project_root).resolve(script_id, class_name)
-                component.exposed_values = {
-                    name: field.default for name, field in behaviour_type.exposed_schema().items()
-                }
-        except (ValueError, TypeError) as exc:
-            messagebox.showerror("Attach Script", str(exc), parent=self._root)
-            return
-        self._console.log(f"[Editor] Attached {class_name} to {entity.name}")
-        self._present_all()
-
-    def _act_remove_script(self) -> None:
-        if self._selected_id is None:
-            return
-        scene = self._engine.edit_scene
-        entity = scene.find_entity(self._selected_id) if scene else None
-        if entity is None:
-            return
-        scripts = [
-            component for component in entity.components if isinstance(component, ScriptComponent)
-        ]
-        if scripts:
-            entity.remove_component(scripts[-1])
-            self._console.log(f"[Editor] Removed script from {entity.name}")
-            self._present_all()
 
     def _on_hierarchy_select(self, ids: Sequence[str]) -> None:
         """Central selection setter: dedupes, drops dead ids, updates dependent action state."""
