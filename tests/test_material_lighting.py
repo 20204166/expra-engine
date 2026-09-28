@@ -269,6 +269,28 @@ def test_lit_and_unlit_visuals_respond_independently_to_the_same_light() -> None
     assert unlit_pixel.r > 240 and unlit_pixel.g > 240 and unlit_pixel.b > 240
 
 
+def test_runtime_renderer_accepts_tuple_colors_assigned_after_primitive_creation() -> None:
+    import pygame
+
+    primitive = PrimitiveComponent(width=4.0, height=4.0, outline_width=1.0)
+    primitive.fill = (1.0, 0.0, 0.0)
+    primitive.outline = (0.0, 1.0, 0.0)
+    scene = Scene("runtime primitive assignment")
+    scene.create_entity("shape").add_component(primitive)
+    surface = pygame.Surface((101, 101))
+    renderer = PygameRenderer(pygame, surface, clear_color=(0, 0, 0))
+    renderer.start(
+        RenderContext(Viewport(0, 0, 101, 101), OrthographicCamera(width=10.0, height=10.0))
+    )
+
+    renderer.render(extract_render_frame(scene))
+
+    center = surface.get_at((50, 50))
+    outline = surface.get_at((30, 50))
+    assert center.r > 240 and center.g < 20 and center.b < 20
+    assert outline.g > 240 and outline.r < 20 and outline.b < 20
+
+
 def test_material_scratch_surface_is_released_when_renderer_stops() -> None:
     import pygame
 

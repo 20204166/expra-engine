@@ -13,7 +13,7 @@ from expra_engine.core.engine import Engine
 from expra_engine.core.project import Project
 from expra_engine.core.scene import Scene, SceneInstanceComponent
 from expra_engine.editor.assets import AssetEntry
-from expra_engine.editor.commands import drop_asset_on_viewport, reparent_selection_to
+from expra_engine.editor.interactions import drop_asset_on_viewport, reparent_selection_to
 from expra_engine.filesystem import ResourceId
 from expra_engine.runtime.visual_components import SpriteComponent
 from expra_engine.ui.editor_window import EditorWindow

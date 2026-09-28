@@ -215,7 +215,7 @@ class MultiLevelWorkflowTests(unittest.TestCase):
 
                 window._project_workflow.run_project()
                 window._root.update()
-                self.assertIsNotNone(window._project_workflow._project_process)
+                self.assertIsNotNone(window._project_workflow._project_process_controller.process)
                 self.assertEqual(window._engine.run_state, EngineRunState.EDIT)
                 self.assertEqual(window._engine.edit_scene.name, "Level Two")  # type: ignore[union-attr]
 
@@ -240,11 +240,11 @@ class MultiLevelWorkflowTests(unittest.TestCase):
                 before_scene_id = window._engine.edit_scene.scene_id  # type: ignore[union-attr]
                 window._project_workflow.run_project()
                 window._root.update()
-                self.assertIsNotNone(window._project_workflow._project_process)
+                self.assertIsNotNone(window._project_workflow._project_process_controller.process)
                 self.assertEqual(window._engine.run_state, EngineRunState.EDIT)
                 window._act_stop()
                 window._root.update()
-                self.assertIsNone(window._project_workflow._project_process)
+                self.assertIsNone(window._project_workflow._project_process_controller.process)
                 self.assertEqual(window._engine.edit_scene.scene_id, before_scene_id)  # type: ignore[union-attr]
             finally:
                 window._on_close()
@@ -259,7 +259,7 @@ class MultiLevelWorkflowTests(unittest.TestCase):
             replacement = Project.create("Replacement", root / "Replacement")
             try:
                 window._project_workflow.run_project()
-                process = window._project_workflow._project_process
+                process = window._project_workflow._project_process_controller.process
                 self.assertIsNotNone(process)
                 assert process is not None
 
@@ -267,7 +267,7 @@ class MultiLevelWorkflowTests(unittest.TestCase):
 
                 self.assertIs(window._engine.project, replacement)
                 self.assertIsNotNone(process.poll())
-                self.assertIsNone(window._project_workflow._project_process)
+                self.assertIsNone(window._project_workflow._project_process_controller.process)
             finally:
                 window._on_close()
 
@@ -280,7 +280,7 @@ class MultiLevelWorkflowTests(unittest.TestCase):
             )
             try:
                 window._project_workflow.run_project()
-                process = window._project_workflow._project_process
+                process = window._project_workflow._project_process_controller.process
                 self.assertIsNotNone(process)
                 assert process is not None
 
@@ -288,7 +288,7 @@ class MultiLevelWorkflowTests(unittest.TestCase):
 
                 self.assertIsNone(window._engine.project)
                 self.assertIsNotNone(process.poll())
-                self.assertIsNone(window._project_workflow._project_process)
+                self.assertIsNone(window._project_workflow._project_process_controller.process)
             finally:
                 window._on_close()
 

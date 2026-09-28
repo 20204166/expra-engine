@@ -2,11 +2,7 @@
 
 from __future__ import annotations
 
-import contextlib
 import json
-import subprocess
-import sys
-import tempfile
 import uuid
 from dataclasses import replace
 from pathlib import Path, PureWindowsPath
@@ -18,14 +14,11 @@ from expra_engine.core.project import Project, ProjectError
 from expra_engine.core.scene import Level, Scene
 from expra_engine.core.scene.document_codec import canonical_pb_path
 from expra_engine.core.world import World, WorldConnection
+from expra_engine.editor.project_process import ProjectProcessController
 from expra_engine.editor.world_authoring import WorldAuthoringWorkflow
 from expra_engine.messages import project as project_messages
 from expra_engine.runtime.input import ActionId, PhysicalInput
 from expra_engine.runtime.script_registry import ScriptRegistry
-
-_PROJECT_POLL_INTERVAL_MS = 100
-_PROJECT_OUTPUT_TAIL_BYTES = 8192
-_PROJECT_OUTPUT_MAX_CHARS = 2048
 
 
 class ProjectWorkflow:
@@ -34,11 +27,7 @@ class ProjectWorkflow:
     def __init__(self, window: Any) -> None:
         self.window = window
         self._pending_restore: tuple[Any, Path | None] | None = None
-        self._project_process: subprocess.Popen[bytes] | None = None
-        self._project_poll_id: str | None = None
-        self._project_output_file: Any | None = None
-        self._project_script_path: Path | None = None
-        self._project_document_entrypoint: str | None = None
+        self._project_process_controller = ProjectProcessController(window)
         self.world_authoring = WorldAuthoringWorkflow(window)
 
     def new_project(self) -> None:
@@ -158,9 +147,7 @@ class ProjectWorkflow:
         self._pending_restore = None
         window._engine.set_project(None)
         window._engine.set_scene(None)
-        active_document = getattr(window, "_active_document", None)
-        if active_document is not None:
-            active_document.open(None)
+        window._active_document.open(None)
         window._viewport.set_resource_service(None)
         window._editor_context = replace(window._editor_context, project=None)
         window._command_stack.clear()
@@ -177,13 +164,7 @@ class ProjectWorkflow:
         window = self.window
         if window._engine.project is None:
             return True
-        active_document = getattr(window, "_active_document", None)
-        dirty = (
-            active_document.is_dirty
-            if active_document is not None
-            else getattr(window._command_stack, "is_dirty", window._command_stack.can_undo)
-        )
-        if not dirty:
+        if not window._active_document.is_dirty:
             return True
         decision = messagebox.askyesnocancel(
             "Unsaved Changes",
@@ -218,9 +199,7 @@ class ProjectWorkflow:
             window._engine.set_scene(document)
         else:
             raise ProjectError("project entrypoint must resolve to a Scene, Level, or World")
-        active_document = getattr(window, "_active_document", None)
-        if active_document is not None:
-            active_document.open(document, project.document_file())
+        window._active_document.open(document, project.document_file())
         window._viewport.set_resource_service(project.resource_service(observer=window._observer))
         window._engine.set_script_registry(ScriptRegistry(project.path))
         window._editor_context = replace(window._editor_context, project=project)
@@ -257,7 +236,7 @@ class ProjectWorkflow:
         project = window._engine.project
         if project is None:
             return "Expra Editor"
-        document = _active_document_value(window)
+        document = window._active_document.document
         kind = document.document_kind.value.upper() if document is not None else "DOCUMENT"
         relative = self._current_relative_path(project)
         if relative is None:
@@ -315,9 +294,7 @@ class ProjectWorkflow:
             messagebox.showerror("Open Document", "Unsupported document kind.", parent=window._root)
             return
         document_path = project.document_file(relative_path)
-        active_document = getattr(window, "_active_document", None)
-        if active_document is not None:
-            active_document.open(document, document_path)
+        window._active_document.open(document, document_path)
         window._last_save_path = document_path
         window._selected_ids = ()
         window._root.title(self.window_title())
@@ -406,9 +383,7 @@ class ProjectWorkflow:
         else:
             window._engine.set_scene(document)
         document_path = project.document_file(relative_path) if project is not None else None
-        active_document = getattr(window, "_active_document", None)
-        if active_document is not None:
-            active_document.open(document, document_path)
+        window._active_document.open(document, document_path)
         window._last_save_path = document_path
         window._selected_ids = ()
         window._root.title(self.window_title())
@@ -454,7 +429,7 @@ class ProjectWorkflow:
     def save_active_document_as(self) -> None:
         """Save the active typed document to a new path, then keep editing it there."""
         window = self.window
-        document = _active_document_value(window)
+        document = window._active_document.document
         if document is None:
             messagebox.showwarning("Save As", "No document to save.", parent=window._root)
             return
@@ -501,7 +476,7 @@ class ProjectWorkflow:
                 messagebox.showerror("Save Scene As", str(exc), parent=window._root)
                 return
             window._last_save_path = target
-            _mark_active_document_saved(window, target)
+            window._active_document.mark_saved(target)
             window._console.log(f"[Editor] Scene saved as: {target}")
             return
         try:
@@ -511,7 +486,7 @@ class ProjectWorkflow:
             messagebox.showerror("Save Scene As", str(exc), parent=window._root)
             return
         window._last_save_path = project.document_file(relative)
-        _mark_active_document_saved(window, window._last_save_path)
+        window._active_document.mark_saved(window._last_save_path)
         window._root.title(self.window_title())
         window._console.log(f"[Editor] Scene saved as: {relative}")
 
@@ -521,7 +496,7 @@ class ProjectWorkflow:
 
     def save_active_document(self) -> None:
         window = self.window
-        document = _active_document_value(window)
+        document = window._active_document.document
         if document is None:
             messagebox.showwarning("Save Document", "No document to save.")
             return
@@ -534,7 +509,7 @@ class ProjectWorkflow:
                 window._last_save_path = project.document_file(relative.as_posix())
                 window._console.log("[Editor] Migrated legacy JSON documents to canonical PB")
             project.save_document(document, relative.as_posix())
-            _mark_active_document_saved(window, window._last_save_path)
+            window._active_document.mark_saved(window._last_save_path)
             window._console.log(f"[Editor] Scene saved: {window._last_save_path}")
             return
         path = filedialog.asksaveasfilename(
@@ -554,7 +529,7 @@ class ProjectWorkflow:
     def save_active_document_silent(self) -> None:
         """Save to the last selected path without opening a dialog."""
         window = self.window
-        document = _active_document_value(window)
+        document = window._active_document.document
         if window._last_save_path is None or document is None:
             return
         project = window._engine.project
@@ -564,7 +539,7 @@ class ProjectWorkflow:
             window._last_save_path.write_text(
                 json.dumps(document.to_dict(), indent=2), encoding="utf-8"
             )
-            _mark_active_document_saved(window, window._last_save_path)
+            window._active_document.mark_saved(window._last_save_path)
             return
         relative = window._last_save_path.resolve().relative_to(project.path).as_posix()
         if relative.casefold().endswith(".json"):
@@ -573,7 +548,7 @@ class ProjectWorkflow:
             window._last_save_path = project.document_file(relative)
             window._console.log("[Editor] Migrated legacy JSON documents to canonical PB")
         project.save_document(document, relative)
-        _mark_active_document_saved(window, window._last_save_path)
+        window._active_document.mark_saved(window._last_save_path)
 
     def duplicate_scene(self, name: str | None = None) -> None:
         """Compatibility wrapper for typed active-document duplication."""
@@ -583,7 +558,7 @@ class ProjectWorkflow:
         """Duplicate the active document while preserving referenced Level paths."""
         window = self.window
         project = window._engine.project
-        document = _active_document_value(window)
+        document = window._active_document.document
         if project is None or document is None:
             return
         if name is None:
@@ -622,9 +597,7 @@ class ProjectWorkflow:
         else:
             window._engine.set_scene(duplicate)
         document_path = project.document_file(relative)
-        active_document = getattr(window, "_active_document", None)
-        if active_document is not None:
-            active_document.open(duplicate, document_path)
+        window._active_document.open(duplicate, document_path)
         window._last_save_path = document_path
         window._selected_ids = ()
         window._root.title(self.window_title())
@@ -637,20 +610,8 @@ class ProjectWorkflow:
         project = window._engine.project
         if project is None:
             return
-        process = self._project_process
-        if process is not None:
-            try:
-                return_code = process.poll()
-            except OSError as exc:
-                window._console.log(
-                    f"[Editor] Could not check project process: {exc}", level="error"
-                )
-                return
-            if return_code is None:
-                return
-            self._report_project_exit(return_code)
-            self._forget_project_process(process)
-            self._close_project_output()
+        if not self._project_process_controller.prepare_start():
+            return
         try:
             script = self._script_entry_point_path(project)
         except (OSError, ProjectError, ValueError) as exc:
@@ -676,43 +637,7 @@ class ProjectWorkflow:
                 parent=window._root,
             )
             return
-        # The workflow owns this file until the launched child exits.
-        output_file = tempfile.TemporaryFile(mode="w+b")  # noqa: SIM115
-        try:
-            process = subprocess.Popen(
-                [sys.executable, str(script)],
-                cwd=project.path,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=output_file,
-            )
-        except OSError as exc:
-            output_file.close()
-            window._console.log(
-                project_messages.project_launch_failed(str(script), project.entrypoint, str(exc)),
-                level="error",
-            )
-            messagebox.showerror("Run Project", str(exc), parent=window._root)
-            return
-        self._project_process = process
-        self._project_output_file = output_file
-        self._project_script_path = script
-        self._project_document_entrypoint = project.entrypoint
-        if not self._schedule_project_poll(process):
-            try:
-                self.stop_project()
-            except (OSError, subprocess.TimeoutExpired) as stop_error:
-                detail = f"Could not monitor project process; stopping it also failed: {stop_error}"
-            else:
-                detail = "Could not monitor project process; it was stopped."
-            messagebox.showerror("Run Project", detail, parent=window._root)
-            return
-        window._console.log(
-            project_messages.project_started(
-                project.script_entry_point,
-                project.entrypoint,
-            )
-        )
+        self._project_process_controller.start(project, script)
 
     @staticmethod
     def _script_entry_point_path(project: Project) -> Path:
@@ -739,170 +664,9 @@ class ProjectWorkflow:
             ) from error
         return script
 
-    def _schedule_project_poll(self, process: subprocess.Popen[bytes]) -> bool:
-        if self._project_process is not process:
-            return False
-        timer = getattr(self.window, "_timer", None)
-        if timer is None:
-            return False
-        try:
-            identifier = timer.schedule(
-                _PROJECT_POLL_INTERVAL_MS,
-                self._poll_project_process,
-                process,
-            )
-        except Exception:  # noqa: BLE001
-            return False
-        if identifier is None:
-            return False
-        self._project_poll_id = identifier
-        return True
-
-    def _poll_project_process(self, process: subprocess.Popen[bytes]) -> None:
-        if self._project_process is not process:
-            return
-        self._project_poll_id = None
-        try:
-            return_code = process.poll()
-        except OSError as error:
-            try:
-                self.stop_project()
-            except (OSError, subprocess.TimeoutExpired) as stop_error:
-                self.window._console.log(
-                    f"[Editor] Could not poll project process ({error}) or stop it ({stop_error}).",
-                    level="error",
-                )
-            else:
-                self.window._console.log(
-                    f"[Editor] Stopped project after process polling failed: {error}",
-                    level="error",
-                )
-            return
-        if return_code is not None:
-            self._report_project_exit(return_code)
-            self._forget_project_process(process)
-            self._close_project_output()
-            return
-        if not self._schedule_project_poll(process):
-            try:
-                self.stop_project()
-            except (OSError, subprocess.TimeoutExpired) as error:
-                self.window._console.log(
-                    f"[Editor] Could not monitor or stop project process: {error}",
-                    level="error",
-                )
-            else:
-                self.window._console.log(
-                    "[Editor] Stopped project because process monitoring became unavailable.",
-                    level="error",
-                )
-
-    def _report_project_exit(self, return_code: int) -> None:
-        level = "info" if return_code == 0 else "error"
-        detail = self._read_project_output_tail() if return_code != 0 else ""
-        self.window._console.log(
-            project_messages.project_exited(
-                return_code,
-                str(self._project_script_path or "(unknown)"),
-                self._project_document_entrypoint,
-                detail,
-            ),
-            level=level,
-        )
-
-    def _read_project_output_tail(self) -> str:
-        output_file = self._project_output_file
-        if output_file is None:
-            return ""
-        try:
-            output_file.flush()
-            output_file.seek(0, 2)
-            size = output_file.tell()
-            output_file.seek(max(0, size - _PROJECT_OUTPUT_TAIL_BYTES))
-            data = output_file.read(_PROJECT_OUTPUT_TAIL_BYTES)
-        except (OSError, ValueError):
-            return ""
-        text = data.decode("utf-8", errors="replace").strip()
-        if len(text) > _PROJECT_OUTPUT_MAX_CHARS:
-            text = text[-_PROJECT_OUTPUT_MAX_CHARS:]
-        return text
-
-    def _close_project_output(self) -> None:
-        output_file = self._project_output_file
-        self._project_output_file = None
-        self._project_script_path = None
-        self._project_document_entrypoint = None
-        if output_file is not None:
-            with contextlib.suppress(OSError):
-                output_file.close()
-
-    def _cancel_project_poll(self) -> None:
-        identifier = self._project_poll_id
-        self._project_poll_id = None
-        timer = getattr(self.window, "_timer", None)
-        if identifier is not None and timer is not None:
-            timer.cancel(identifier)
-
-    def _forget_project_process(self, process: subprocess.Popen[bytes]) -> None:
-        if self._project_process is not process:
-            return
-        self._project_process = None
-        self._cancel_project_poll()
-
-    @staticmethod
-    def _process_exited(process: subprocess.Popen[bytes]) -> bool:
-        try:
-            return process.poll() is not None
-        except OSError:
-            return False
-
     def stop_project(self) -> None:
         """Terminate a child launched by Run Project, if it is still alive."""
-        process = self._project_process
-        self._cancel_project_poll()
-        if process is None:
-            self._close_project_output()
-            return
-        try:
-            return_code = process.poll()
-        except OSError:
-            return_code = None
-        if return_code is not None:
-            self._report_project_exit(return_code)
-            self._forget_project_process(process)
-            self._close_project_output()
-            return
-        try:
-            process.terminate()
-        except OSError:
-            if self._process_exited(process):
-                self._forget_project_process(process)
-                self._close_project_output()
-                return
-            self._schedule_project_poll(process)
-            raise
-        try:
-            process.wait(timeout=2)
-        except subprocess.TimeoutExpired:
-            try:
-                process.kill()
-                process.wait(timeout=2)
-            except (OSError, subprocess.TimeoutExpired):
-                if self._process_exited(process):
-                    self._forget_project_process(process)
-                    self._close_project_output()
-                    return
-                self._schedule_project_poll(process)
-                raise
-        except OSError:
-            if self._process_exited(process):
-                self._forget_project_process(process)
-                self._close_project_output()
-                return
-            self._schedule_project_poll(process)
-            raise
-        self._forget_project_process(process)
-        self._close_project_output()
+        self._project_process_controller.stop()
 
     def restore_after_run_project(self) -> None:
         """Undo ``run_project``'s scene swap once the run has stopped."""
@@ -916,22 +680,3 @@ class ProjectWorkflow:
         window._root.title(self.window_title())
         window._console.log("[Editor] Restored previous scene after Run Project")
         window._present_all()
-
-
-def _active_document_value(window: Any) -> Scene | World | None:
-    session = getattr(window, "_active_document", None)
-    if session is not None:
-        return session.document
-    return getattr(window._engine, "edit_scene", None)
-
-
-def _mark_active_document_saved(window: Any, path: Path | None) -> None:
-    session = getattr(window, "_active_document", None)
-    if session is not None:
-        session.mark_saved(path)
-        return
-    command_stack = getattr(window, "_command_stack", None)
-    if command_stack is not None:
-        mark_clean = getattr(command_stack, "mark_clean", None)
-        if callable(mark_clean):
-            mark_clean()

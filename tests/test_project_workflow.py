@@ -21,6 +21,7 @@ from expra_engine.core.world import LevelDescriptor, World, WorldConnection
 from expra_engine.editor.active_document import ActiveDocument
 from expra_engine.editor.contributions import EditorContext
 from expra_engine.editor.preferences import EditorPreferences
+from expra_engine.editor.project_process import ProjectProcessController
 from expra_engine.editor.project_workflow import ProjectWorkflow
 from expra_engine.editor.script_tools import attach_script, create_behaviour_script
 from expra_engine.runtime import ScriptComponent, ScriptRegistry
@@ -497,8 +498,9 @@ class TestProjectWorkflow(unittest.TestCase):
                 _timer=RecordingTimer(),
             )
             workflow = ProjectWorkflow(window)
+            self.assertIsInstance(workflow._project_process_controller, ProjectProcessController)
 
-            with patch("expra_engine.editor.project_workflow.subprocess.Popen") as launch:
+            with patch("expra_engine.editor.project_process.subprocess.Popen") as launch:
                 workflow.run_project()
 
             launch.assert_called_once()
@@ -507,9 +509,9 @@ class TestProjectWorkflow(unittest.TestCase):
             self.assertEqual(kwargs["cwd"], project.path)
             self.assertIs(kwargs["stdin"], subprocess.DEVNULL)
             self.assertIs(kwargs["stdout"], subprocess.DEVNULL)
-            self.assertIs(kwargs["stderr"], workflow._project_output_file)
-            self.assertIs(workflow._project_process, launch.return_value)
-            workflow._close_project_output()
+            self.assertIs(kwargs["stderr"], workflow._project_process_controller._output_file)
+            self.assertIs(workflow._project_process_controller.process, launch.return_value)
+            workflow._project_process_controller._close_output()
 
     def test_double_run_keeps_one_live_child(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -525,13 +527,34 @@ class TestProjectWorkflow(unittest.TestCase):
             workflow = ProjectWorkflow(window)
 
             with patch(
-                "expra_engine.editor.project_workflow.subprocess.Popen", return_value=process
+                "expra_engine.editor.project_process.subprocess.Popen", return_value=process
             ) as launch:
                 workflow.run_project()
                 workflow.run_project()
 
             launch.assert_called_once()
-            self.assertIs(workflow._project_process, process)
+            self.assertIs(workflow._project_process_controller.process, process)
+
+    def test_live_project_process_short_circuits_before_entrypoint_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Project.create("Runtime", Path(tmp) / "runtime")
+            process = MagicMock()
+            process.poll.return_value = None
+            window = SimpleNamespace(
+                _engine=SimpleNamespace(project=project),
+                _console=MagicMock(),
+                _root=MagicMock(),
+                _timer=RecordingTimer(),
+            )
+            workflow = ProjectWorkflow(window)
+            workflow._project_process_controller.process = process
+
+            with patch.object(
+                workflow, "_script_entry_point_path", side_effect=AssertionError("validated")
+            ):
+                workflow.run_project()
+
+            process.poll.assert_called_once_with()
 
     def test_invalid_script_path_outside_project_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -549,14 +572,14 @@ class TestProjectWorkflow(unittest.TestCase):
             workflow = ProjectWorkflow(window)
 
             with (
-                patch("expra_engine.editor.project_workflow.subprocess.Popen") as launch,
+                patch("expra_engine.editor.project_process.subprocess.Popen") as launch,
                 patch("expra_engine.editor.project_workflow.messagebox.showerror") as error,
             ):
                 workflow.run_project()
 
             launch.assert_not_called()
             error.assert_called_once()
-            self.assertIsNone(workflow._project_process)
+            self.assertIsNone(workflow._project_process_controller.process)
 
     def test_script_symlink_cannot_escape_project_root(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -576,14 +599,14 @@ class TestProjectWorkflow(unittest.TestCase):
             workflow = ProjectWorkflow(window)
 
             with (
-                patch("expra_engine.editor.project_workflow.subprocess.Popen") as launch,
+                patch("expra_engine.editor.project_process.subprocess.Popen") as launch,
                 patch("expra_engine.editor.project_workflow.messagebox.showerror") as error,
             ):
                 workflow.run_project()
 
             launch.assert_not_called()
             error.assert_called_once()
-            self.assertIsNone(workflow._project_process)
+            self.assertIsNone(workflow._project_process_controller.process)
 
     def test_child_that_exits_early_is_reaped_and_reported_by_poll(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -599,7 +622,7 @@ class TestProjectWorkflow(unittest.TestCase):
             workflow = ProjectWorkflow(window)
 
             workflow.run_project()
-            process = workflow._project_process
+            process = workflow._project_process_controller.process
             self.assertIsNotNone(process)
             assert process is not None
             self.assertTrue(timer.callbacks)
@@ -607,7 +630,7 @@ class TestProjectWorkflow(unittest.TestCase):
 
             timer.fire_next()
 
-            self.assertIsNone(workflow._project_process)
+            self.assertIsNone(workflow._project_process_controller.process)
             window._console.log.assert_called()
             self.assertIn("7", window._console.log.call_args.args[0])
 
@@ -636,8 +659,8 @@ class TestProjectWorkflow(unittest.TestCase):
             workflow = ProjectWorkflow(window)
 
             workflow.run_project()
-            process = workflow._project_process
-            output_file = workflow._project_output_file
+            process = workflow._project_process_controller.process
+            output_file = workflow._project_process_controller._output_file
             self.assertIsNotNone(process)
             self.assertIsNotNone(output_file)
             assert process is not None
@@ -668,7 +691,7 @@ class TestProjectWorkflow(unittest.TestCase):
             )
             workflow = ProjectWorkflow(window)
             with patch(
-                "expra_engine.editor.project_workflow.subprocess.Popen", return_value=process
+                "expra_engine.editor.project_process.subprocess.Popen", return_value=process
             ):
                 workflow.run_project()
 
@@ -676,7 +699,7 @@ class TestProjectWorkflow(unittest.TestCase):
 
             process.terminate.assert_called_once_with()
             process.wait.assert_called_once_with(timeout=2)
-            self.assertIsNone(workflow._project_process)
+            self.assertIsNone(workflow._project_process_controller.process)
             self.assertFalse(timer.callbacks)
 
     def test_monitor_schedule_failure_stops_the_new_child(self) -> None:
@@ -696,7 +719,7 @@ class TestProjectWorkflow(unittest.TestCase):
 
             with (
                 patch(
-                    "expra_engine.editor.project_workflow.subprocess.Popen",
+                    "expra_engine.editor.project_process.subprocess.Popen",
                     return_value=process,
                 ),
                 patch("expra_engine.editor.project_workflow.messagebox.showerror") as error,
@@ -705,7 +728,7 @@ class TestProjectWorkflow(unittest.TestCase):
 
             process.terminate.assert_called_once_with()
             process.wait.assert_called_once_with(timeout=2)
-            self.assertIsNone(workflow._project_process)
+            self.assertIsNone(workflow._project_process_controller.process)
             error.assert_called_once()
 
     def test_failed_candidate_load_keeps_current_child_running(self) -> None:
@@ -723,7 +746,7 @@ class TestProjectWorkflow(unittest.TestCase):
             )
             workflow = ProjectWorkflow(window)
             with patch(
-                "expra_engine.editor.project_workflow.subprocess.Popen", return_value=process
+                "expra_engine.editor.project_process.subprocess.Popen", return_value=process
             ):
                 workflow.run_project()
 
@@ -733,7 +756,7 @@ class TestProjectWorkflow(unittest.TestCase):
                 workflow.open_loaded(failed_project)
 
             self.assertIs(window._engine.project, current)
-            self.assertIs(workflow._project_process, process)
+            self.assertIs(workflow._project_process_controller.process, process)
             process.terminate.assert_not_called()
 
     def test_kill_timeout_keeps_process_handle_for_retry(self) -> None:
@@ -745,7 +768,7 @@ class TestProjectWorkflow(unittest.TestCase):
             subprocess.TimeoutExpired("game", 2),
             subprocess.TimeoutExpired("game", 2),
         ]
-        workflow._project_process = process
+        workflow._project_process_controller.process = process
         stop_error: Exception | None = None
         try:
             workflow.stop_project()
@@ -755,15 +778,18 @@ class TestProjectWorkflow(unittest.TestCase):
         self.assertIsInstance(stop_error, subprocess.TimeoutExpired)
         process.terminate.assert_called_once_with()
         process.kill.assert_called_once_with()
-        self.assertIs(workflow._project_process, process)
+        self.assertIs(workflow._project_process_controller.process, process)
 
     def test_save_as_outside_project_preserves_previous_target(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             project = Project.create("Workflow", root / "project")
             previous_target = project.document_file()
+            active_document = ActiveDocument()
+            active_document.open(project.load_scene(), previous_target)
             window = SimpleNamespace(
                 _engine=SimpleNamespace(project=project, edit_scene=project.load_scene()),
+                _active_document=active_document,
                 _last_save_path=previous_target,
                 _console=MagicMock(),
                 _root=MagicMock(),
@@ -786,8 +812,11 @@ class TestProjectWorkflow(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             project = Project.create("Workflow", Path(tmp) / "project")
             previous_target = project.document_file()
+            active_document = ActiveDocument()
+            active_document.open(project.load_scene(), previous_target)
             window = SimpleNamespace(
                 _engine=SimpleNamespace(project=project, edit_scene=project.load_scene()),
+                _active_document=active_document,
                 _last_save_path=previous_target,
                 _console=MagicMock(),
                 _root=MagicMock(),
@@ -824,7 +853,7 @@ class TestProjectWorkflow(unittest.TestCase):
 
             with (
                 patch(
-                    "expra_engine.editor.project_workflow.subprocess.Popen",
+                    "expra_engine.editor.project_process.subprocess.Popen",
                     side_effect=OSError("process limit reached"),
                 ),
                 patch("expra_engine.editor.project_workflow.messagebox.showerror") as error,
@@ -834,7 +863,7 @@ class TestProjectWorkflow(unittest.TestCase):
             self.assertIs(engine.project, project)
             self.assertIs(engine.edit_scene, scene)
             self.assertEqual(window._last_save_path, previous_target)
-            self.assertIsNone(workflow._project_process)
+            self.assertIsNone(workflow._project_process_controller.process)
             error.assert_called_once()
 
     def test_stop_project_terminates_a_running_child_process(self) -> None:
@@ -842,13 +871,13 @@ class TestProjectWorkflow(unittest.TestCase):
         workflow = ProjectWorkflow(window)
         process = MagicMock()
         process.poll.return_value = None
-        workflow._project_process = process
+        workflow._project_process_controller.process = process
 
         workflow.stop_project()
 
         process.terminate.assert_called_once_with()
         process.wait.assert_called_once_with(timeout=2)
-        self.assertIsNone(workflow._project_process)
+        self.assertIsNone(workflow._project_process_controller.process)
 
     def test_stop_project_kills_a_child_that_does_not_terminate(self) -> None:
         window = SimpleNamespace(_engine=SimpleNamespace(project=None))
@@ -856,13 +885,13 @@ class TestProjectWorkflow(unittest.TestCase):
         process = MagicMock()
         process.poll.return_value = None
         process.wait.side_effect = [subprocess.TimeoutExpired("game", 2), None]
-        workflow._project_process = process
+        workflow._project_process_controller.process = process
 
         workflow.stop_project()
 
         process.terminate.assert_called_once_with()
         process.kill.assert_called_once_with()
-        self.assertIsNone(workflow._project_process)
+        self.assertIsNone(workflow._project_process_controller.process)
 
     def test_failed_terminate_keeps_the_handle_and_reschedules_poll(self) -> None:
         timer = RecordingTimer()
@@ -871,12 +900,12 @@ class TestProjectWorkflow(unittest.TestCase):
         process = MagicMock()
         process.poll.return_value = None
         process.terminate.side_effect = PermissionError("terminate denied")
-        workflow._project_process = process
+        workflow._project_process_controller.process = process
 
         with self.assertRaisesRegex(PermissionError, "terminate denied"):
             workflow.stop_project()
 
-        self.assertIs(workflow._project_process, process)
+        self.assertIs(workflow._project_process_controller.process, process)
         self.assertTrue(timer.callbacks)
 
     def test_terminate_race_with_exit_is_treated_as_stopped(self) -> None:
@@ -885,11 +914,11 @@ class TestProjectWorkflow(unittest.TestCase):
         process = MagicMock()
         process.poll.side_effect = [None, 0]
         process.terminate.side_effect = ProcessLookupError("child already exited")
-        workflow._project_process = process
+        workflow._project_process_controller.process = process
 
         workflow.stop_project()
 
-        self.assertIsNone(workflow._project_process)
+        self.assertIsNone(workflow._project_process_controller.process)
         process.terminate.assert_called_once_with()
 
     def test_late_poll_from_replaced_process_cannot_clear_new_child(self) -> None:
@@ -910,18 +939,18 @@ class TestProjectWorkflow(unittest.TestCase):
             workflow = ProjectWorkflow(window)
 
             with patch(
-                "expra_engine.editor.project_workflow.subprocess.Popen",
+                "expra_engine.editor.project_process.subprocess.Popen",
                 side_effect=(first, second),
             ):
                 workflow.run_project()
-                first_poll = workflow._project_poll_id
+                first_poll = workflow._project_process_controller.poll_id
                 assert first_poll is not None
                 workflow.stop_project()
                 workflow.run_project()
 
-            self.assertIs(workflow._project_process, second)
+            self.assertIs(workflow._project_process_controller.process, second)
             timer.fire_even_if_cancelled(first_poll)
-            self.assertIs(workflow._project_process, second)
+            self.assertIs(workflow._project_process_controller.process, second)
             second.poll.assert_not_called()
 
     def test_new_project_has_standard_runtime_entry_point(self) -> None:

@@ -92,11 +92,27 @@ class PrimitiveComponent(Component):
         self.width = _finite(width, "width")
         self.height = _finite(height, "height")
         self.radius = None if radius is None else _finite(radius, "radius")
-        self.fill = _color(fill)
-        self.outline = None if outline is None else _color(outline)
+        self.fill = fill  # goes through property setter
+        self.outline = outline  # goes through property setter
         self.outline_width = _finite(outline_width, "outline_width")
         self.layer = int(layer)
         self.visible = bool(visible)
+
+    @property
+    def fill(self) -> Color:
+        return self._fill
+
+    @fill.setter
+    def fill(self, value: Color | tuple[float, ...] | list[float]) -> None:
+        self._fill = _color(value)
+
+    @property
+    def outline(self) -> Color | None:
+        return self._outline
+
+    @outline.setter
+    def outline(self, value: Color | tuple[float, ...] | list[float] | None) -> None:
+        self._outline = None if value is None else _color(value)
 
     def to_dict(self) -> dict[str, Any]:
         return {

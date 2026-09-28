@@ -125,6 +125,36 @@ def test_extractor_keeps_existing_materials_and_resolves_modulation_once() -> No
     )
 
 
+def test_primitive_color_assignments_are_normalized_before_render_extraction() -> None:
+    primitive = PrimitiveComponent()
+    primitive.fill = (0.2, 0.4, 0.6, 0.8)
+    primitive.outline = [0.9, 0.7, 0.5, 1.0]
+    scene = Scene("primitive color assignment")
+    scene.create_entity("shape").add_component(primitive)
+
+    item = extract_render_frame(scene).items[0]
+
+    assert primitive.fill == Color(0.2, 0.4, 0.6, 0.8)
+    assert primitive.outline == Color(0.9, 0.7, 0.5, 1.0)
+    assert item.material.color == Color(0.2, 0.4, 0.6, 0.8)
+    assert item.material.outline == Color(0.9, 0.7, 0.5, 1.0)
+    assert primitive.to_dict()["fill"] == [0.2, 0.4, 0.6, 0.8]
+
+
+def test_invalid_primitive_color_assignment_preserves_previous_typed_value() -> None:
+    primitive = PrimitiveComponent(fill=(0.1, 0.2, 0.3))
+    previous_fill = primitive.fill
+    previous_outline = primitive.outline
+
+    with pytest.raises(ValueError, match="color must contain 3 or 4 values"):
+        primitive.fill = (0.4, 0.5)
+    with pytest.raises(ValueError, match="color must contain 3 or 4 values"):
+        primitive.outline = (0.4, 0.5)
+
+    assert primitive.fill is previous_fill
+    assert primitive.outline is previous_outline
+
+
 def test_visual_components_reject_non_finite_values_but_allow_backend_neutral_colors() -> None:
     with pytest.raises(ValueError):
         PrimitiveComponent("rectangle", width=float("nan"))

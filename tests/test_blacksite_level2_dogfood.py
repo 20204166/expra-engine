@@ -115,7 +115,7 @@ class BlacksiteLevel2DogfoodTests(unittest.TestCase):
                 # scratch (an equally legitimate reading of the spec item).
                 window._on_hierarchy_select((drone.entity_id,))
                 window._root.update()
-                from expra_engine.editor.commands import duplicate_selection
+                from expra_engine.editor.interactions import duplicate_selection
 
                 enemy_count_before = len(scene.get_entities_by_tag("enemy"))
                 duplicate_selection(window)
@@ -128,7 +128,7 @@ class BlacksiteLevel2DogfoodTests(unittest.TestCase):
                 # path (asset kind resolution + CreateEntityCommand), not a
                 # bare scene.add_entity.
                 from expra_engine.editor.assets import AssetEntry
-                from expra_engine.editor.commands import drop_asset_on_viewport
+                from expra_engine.editor.interactions import drop_asset_on_viewport
 
                 canvas = window._viewport._canvas
                 canvas.update_idletasks()

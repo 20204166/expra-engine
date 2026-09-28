@@ -44,24 +44,26 @@ from expra_engine.editor.commands import (
     SetExposedValueCommand,
     ToggleEnabledCommand,
     TransformEntityCommand,
+)
+from expra_engine.editor.contributions import (
+    ContributionRegistry,
+    EditorContext,
+    MenuFactory,
+    ShortcutRegistry,
+)
+from expra_engine.editor.delivery import TkDeliveryQueue
+from expra_engine.editor.document_actions import EditorDocumentSurface
+from expra_engine.editor.export_dialog import ExportDialog
+from expra_engine.editor.interactions import (
     apply_component_change,
     delete_selection,
     duplicate_selection,
     remove_component,
     reparent_selection_to,
 )
-from expra_engine.editor.contributions import (
-    ContributionRegistry,
-    EditorContext,
-    MenuFactory,
-    RenderTargetRegistry,
-    ShortcutRegistry,
-)
-from expra_engine.editor.delivery import TkDeliveryQueue
-from expra_engine.editor.document_actions import EditorDocumentSurface
-from expra_engine.editor.export_dialog import ExportDialog
 from expra_engine.editor.preferences import PreferencesStore
 from expra_engine.editor.project_workflow import ProjectWorkflow
+from expra_engine.editor.render_targets import RenderTargetRegistry
 from expra_engine.editor.runtime_preview import RuntimePreviewLoop
 from expra_engine.editor.script_tools import attach_script, create_behaviour_script
 from expra_engine.editor.window_placement import WindowGeometry, initial_hierarchy_width

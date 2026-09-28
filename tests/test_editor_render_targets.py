@@ -10,7 +10,7 @@ from expra_engine.coordinators.ui_coordinator import RenderIntent, UICoordinator
 from expra_engine.core.component import TransformComponent
 from expra_engine.core.engine import EngineRunState
 from expra_engine.core.scene import Scene
-from expra_engine.editor.contributions import RenderTargetRegistry
+from expra_engine.editor.render_targets import RenderTargetRegistry
 from expra_engine.runtime.canvas_effects import CanvasModulateComponent
 from expra_engine.runtime.collider import ColliderComponent
 from expra_engine.runtime.rendering import Color

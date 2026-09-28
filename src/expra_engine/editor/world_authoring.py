@@ -16,7 +16,8 @@ from expra_engine.core.world import (
     World,
     WorldConnection,
 )
-from expra_engine.editor.commands import ReplaceWorldDocumentCommand, drop_asset_on_viewport
+from expra_engine.editor.commands import ReplaceWorldDocumentCommand
+from expra_engine.editor.interactions import drop_asset_on_viewport
 from expra_engine.runtime.level_anchor import LevelAnchorComponent, LevelAnchorKind
 
 
