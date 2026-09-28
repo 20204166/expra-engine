@@ -9,9 +9,21 @@ Design tokens (colours, fonts, spacing, control) preserved.
 
 from typing import Any
 
-from expra_engine.design.tokens import SEMANTIC_COLORS, SPACING_SCALE
+from expra_engine.design.tokens import SEMANTIC_COLORS, SPACING_SCALE, TYPOGRAPHY_SCALE
 
 Font = tuple[Any, ...]
+_TK_FONT_STYLE: dict[str, tuple[str, ...]] = {
+    "regular": (),
+    "bold": ("bold",),
+    "italic": ("normal", "italic"),
+    "bold italic": ("bold", "italic"),
+}
+
+
+def _font_from_token(name: str, *, family: str = "Helvetica") -> Font:
+    token = TYPOGRAPHY_SCALE[name]
+    style = _TK_FONT_STYLE[str(token["weight"])]
+    return (family, token["size"], *style)
 
 COLOR_ROLES: dict[str, str] = {
     **SEMANTIC_COLORS,
@@ -28,7 +40,6 @@ COLORS: dict[str, str] = {
     "text": COLOR_ROLES["ink"],
     "secondary": COLOR_ROLES["ink_2"],
     "accent": COLOR_ROLES["accent"],
-    "accent_active": "#36AABA",
     "border": COLOR_ROLES["line"],
     "success": COLOR_ROLES["success"],
     "warning": COLOR_ROLES["warning"],
@@ -80,16 +91,16 @@ CONTROL: dict[str, int] = {
 
 FONTS: dict[str, Font] = {
     "ui": ("Helvetica",),
-    "title": ("Helvetica", 18, "bold"),
-    "section": ("Helvetica", 12, "bold"),
-    "body": ("Helvetica", 10),
-    "button": ("Helvetica", 10, "bold"),
-    "danger_button": ("Helvetica", 10, "bold"),
-    "status": ("Helvetica", 9, "bold"),
-    "mono": ("Courier", 10),
+    "title": _font_from_token("title"),
+    "section": _font_from_token("section"),
+    "body": _font_from_token("body"),
+    "button": ("Helvetica", TYPOGRAPHY_SCALE["body"]["size"], "bold"),
+    "danger_button": ("Helvetica", TYPOGRAPHY_SCALE["body"]["size"], "bold"),
+    "status": ("Helvetica", TYPOGRAPHY_SCALE["label"]["size"], "bold"),
+    "mono": _font_from_token("mono", family="Courier"),
     "panel_header": ("Helvetica", 11, "bold"),
-    "detail_row": ("Helvetica", 10),
-    "toolbar_label": ("Helvetica", 9),
+    "detail_row": _font_from_token("body"),
+    "toolbar_label": _font_from_token("label"),
 }
 
 STYLE_APP_FRAME = "App.TFrame"
@@ -133,13 +144,17 @@ def editor_entity_kind(name: str) -> str | None:
     return None
 
 
-ACCENT_THEMES: dict[str, dict[str, str]] = {
-    "cyan": {
-        "accent": "#55C7D9",
-        "accent_active": "#36AABA",
+def _default_cyan_theme() -> dict[str, str]:
+    return {
+        "accent": SEMANTIC_COLORS["accent"],
+        "accent_active": SEMANTIC_COLORS["accent_active"],
         "primary_disabled": "#365863",
         "primary_disabled_text": "#9CA8B5",
-    },
+    }
+
+
+ACCENT_THEMES: dict[str, dict[str, str]] = {
+    "cyan": _default_cyan_theme(),
     "indigo": {
         "accent": "#4F46E5",
         "accent_active": "#4338CA",

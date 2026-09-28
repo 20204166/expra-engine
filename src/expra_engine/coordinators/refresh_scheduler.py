@@ -13,16 +13,13 @@ import contextlib
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from math import isfinite
 
+from expra_engine.core.math_utils import finite_float
 from expra_engine.observability import ObservabilityWatcher
 
 
 def _finite_time(value: float) -> float:
-    resolved = float(value)
-    if not isfinite(resolved):
-        raise ValueError("time must be finite")
-    return resolved
+    return finite_float(value, "time")
 
 
 def _make_monotonic_clock(clock: Callable[[], float]) -> Callable[[], float]:

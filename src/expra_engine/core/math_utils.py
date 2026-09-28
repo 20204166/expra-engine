@@ -5,6 +5,14 @@ from __future__ import annotations
 import math
 
 
+def finite_float(value: float, name: str) -> float:
+    """Convert a numeric value to float, rejecting non-finite results."""
+    converted = float(value)
+    if not math.isfinite(converted):
+        raise ValueError(f"{name} must be finite")
+    return converted
+
+
 def clamp(value: float, floor: float, ceiling: float) -> float:
     """Return *value* constrained to the inclusive range."""
     if floor > ceiling:
@@ -73,6 +81,7 @@ def compose_2d_pose(
 __all__ = [
     "clamp",
     "compose_2d_pose",
+    "finite_float",
     "inverselerp",
     "lerp",
     "lerp_angle",

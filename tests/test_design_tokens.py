@@ -47,6 +47,41 @@ _KNOWN_WEIGHTS: frozenset[str] = frozenset({"regular", "bold", "italic", "bold i
 
 
 class DesignTokenTests(unittest.TestCase):
+    def test_editor_font_adapter_uses_renderer_neutral_typography_tokens(self) -> None:
+        import expra_engine.ui.styles as styles
+
+        original_body = styles.TYPOGRAPHY_SCALE["body"]
+        original_title = styles.TYPOGRAPHY_SCALE["title"]
+        styles.TYPOGRAPHY_SCALE["body"] = {"size": 17, "weight": "regular"}
+        styles.TYPOGRAPHY_SCALE["title"] = {"size": 18, "weight": "bold italic"}
+        try:
+            body_font = styles._font_from_token("body")
+            title_font = styles._font_from_token("title")
+        finally:
+            styles.TYPOGRAPHY_SCALE["body"] = original_body
+            styles.TYPOGRAPHY_SCALE["title"] = original_title
+
+        self.assertEqual(body_font, ("Helvetica", 17))
+        self.assertEqual(title_font, ("Helvetica", 18, "bold", "italic"))
+        self.assertEqual(styles._font_from_token("title"), ("Helvetica", 18, "bold"))
+        self.assertEqual(styles._font_from_token("mono", family="Courier"), ("Courier", 10))
+
+    def test_default_accent_adapter_reads_semantic_color_tokens(self) -> None:
+        import expra_engine.ui.styles as styles
+
+        original_accent = styles.SEMANTIC_COLORS["accent"]
+        original_active = styles.SEMANTIC_COLORS["accent_active"]
+        styles.SEMANTIC_COLORS["accent"] = "#123456"
+        styles.SEMANTIC_COLORS["accent_active"] = "#654321"
+        try:
+            colors = styles._default_cyan_theme()
+        finally:
+            styles.SEMANTIC_COLORS["accent"] = original_accent
+            styles.SEMANTIC_COLORS["accent_active"] = original_active
+
+        self.assertEqual(colors["accent"], "#123456")
+        self.assertEqual(colors["accent_active"], "#654321")
+
     def test_shared_tokens_cover_runtime_ui_concepts(self) -> None:
         self.assertEqual(SPACING_SCALE["xs"], 4)
         self.assertEqual(SPACING_SCALE["xl"], 24)

@@ -5,6 +5,7 @@
 **Audited commit:** `4723b25d89f00948d2766454b686a70e41884016`
 **Supplemental audit baseline:** `32abb1b`
 **Final supplemental baseline:** `ee741de`
+**Final UI-model/UI implementation baseline:** `f964903`
 **Audit mode:** Static source and test inspection; implementation follow-ups are recorded below.
 
 ## Scope and Method
@@ -192,35 +193,33 @@ The remaining `coordinators/`, `design/`, `messages/`, `schema/`, `ui_model/`,
 `ui/`, and root-level modules were inspected after the first implementation
 pass, then rechecked against `ee741de` for this final audit update.
 
-### 9. Finite-float and clamp helpers cross the core, runtime, coordinator, and UI-model boundary
+### 9. Typed finite-float validation crosses the core/runtime/coordinator/UI-model boundary
 
-**Classification:** APPLY — MEDIUM VALUE / MODERATE RISK
-**Candidate owner:** `core/math_utils.py`
+**Classification:** APPLY — MEDIUM VALUE / MODERATE RISK — IMPLEMENTED
+**Owner:** `core/math_utils.py`
 
-The first implementation added `runtime.validation.finite_float` and reused it
-within runtime modules. The wider scan found equivalent typed-float validation
-in `ui_model.controls._finite` and `coordinators.refresh_scheduler._finite_time`.
-The error labels are caller-specific but fit the `finite_float(value, name)`
-contract. `ui_model` should not import a runtime-owned utility; `core/math_utils`
-is the lower-level numeric owner already used by runtime models. Also,
-`ui_model.controls._clamp` duplicates `core.math_utils.clamp`; its callers
-validate ranges first, and the core helper allows equal bounds as the controls
-model does.
+The first implementation put `finite_float` in `runtime.validation`. The wider
+scan found equivalent typed-float validation in `ui_model.controls._finite`
+and `coordinators.refresh_scheduler._finite_time`. Because UI models should not
+depend on runtime, `core/math_utils.py` is now the common owner; runtime keeps a
+re-export and the scheduler retains a domain-labelled wrapper.
 
-**Recommendation:** Consider moving the common typed `finite_float` helper to
-`core/math_utils.py`, preserving the current runtime import as a compatibility
-re-export if desired, then use it from controls and refresh scheduling. Replace
-`controls._clamp` with the core clamp only after verifying its error ordering
-remains unreachable for valid constructors. Keep `coerce_finite_float` and
-`pair_values` in `runtime.validation`: they handle runtime-specific object
-coercion and vector diagnostics.
+`ui_model.controls._clamp`, `SliderModel`'s inline clamp, and
+`core.math_utils.clamp` also share a formula for valid ranges. **KEEP SEPARATE
+FOR NOW:** the UI model dataclasses expose mutable bounds, so callers can create
+reversed ranges after construction; the local clamps and core clamp then have
+different failure behavior. Reconsider after range invariants are enforced or
+the invalid-state contract is specified.
+
+`coerce_finite_float` and `pair_values` remain in `runtime.validation` because
+they handle runtime-specific object coercion and vector diagnostics.
 
 Relevant tests: `tests/test_core_math_utils.py`,
 `tests/test_ui_model_controls.py`, and `tests/test_refresh_scheduler.py`.
 
 ### 10. UI style typography and default accent values partially duplicate design tokens
 
-**Classification:** APPLY — LOW VALUE / LOW RISK
+**Classification:** APPLY — LOW VALUE / LOW RISK — IMPLEMENTED
 **Owners:** `design/tokens.py` and `ui/styles.py`
 
 `ui/styles.py` already consumes canonical semantic colors and spacing. Its
@@ -230,10 +229,12 @@ style aliases remain presentation-adapter details. The `cyan` entry in
 `ACCENT_THEMES` also repeats the default semantic accent and active-accent
 values.
 
-**Recommendation:** Consider deriving the shared font-size/weight portions and
-the default cyan accent values from `design.tokens`, while leaving font
-families, Tk style aliases, and non-token control metrics in `ui.styles.py`.
-Existing coverage is in `tests/test_design_tokens.py` and the UI style tests.
+Shared font-size/weight portions and the default cyan accent values now derive
+from `design.tokens`; font families, Tk style aliases, and non-token control
+metrics remain in `ui.styles.py`. The style adapter maps the renderer-neutral
+`regular`/`bold`/italic weight vocabulary to Tk font tuple semantics instead of
+passing the token strings through unchanged. Coverage is in
+`tests/test_design_tokens.py` and the UI style tests.
 
 ## Remaining Packages: KEEP / Existing Owners
 
@@ -313,10 +314,12 @@ Existing coverage is in `tests/test_design_tokens.py` and the UI style tests.
 | Entity behaviour eligibility | `Entity._eligible_behaviours` | Shared lazy iterator; eligibility remains live during event dispatch. |
 | Project-root document confinement | `Project._resolve_project_path` | Shared resolved containment check; caller errors remain distinct. |
 | Entity ID/parent remapping | `core/scene/scene.py::_clone_entity_tree` | Shared by recursive clone and Scene Instance materialization; root policy remains explicit. |
-| Runtime numeric conversions | `runtime/validation.py` | Shared within runtime; final pass recommends re-homing typed finite conversion to `core/math_utils.py` for UI-model and coordinator reuse. |
+| Typed finite-float conversion | `core/math_utils.py::finite_float` | Shared by runtime, UI controls, and refresh scheduling; runtime re-exports it. |
+| Object coercion and pair-shape validation | `runtime/validation.py` | Runtime-specific exception/field contracts retained. |
+| UI-model clamping | `ui_model` plus `core/math_utils.clamp` | Kept separate because mutable bounds can become invalid and error behavior differs. |
 | Editor project-relative conversion | `editor/project_paths.py` | Separate lexical/resolved APIs preserve call-site normalization. |
 | Preview callback failures | `editor/runtime_preview.py` | Fail closed and report at the Tk callback boundary; standalone `Engine.tick()` retains its exception contract. |
-| UI style tokens | `design/tokens.py` and `ui/styles.py` | Shared colors/spacing already; final pass recommends deriving matching typography/default cyan values from tokens. |
+| UI style tokens | `design/tokens.py` and `ui/styles.py` | Typography and default cyan theme now consume canonical tokens. |
 | Filesystem and document-specific validation | Existing specialized owners | Keep separate where input contracts or security policies differ. |
 
 ## Implementation Follow-up
@@ -343,11 +346,17 @@ The APPLY findings were implemented against the current tree after
 7. Editor workflows use `resolved_project_relative_path` for normalized path
    conversion; the current-scene comparison uses `project_relative_path` to
    retain its previous lexical, non-resolving behavior.
+8. Typed finite-float validation is owned by `core.math_utils.finite_float`;
+   runtime validation re-exports it, controls use it directly, and refresh
+   scheduling wraps it with its stable `time` diagnostic.
+9. Tk font sizes/weights and the default cyan accent values use the shared
+   design tokens; the adapter maps token weights into Tk font syntax while
+   keeping font families and Tk-specific roles in `ui.styles`.
+10. UI control clamping remains local because public mutable bounds can become
+    invalid after construction, where local and core clamp error semantics differ.
 
-Finding 8 and the KEEP-SEPARATE decisions were left unchanged.
-
-Supplemental findings 9–10 are documented opportunities from the wider audit;
-they were not included in the initial implementation set.
+The original export-verification finding and the other KEEP-SEPARATE decisions
+were left unchanged.
 
 ### Runtime preview callback failure follow-up
 
@@ -382,6 +391,7 @@ the implementation follow-up:
 | `tests/test_world_state.py tests/test_world_streaming.py` | 48 passed |
 | Consolidated regression run over all affected core/runtime/editor tests | 375 passed, 21 subtests passed |
 | `tests/test_core_math_utils.py tests/test_ui_model_controls.py tests/test_ui_model_slider.py tests/test_refresh_scheduler.py tests/test_design_tokens.py` | 86 passed, 108 subtests passed |
+| Final math/token pass over core math, UI controls/sliders, refresh scheduling, design tokens, and Tk style registration | 93 passed, 108 subtests passed |
 | Engine-message, preview-loop, and direct BehaviourSystem exception-contract tests | 17 passed |
 | `tests/test_engine_messages.py tests/test_editor_ui.py::RuntimePreviewLoopTests` | 16 passed |
 
@@ -395,9 +405,10 @@ Focused Ruff import/unused-import checks were also run. Whole-file Ruff checks o
 some touched runtime modules report existing unrelated rules in those modules
 (late registration imports, default `Color(...)` calls, enum style, and quoted
 annotations); no changes were made for those unrelated diagnostics. Focused
-Pyright on the new runtime-validation and editor-project-path modules reported
-0 errors. The repository-wide `pyright` profile exited 1 with 721 diagnostics,
-including existing World/project typing issues and editor mixin-attribute errors.
+Pyright on the runtime-validation, editor-project-path, and final shared
+math/token owner modules reported 0 errors. The repository-wide `pyright`
+profile exited 1 with 721 diagnostics, including existing World/project typing
+issues and editor mixin-attribute errors.
 
 ## Audit-Time Worktree
 
@@ -406,4 +417,9 @@ run. The worktree was dirty; unrelated changes and the untracked `To` file were
 preserved. The implementation follow-up changed only the findings described
 above, their focused tests, and this report; it did not modify `To`. The
 untracked `docs/specs/2026-09-28-normal-mapping-design-revised.md` was also
-present during implementation and was preserved untouched.
+present during implementation and was preserved untouched. During the final
+UI-model/UI pass, separate normal-mapping work was present in
+`core/component.py`, `runtime/material_component.py`, and
+`tests/test_material_lighting.py`, with untracked `runtime/normal_mapping.py`
+and `tests/test_normal_mapping.py`; those files were not part of this audit
+follow-up.

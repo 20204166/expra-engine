@@ -5,13 +5,9 @@ from __future__ import annotations
 import math
 from typing import Any, cast
 
+from expra_engine.core.math_utils import finite_float
 
-def finite_float(value: float, name: str) -> float:
-    """Convert a typed numeric value to float and reject non-finite results."""
-    converted = float(value)
-    if not math.isfinite(converted):
-        raise ValueError(f"{name} must be finite")
-    return converted
+__all__ = ("coerce_finite_float", "finite_float", "pair_values")
 
 
 def coerce_finite_float(value: object, name: str) -> float:

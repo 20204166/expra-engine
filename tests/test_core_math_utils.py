@@ -5,6 +5,7 @@ import unittest
 
 from expra_engine.core.math_utils import (
     clamp,
+    finite_float,
     inverselerp,
     lerp,
     lerp_angle,
@@ -51,6 +52,16 @@ class MathUtilsTests(unittest.TestCase):
 
 
 class MathUtilsFiniteTests(unittest.TestCase):
+    def test_finite_float_is_shared_by_runtime_validation_and_ui_controls(self) -> None:
+        from expra_engine.runtime.validation import finite_float as runtime_finite_float
+        from expra_engine.ui_model.controls import _finite as control_finite_float
+
+        self.assertIs(runtime_finite_float, finite_float)
+        self.assertIs(control_finite_float, finite_float)
+        self.assertEqual(finite_float(2, "time"), 2.0)
+        with self.assertRaisesRegex(ValueError, "time must be finite"):
+            finite_float(math.inf, "time")
+
     def test_decay_handles_large_positive_dt(self) -> None:
         self.assertAlmostEqual(lerp_exponential_decay(0.0, 10.0, 100.0, 5.0), 10.0)
 

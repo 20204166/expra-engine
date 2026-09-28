@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from math import isfinite
 from typing import Literal, TypeVar
+
+from expra_engine.core.math_utils import finite_float as _finite
 
 __all__ = (
     "Button",
@@ -98,13 +99,6 @@ class Toggle:
 
     def set_enabled(self, enabled: bool) -> None:
         self.enabled = enabled
-
-
-def _finite(value: float, name: str) -> float:
-    result = float(value)
-    if not isfinite(result):
-        raise ValueError(f"{name} must be finite")
-    return result
 
 
 def _clamp(value: float, minimum: float, maximum: float) -> float:
