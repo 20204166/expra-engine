@@ -177,6 +177,23 @@ class TestPendingTransition(unittest.TestCase):
         self.assertEqual(applied, ["applied"])
         self.assertIsNone(t.pending_id)
 
+    def test_schedule_failure_invalidates_callback_registered_before_error(self) -> None:
+        callbacks: list[Any] = []
+        applied: list[str] = []
+
+        def register_then_fail(_delay: int, callback: Any) -> int:
+            callbacks.append(callback)
+            raise RuntimeError("timer backend failed after registration")
+
+        transition = PendingTransition(register_then_fail, lambda _identifier: True)
+        with self.assertRaisesRegex(RuntimeError, "after registration"):
+            transition.start(100, lambda: applied.append("applied"))
+
+        callbacks[0]()
+
+        self.assertEqual(applied, [])
+        self.assertIsNone(transition.pending_id)
+
 
 if __name__ == "__main__":
     unittest.main()

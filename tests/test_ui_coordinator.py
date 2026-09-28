@@ -10,6 +10,7 @@ Adapted from System Analyzer tests/test_render_coordinator.py — behavior prese
 
 import unittest
 from typing import Any
+from unittest.mock import patch
 
 from expra_engine.coordinators.ui_coordinator import RenderIntent, UICoordinator
 from expra_engine.observability import ObservabilityWatcher
@@ -126,6 +127,39 @@ class TestUICoordinatorShutdown(unittest.TestCase):
         result = coord.request(RenderIntent(target="hierarchy"), lambda i: None)
         self.assertFalse(result)
 
+    def test_late_scheduled_flush_after_shutdown_cannot_commit(self) -> None:
+        scheduled: list[Any] = []
+
+        def schedule(_delay: int, callback: Any) -> int:
+            scheduled.append(callback)
+            return len(scheduled)
+
+        coord = UICoordinator(schedule=schedule)
+        applied: list[str] = []
+        coord.request(RenderIntent("panel"), lambda _intent: applied.append("panel"))
+        coord.shutdown()
+        scheduled[0]()
+
+        self.assertEqual(applied, [])
+        self.assertEqual(coord.pending_count, 0)
+
+    def test_mutators_after_shutdown_do_not_recreate_target_state(self) -> None:
+        coord = UICoordinator()
+        coord.begin_batch()
+        coord.shutdown()
+
+        self.assertEqual(coord._batch_depth, 0)
+        for index in range(10):
+            target = f"late-{index}"
+            coord.invalidate(target, generation=1, owner_id=target)
+            coord.set_visible(target, False)
+            coord.clear(target)
+
+        self.assertEqual(coord._pending, {})
+        self.assertEqual(coord._visible, {})
+        self.assertEqual(coord._generations, {})
+        self.assertEqual(coord._target_nodes, {})
+
 
 class TestUICoordinatorBatchDepth(unittest.TestCase):
     def test_nested_batch_requires_matching_end(self) -> None:
@@ -213,6 +247,61 @@ class TestUICoordinatorObserver(unittest.TestCase):
         self.assertGreaterEqual(metric.coalesced, 1)
         self.assertGreaterEqual(metric.stale, 1)
         self.assertGreaterEqual(metric.rejected, 1)
+
+    def test_observer_record_failure_does_not_block_render_commit(self) -> None:
+        observer = ObservabilityWatcher()
+        coord = UICoordinator(observer=observer)
+        applied: list[str] = []
+
+        with patch.object(observer, "record_event", side_effect=RuntimeError("observer failed")):
+            accepted = coord.request(RenderIntent("panel"), lambda _intent: applied.append("panel"))
+
+        self.assertTrue(accepted)
+        self.assertEqual(applied, ["panel"])
+        self.assertEqual(coord.pending_count, 0)
+
+    def test_observer_begin_failure_does_not_drop_pending_render(self) -> None:
+        observer = ObservabilityWatcher()
+        coord = UICoordinator(observer=observer)
+        applied: list[str] = []
+
+        with patch.object(observer, "begin", side_effect=RuntimeError("observer failed")):
+            accepted = coord.request(RenderIntent("panel"), lambda _intent: applied.append("panel"))
+
+        self.assertTrue(accepted)
+        self.assertEqual(applied, ["panel"])
+        self.assertEqual(coord.pending_count, 0)
+
+    def test_observer_finish_failure_does_not_escape_after_commit(self) -> None:
+        observer = ObservabilityWatcher()
+        coord = UICoordinator(observer=observer)
+        applied: list[str] = []
+
+        with patch.object(observer, "finish", side_effect=RuntimeError("observer failed")):
+            accepted = coord.request(RenderIntent("panel"), lambda _intent: applied.append("panel"))
+
+        self.assertTrue(accepted)
+        self.assertEqual(applied, ["panel"])
+        self.assertEqual(coord.pending_count, 0)
+
+    def test_observer_rejecting_long_target_does_not_reject_render(self) -> None:
+        coord = UICoordinator(observer=ObservabilityWatcher())
+        target = "panel-" + "x" * 150
+        applied: list[str] = []
+
+        self.assertTrue(
+            coord.request(RenderIntent(target), lambda intent: applied.append(intent.target))
+        )
+
+        self.assertEqual(applied, [target])
+        self.assertEqual(coord.pending_count, 0)
+
+    def test_metric_queries_fail_soft_when_observer_is_unavailable(self) -> None:
+        observer = ObservabilityWatcher()
+        coord = UICoordinator(observer=observer)
+
+        with patch.object(observer, "event_total", side_effect=RuntimeError("observer failed")):
+            self.assertEqual(coord.render_requests, 0)
 
 
 class TestUICoordinatorFieldMerge(unittest.TestCase):
@@ -335,6 +424,28 @@ class TestUICoordinatorMetricsExtended(unittest.TestCase):
         coord.request(RenderIntent(target="viewport"), bad_apply)
         self.assertEqual(coord.render_failures, 1)
 
+    def test_failed_commit_is_not_counted_as_successful_commit(self) -> None:
+        coord = UICoordinator()
+
+        def bad_apply(_intent: RenderIntent) -> None:
+            raise RuntimeError("widget gone")
+
+        coord.request(RenderIntent(target="viewport"), bad_apply)
+
+        self.assertEqual(coord.render_failures, 1)
+        self.assertEqual(coord.render_commits, 0)
+
+    def test_failed_commit_log_bounds_target_and_error_detail(self) -> None:
+        coord = UICoordinator()
+
+        def bad_apply(_intent: RenderIntent) -> None:
+            raise RuntimeError("detail " * 10000)
+
+        with self.assertLogs("expra_engine.coordinators.ui_coordinator", level="WARNING") as logs:
+            coord.request(RenderIntent(target="panel-" + "x" * 1000), bad_apply)
+
+        self.assertLessEqual(len(logs.output[0]), 400)
+
     def test_commit_runs_on_requesting_thread(self) -> None:
         import threading
 
@@ -423,6 +534,18 @@ class TestUICoordinatorTransitions(unittest.TestCase):
         coord.cancel_transition("status")
         self.assertEqual(len(cancelled), 1)
         self.assertEqual(cancelled[0], 1)
+        self.assertEqual(coord._transitions, {})
+
+    def test_cancelled_transition_callback_cannot_fire_after_slot_release(self) -> None:
+        coord, scheduled, _cancelled = self._make()
+        applied: list[str] = []
+        coord.schedule_transition("status", 200, lambda: applied.append("applied"))
+
+        coord.cancel_transition("status")
+        scheduled[0][1]()
+
+        self.assertEqual(applied, [])
+        self.assertEqual(coord._transitions, {})
 
     def test_cancel_transition_unknown_name_is_safe(self) -> None:
         coord, _, _ = self._make()
@@ -440,6 +563,133 @@ class TestUICoordinatorTransitions(unittest.TestCase):
         coord.schedule_transition("status", 200, lambda: None)  # must not raise
         coord.cancel_transition("status")  # must not raise
         coord.shutdown()  # must not raise
+
+    def test_no_schedule_callable_does_not_retain_inert_transition(self) -> None:
+        coord = UICoordinator()
+        coord.schedule_transition("status", 200, lambda: self.fail("transition should be inert"))
+
+        self.assertEqual(coord._transitions, {})
+
+    def test_transition_registry_releases_completed_unique_names(self) -> None:
+        coord, scheduled, _cancelled = self._make()
+
+        for index in range(100):
+            coord.schedule_transition(f"transition-{index}", 1, lambda: None)
+            scheduled[-1][1]()
+
+        self.assertEqual(coord._transitions, {})
+
+    def test_transition_callback_failure_is_logged_and_releases_its_slot(self) -> None:
+        coord, scheduled, _cancelled = self._make()
+
+        def fail() -> None:
+            raise RuntimeError("transition failed" * 1000)
+
+        coord.schedule_transition("status", 1, fail)
+        with self.assertLogs("expra_engine.coordinators.ui_coordinator", level="WARNING") as logs:
+            scheduled[0][1]()
+
+        self.assertLessEqual(len(logs.output[0]), 350)
+        self.assertEqual(coord._transitions, {})
+
+    def test_transition_schedule_partial_failure_does_not_retain_or_apply_callback(self) -> None:
+        callbacks: list[Any] = []
+        applied: list[str] = []
+
+        def register_then_fail(_delay: int, callback: Any) -> int:
+            callbacks.append(callback)
+            raise RuntimeError("timer backend failed after registration")
+
+        coord = UICoordinator(schedule=register_then_fail)
+        with self.assertRaisesRegex(RuntimeError, "after registration"):
+            coord.schedule_transition("status", 1, lambda: applied.append("applied"))
+
+        callbacks[0]()
+
+        self.assertEqual(applied, [])
+        self.assertEqual(coord._transitions, {})
+
+    def test_reentrant_transition_replacement_keeps_new_timer_until_it_fires(self) -> None:
+        coord, scheduled, _cancelled = self._make()
+        applied: list[str] = []
+
+        def first() -> None:
+            applied.append("first")
+            coord.schedule_transition("status", 2, lambda: applied.append("second"))
+
+        coord.schedule_transition("status", 1, first)
+        scheduled[0][1]()
+        self.assertIn("status", coord._transitions)
+
+        scheduled[1][1]()
+
+        self.assertEqual(applied, ["first", "second"])
+        self.assertEqual(coord._transitions, {})
+
+    def test_shutdown_is_terminal_for_transition_scheduling(self) -> None:
+        coord, scheduled, _cancelled = self._make()
+        coord.shutdown()
+
+        coord.schedule_transition("late", 1, lambda: self.fail("late transition fired"))
+
+        self.assertEqual(scheduled, [])
+
+    def test_shutdown_continues_transition_cancellation_after_failure(self) -> None:
+        scheduled: list[tuple[int, Any]] = []
+        cancelled: list[Any] = []
+
+        def schedule(delay: int, callback: Any) -> int:
+            identifier = len(scheduled) + 1
+            scheduled.append((identifier, callback))
+            return identifier
+
+        def cancel(identifier: Any) -> bool:
+            cancelled.append(identifier)
+            if identifier == 1:
+                raise RuntimeError("scheduler is closing")
+            return True
+
+        coord = UICoordinator(schedule=schedule, cancel=cancel)
+        applied: list[str] = []
+        coord.schedule_transition("first", 1, lambda: applied.append("first"))
+        coord.schedule_transition("second", 1, lambda: applied.append("second"))
+
+        coord.shutdown()
+        for _identifier, callback in scheduled:
+            callback()
+
+        self.assertEqual(cancelled, [1, 2])
+        self.assertEqual(applied, [])
+        self.assertEqual(coord._transitions, {})
+
+
+class TestUICoordinatorFlushScheduling(unittest.TestCase):
+    def test_synchronous_scheduler_does_not_leave_stale_flush_flag(self) -> None:
+        applied: list[str] = []
+
+        def schedule(_delay: int, callback: Any) -> object:
+            callback()
+            return object()
+
+        coord = UICoordinator(schedule=schedule)
+        coord.request(RenderIntent("first"), lambda _intent: applied.append("first"))
+        coord.request(RenderIntent("second"), lambda _intent: applied.append("second"))
+
+        self.assertEqual(applied, ["first", "second"])
+        self.assertEqual(coord.pending_count, 0)
+
+    def test_scheduler_exception_falls_back_to_synchronous_commit(self) -> None:
+        applied: list[str] = []
+
+        def schedule(_delay: int, _callback: Any) -> object:
+            raise RuntimeError("event loop unavailable")
+
+        coord = UICoordinator(schedule=schedule)
+        accepted = coord.request(RenderIntent("panel"), lambda _intent: applied.append("panel"))
+
+        self.assertTrue(accepted)
+        self.assertEqual(applied, ["panel"])
+        self.assertEqual(coord.pending_count, 0)
 
 
 if __name__ == "__main__":

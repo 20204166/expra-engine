@@ -50,7 +50,12 @@ class PendingTransition:
             fired = True
             callback()
 
-        identifier = self._schedule(delay, run)
+        try:
+            identifier = self._schedule(delay, run)
+        except Exception:
+            if not fired:
+                self._generation += 1
+            raise
         if not fired:
             self._id = identifier
 

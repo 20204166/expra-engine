@@ -12,6 +12,7 @@ The coordinator never scans, schedules workers, or mutates widgets itself.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import time
 from collections.abc import Callable
@@ -19,6 +20,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from expra_engine.coordinators.transition import PendingTransition
+from expra_engine.messages._format import bounded_text
 from expra_engine.observability import EventKind, ObservabilityWatcher, Outcome
 
 LOGGER = logging.getLogger(__name__)
@@ -94,7 +96,10 @@ class UICoordinator:
         self._transitions: dict[str, PendingTransition] = {}
 
     def _event_total(self, event: EventKind) -> int:
-        return self._observer.event_total("ui:render:", event)
+        try:
+            return self._observer.event_total("ui:render:", event)
+        except Exception:  # noqa: BLE001 - optional metrics cannot block UI state
+            return 0
 
     @property
     def render_requests(self) -> int:
@@ -132,6 +137,8 @@ class UICoordinator:
             self.flush()
 
     def set_visible(self, target: str, visible: bool) -> None:
+        if self._closed:
+            return
         self._visible[target] = visible
         if visible and self._batch_depth == 0:
             self.flush()
@@ -142,6 +149,8 @@ class UICoordinator:
         generation: int | None = None,
         owner_id: Any | None = None,
     ) -> None:
+        if self._closed:
+            return
         current = self._generations.get(target, 0)
         previous_owner = self._target_nodes.get(target)
         owner_changed = (
@@ -171,6 +180,8 @@ class UICoordinator:
             del self._pending[target]
 
     def clear(self, target: str | None = None) -> None:
+        if target is not None and self._closed:
+            return
         if target is None:
             self._pending.clear()
             self._generations.clear()
@@ -183,21 +194,67 @@ class UICoordinator:
         self._generations[target] = self._generations.get(target, 0) + 1
 
     def shutdown(self) -> None:
+        if self._closed:
+            return
         self._closed = True
         self.clear()
-        for transition in self._transitions.values():
-            transition.cancel()
+        self._batch_depth = 0
+        transitions = tuple(self._transitions.items())
         self._transitions.clear()
+        for name, transition in transitions:
+            try:
+                transition.cancel()
+            except Exception as error:  # noqa: BLE001 - cancel every timer before teardown
+                LOGGER.warning(
+                    "Could not cancel UI transition %s during shutdown: %s",
+                    bounded_text(name, 80),
+                    bounded_text(str(error), 200),
+                )
 
     def schedule_transition(self, name: str, delay: int, apply: Callable[[], None]) -> None:
-        if name not in self._transitions:
-            self._transitions[name] = PendingTransition(self._schedule, self._cancel)
-        self._transitions[name].start(delay, apply)
+        if self._closed:
+            return
+        transition = self._transitions.get(name)
+        if transition is None:
+            transition = PendingTransition(self._schedule, self._cancel)
+            self._transitions[name] = transition
+
+        def apply_and_forget() -> None:
+            try:
+                apply()
+            except Exception as error:  # noqa: BLE001 - timer callbacks must not escape the UI loop
+                LOGGER.warning(
+                    "UI transition %s failed: %s",
+                    bounded_text(name, 80),
+                    bounded_text(str(error), 200),
+                )
+            finally:
+                if (
+                    self._transitions.get(name) is transition
+                    and transition.pending_id is None
+                ):
+                    self._transitions.pop(name, None)
+
+        try:
+            transition.start(delay, apply_and_forget)
+        except Exception:
+            if self._transitions.get(name) is transition and transition.pending_id is None:
+                self._transitions.pop(name, None)
+            raise
+        if self._transitions.get(name) is transition and transition.pending_id is None:
+            self._transitions.pop(name, None)
 
     def cancel_transition(self, name: str) -> None:
         transition = self._transitions.get(name)
         if transition is not None:
-            transition.cancel()
+            try:
+                transition.cancel()
+            finally:
+                if (
+                    self._transitions.get(name) is transition
+                    and transition.pending_id is None
+                ):
+                    self._transitions.pop(name, None)
 
     def request(
         self,
@@ -250,10 +307,24 @@ class UICoordinator:
             and not self._flush_scheduled
             and self._visible.get(intent.target, True)
         ):
-            token = self._schedule(0, self._deferred_flush)
-            if token is not None:
+            callback_fired = False
+
+            def scheduled_flush() -> None:
+                nonlocal callback_fired
+                callback_fired = True
+                self._deferred_flush()
+
+            try:
+                token = self._schedule(0, scheduled_flush)
+            except Exception as error:  # noqa: BLE001 - render synchronously if scheduling fails
+                LOGGER.warning(
+                    "Could not schedule UI render flush; applying synchronously: %s",
+                    bounded_text(str(error), 200),
+                )
+                token = None
+            if token is not None and not callback_fired:
                 self._flush_scheduled = True
-            else:
+            elif token is None and not callback_fired:
                 self._apply_target(intent.target)
         return True
 
@@ -311,7 +382,11 @@ class UICoordinator:
             return False
 
         del self._pending[target]
-        token = self._observer.begin(f"ui:render:{target}") if self._observer is not None else None
+        observer = self._observer
+        token = None
+        if observer is not None:
+            with contextlib.suppress(Exception):
+                token = observer.begin(f"ui:render:{target}")
         started = time.perf_counter()
         outcome: Outcome = "success"
         detail: str | None = None
@@ -321,20 +396,26 @@ class UICoordinator:
             outcome = "failure"
             detail = type(error).__name__
             self._record_event(target, "failure")
-            LOGGER.warning("Render commit for %s failed: %s", target, error)
+            LOGGER.warning(
+                "Render commit for %s failed: %s",
+                bounded_text(target, 80),
+                bounded_text(str(error), 200),
+            )
+        else:
+            self._record_event(target, "commit")
         finally:
             self.last_commit_seconds = time.perf_counter() - started
             if token is not None:
-                observer = self._observer
-                assert observer is not None
-                observer.finish(
-                    token,
-                    outcome=outcome,
-                    duration_seconds=self.last_commit_seconds,
-                    detail=detail,
-                )
-        self._record_event(target, "commit")
+                with contextlib.suppress(Exception):
+                    assert observer is not None
+                    observer.finish(
+                        token,
+                        outcome=outcome,
+                        duration_seconds=self.last_commit_seconds,
+                        detail=detail,
+                    )
         return True
 
     def _record_event(self, target: str, event: EventKind) -> None:
-        self._observer.record_event(f"ui:render:{target}", event)
+        with contextlib.suppress(Exception):
+            self._observer.record_event(f"ui:render:{target}", event)
