@@ -4,7 +4,8 @@
 **Source version:** Expra 0.5.4.0
 **Audited commit:** `4723b25d89f00948d2766454b686a70e41884016`
 **Supplemental audit baseline:** `32abb1b`
-**Mode:** Read-only source and test inspection; no implementation changes made.
+**Final supplemental baseline:** `ee741de`
+**Audit mode:** Static source and test inspection; implementation follow-ups are recorded below.
 
 ## Scope and Method
 
@@ -189,7 +190,7 @@ coverage is in `tests/test_export_verify.py`.
 
 The remaining `coordinators/`, `design/`, `messages/`, `schema/`, `ui_model/`,
 `ui/`, and root-level modules were inspected after the first implementation
-pass.
+pass, then rechecked against `ee741de` for this final audit update.
 
 ### 9. Finite-float and clamp helpers cross the core, runtime, coordinator, and UI-model boundary
 
@@ -312,8 +313,10 @@ Existing coverage is in `tests/test_design_tokens.py` and the UI style tests.
 | Entity behaviour eligibility | `Entity._eligible_behaviours` | Shared lazy iterator; eligibility remains live during event dispatch. |
 | Project-root document confinement | `Project._resolve_project_path` | Shared resolved containment check; caller errors remain distinct. |
 | Entity ID/parent remapping | `core/scene/scene.py::_clone_entity_tree` | Shared by recursive clone and Scene Instance materialization; root policy remains explicit. |
-| Runtime numeric conversions | `runtime/validation.py` | Shared only across compatible runtime callers; lower-level owner review remains a supplemental finding. |
+| Runtime numeric conversions | `runtime/validation.py` | Shared within runtime; final pass recommends re-homing typed finite conversion to `core/math_utils.py` for UI-model and coordinator reuse. |
 | Editor project-relative conversion | `editor/project_paths.py` | Separate lexical/resolved APIs preserve call-site normalization. |
+| Preview callback failures | `editor/runtime_preview.py` | Fail closed and report at the Tk callback boundary; standalone `Engine.tick()` retains its exception contract. |
+| UI style tokens | `design/tokens.py` and `ui/styles.py` | Shared colors/spacing already; final pass recommends deriving matching typography/default cyan values from tokens. |
 | Filesystem and document-specific validation | Existing specialized owners | Keep separate where input contracts or security policies differ. |
 
 ## Implementation Follow-up
@@ -346,6 +349,22 @@ Finding 8 and the KEEP-SEPARATE decisions were left unchanged.
 Supplemental findings 9–10 are documented opportunities from the wider audit;
 they were not included in the initial implementation set.
 
+### Runtime preview callback failure follow-up
+
+The reported behavior exception is propagated by `BehaviourSystem` through the
+`EventQueue` and `Engine.tick()`. That direct Engine exception behavior is
+covered by `test_behaviour_exception_is_recorded_as_failure_and_still_propagates`
+and remains unchanged. The editor-owned `RuntimePreviewLoop` was the leaking
+boundary: it fail-stopped the Engine and then re-raised from Tk's `after`
+callback, causing Tk to print a traceback. It now reports a bounded Engine
+diagnostic through the editor console and returns from the callback after
+fail-closed stop. No game/project script was changed.
+
+The initial consolidation commit (`ee741de`) changed `src/expra_engine` by 163
+insertions and 165 deletions (net -2 source lines). No performance benchmark
+was run; this was a behavior-preserving ownership pass, not a measured runtime
+optimization.
+
 ### Verification
 
 Audit-time inspection itself was static; the following tests were run during
@@ -362,6 +381,9 @@ the implementation follow-up:
 | Editor project paths, project workflow, World authoring, composition, multi-level workflow, and script-tools tests | 77 passed, 6 subtests passed |
 | `tests/test_world_state.py tests/test_world_streaming.py` | 48 passed |
 | Consolidated regression run over all affected core/runtime/editor tests | 375 passed, 21 subtests passed |
+| `tests/test_core_math_utils.py tests/test_ui_model_controls.py tests/test_ui_model_slider.py tests/test_refresh_scheduler.py tests/test_design_tokens.py` | 86 passed, 108 subtests passed |
+| Engine-message, preview-loop, and direct BehaviourSystem exception-contract tests | 17 passed |
+| `tests/test_engine_messages.py tests/test_editor_ui.py::RuntimePreviewLoopTests` | 16 passed |
 
 After the final resolved-vs-lexical editor path helper split, the Tk-heavy tests
 were rerun separately: `tests/test_multi_level_workflow.py` passed 12 tests, and

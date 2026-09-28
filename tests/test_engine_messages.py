@@ -27,3 +27,16 @@ def test_world_lifecycle_diagnostic_bounds_untrusted_level_identifier() -> None:
 
     assert len(message) <= 300
     assert "..." in message
+
+
+def test_runtime_preview_failure_message_is_bounded_and_actionable() -> None:
+    spec = importlib.util.find_spec("expra_engine.messages.engine")
+    assert spec is not None
+    messages = importlib.import_module("expra_engine.messages.engine")
+
+    assert messages.runtime_preview_tick_failed("LookupError", "missing attack hitbox") == (
+        "[Engine] Runtime preview stopped after LookupError: missing attack hitbox"
+    )
+    message = messages.runtime_preview_tick_failed("E" * 1000, "detail " * 1000)
+    assert len(message) <= 640
+    assert message.count("...") == 2

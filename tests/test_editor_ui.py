@@ -146,7 +146,7 @@ class RuntimePreviewLoopTests(unittest.TestCase):
         self.assertEqual(rendered, [])
         self.assertIsNone(loop._after_id)
 
-    def test_tick_failure_stops_engine_and_surfaces_error(self) -> None:
+    def test_tick_failure_stops_engine_and_reports_without_escaping_tk(self) -> None:
         class LiveRoot:
             def __init__(self) -> None:
                 self.scheduled: list[tuple[int, object]] = []
@@ -173,15 +173,24 @@ class RuntimePreviewLoopTests(unittest.TestCase):
 
         engine = FailingEngine()
         root = LiveRoot()
-        loop = RuntimePreviewLoop(cast(Any, root), cast(Any, engine), lambda: None)
+        errors: list[str] = []
+        loop = RuntimePreviewLoop(
+            cast(Any, root),
+            cast(Any, engine),
+            lambda: None,
+            on_runtime_error=errors.append,
+        )
 
-        with self.assertRaises(RuntimeError):
-            loop._tick()
+        loop._tick()
 
         self.assertTrue(engine.stopped)
         self.assertEqual(engine.run_state, EngineRunState.EDIT)
         self.assertIsNone(loop._after_id)
         self.assertEqual(root.scheduled, [])
+        self.assertEqual(
+            errors,
+            ["[Engine] Runtime preview stopped after RuntimeError: behaviour failed"],
+        )
 
     def test_tick_on_destroyed_root_stops_engine(self) -> None:
         class DeadRoot:

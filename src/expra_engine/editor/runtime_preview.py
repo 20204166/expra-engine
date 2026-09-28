@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import contextlib
+import logging
 import tkinter as tk
 from collections.abc import Callable
 from typing import Any, Literal
 
 from expra_engine.core.engine import Engine, EngineRunState
+from expra_engine.messages import engine as engine_messages
 from expra_engine.observability import ObservabilityWatcher
+
+LOGGER = logging.getLogger(__name__)
 
 
 class RuntimePreviewLoop:
@@ -23,6 +27,7 @@ class RuntimePreviewLoop:
         observer: ObservabilityWatcher | None = None,
         on_world_startup_diagnostic: Callable[[str], None] | None = None,
         on_world_startup_error: Callable[[], None] | None = None,
+        on_runtime_error: Callable[[str], None] | None = None,
     ) -> None:
         self._root = root
         self._engine = engine
@@ -31,6 +36,7 @@ class RuntimePreviewLoop:
         self._observer = observer
         self._on_world_startup_diagnostic = on_world_startup_diagnostic
         self._on_world_startup_error = on_world_startup_error
+        self._on_runtime_error = on_runtime_error
         self._last_world_startup_diagnostic: str | None = None
 
     def start(self) -> None:
@@ -67,10 +73,20 @@ class RuntimePreviewLoop:
                 if self._report_world_startup_state():
                     return
                 self._render()
-            except Exception:
+            except Exception as exc:  # noqa: BLE001 - contain engine failures at Tk's callback boundary
                 outcome = "failure"
                 self._stop_engine()
-                raise
+                message = engine_messages.runtime_preview_tick_failed(
+                    type(exc).__name__, str(exc)
+                )
+                if self._on_runtime_error is None:
+                    LOGGER.error("%s", message)
+                else:
+                    try:
+                        self._on_runtime_error(message)
+                    except Exception as report_error:  # noqa: BLE001 - Tk reporting must not escape
+                        LOGGER.error("Runtime preview error reporting failed: %s", report_error)
+                return
             finally:
                 if observer is not None and token is not None:
                     observer.finish(token, outcome=outcome)

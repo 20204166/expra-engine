@@ -186,6 +186,7 @@ class EditorWindow(EditorDocumentSurface, WorldEditorActionsMixin):
                 f"[World] {message}", level="error"
             ),
             on_world_startup_error=self._act_stop,
+            on_runtime_error=lambda message: self._console.log(message, level="error"),
         )
 
         self._register_actions()
