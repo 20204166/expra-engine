@@ -243,14 +243,18 @@ class PygameRuntime:
                     UIEvent("key_down", key=self._key_name(event.key))
                 ) is not None
                 if not handled:
-                    self._signal_input("press", event.key)
+                    self._signal_input(
+                        "press", PhysicalInput("keyboard", self._key_name(event.key))
+                    )
             elif event_type == self.pygame.KEYUP:
                 self._keys.discard(event.key)
                 handled = self.ui_root is not None and self.ui_root.dispatch(
                     UIEvent("key_up", key=self._key_name(event.key))
                 ) is not None
                 if not handled:
-                    self._signal_input("release", event.key)
+                    self._signal_input(
+                        "release", PhysicalInput("keyboard", self._key_name(event.key))
+                    )
             elif event_type == getattr(self.pygame, "MOUSEMOTION", object()):
                 if self.ui_root is not None:
                     self.ui_root.dispatch(UIEvent("pointer_move", position=tuple(event.pos)))
@@ -259,31 +263,29 @@ class PygameRuntime:
                     UIEvent("pointer_down", position=tuple(event.pos), button=str(event.button))
                 ) is not None
                 if not handled:
-                    self._signal_input("press", event.button)
+                    self._signal_input(
+                        "press", PhysicalInput("mouse", f"button-{event.button}")
+                    )
             elif event_type == getattr(self.pygame, "MOUSEBUTTONUP", object()):
                 handled = self.ui_root is not None and self.ui_root.dispatch(
                     UIEvent("pointer_up", position=tuple(event.pos), button=str(event.button))
                 ) is not None
                 if not handled:
-                    self._signal_input("release", event.button)
+                    self._signal_input(
+                        "release", PhysicalInput("mouse", f"button-{event.button}")
+                    )
 
     def _key_name(self, key: Any) -> str:
         key_api = getattr(self.pygame, "key", None)
         name = getattr(key_api, "name", None)
         return str(name(key)) if callable(name) else str(key)
 
-    def _signal_input(self, phase: str, key: Any) -> None:
-        """Translate a backend key event into the engine's semantic input map."""
+    def _signal_input(self, phase: str, physical: PhysicalInput) -> None:
+        """Resolve a translated physical input through the engine's input map."""
         input_map = getattr(self.engine, "input_map", None)
         signal = getattr(self.engine, "signal", None)
         if input_map is None or signal is None:
             return
-        key_name = str(key)
-        key_api = getattr(self.pygame, "key", None)
-        name = getattr(key_api, "name", None)
-        if callable(name):
-            key_name = str(name(key))
-        physical = PhysicalInput("keyboard", key_name)
         transitions = getattr(input_map, phase)(physical)
         for action_event in transitions:
             signal(action_event)

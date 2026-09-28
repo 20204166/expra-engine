@@ -16,6 +16,7 @@ from expra_engine.core.component_schema import (
 )
 from expra_engine.core.entity import Entity
 from expra_engine.core.world import World
+from expra_engine.runtime.material_component import MaterialComponent
 from expra_engine.runtime.script_component import ScriptComponent
 from expra_engine.ui.layout import make_scrollable_frame
 from expra_engine.ui.styles import (
@@ -46,6 +47,8 @@ class InspectorPanel(tk.Frame):
         on_world_level_placement: Callable[[str, tuple[float, float]], None] | None = None,
         on_world_set_initial_level: Callable[[str], None] | None = None,
         on_world_remove_item: Callable[[str], None] | None = None,
+        on_normal_map_preview: Callable[[str, int], None] | None = None,
+        on_normal_map_auto_map: Callable[[], None] | None = None,
     ) -> None:
         c = colors or COLORS
         super().__init__(parent, bg=c["panel_bg"])
@@ -60,6 +63,8 @@ class InspectorPanel(tk.Frame):
         self._on_world_level_placement = on_world_level_placement
         self._on_world_set_initial_level = on_world_set_initial_level
         self._on_world_remove_item = on_world_remove_item
+        self._on_normal_map_preview = on_normal_map_preview
+        self._on_normal_map_auto_map = on_normal_map_auto_map
         self._current_entity_id: str | None = None
         self._current_entity: Entity | None = None
         self._structure_key: tuple[Any, ...] | None = None
@@ -635,6 +640,8 @@ class InspectorPanel(tk.Frame):
 
     @staticmethod
     def format_component_value(value: Any) -> str:
+        if value is None:
+            return ""
         if isinstance(value, (tuple, list)):
             return ", ".join(str(part) for part in value)
         return str(value)
@@ -673,6 +680,31 @@ class InspectorPanel(tk.Frame):
             handler = self._component_handler(index, spec.name, descriptor.name, variable)
             entry.bind("<Return>", handler)
             self._bind_focus_out(entry, handler)
+        if isinstance(component, MaterialComponent):
+            controls = ttk.Frame(self._content)
+            controls.pack(fill="x", padx=(SPACING["card_pad_x"], 0), pady=(0, 6))
+            ttk.Button(
+                controls,
+                text="Preview Normal Map",
+                style=STYLE_NEUTRAL_BUTTON,
+                command=lambda: self._emit_normal_map_preview(index),
+                state="normal" if self._on_normal_map_preview is not None else "disabled",
+            ).pack(side="left")
+            ttk.Button(
+                controls,
+                text="Auto-map this Level…",
+                style=STYLE_NEUTRAL_BUTTON,
+                command=self._emit_normal_map_auto_map,
+                state="normal" if self._on_normal_map_auto_map is not None else "disabled",
+            ).pack(side="left", padx=(4, 0))
+
+    def _emit_normal_map_preview(self, component_index: int) -> None:
+        if self._current_entity_id is not None and self._on_normal_map_preview is not None:
+            self._on_normal_map_preview(self._current_entity_id, component_index)
+
+    def _emit_normal_map_auto_map(self) -> None:
+        if self._on_normal_map_auto_map is not None:
+            self._on_normal_map_auto_map()
 
     def _component_handler(
         self,

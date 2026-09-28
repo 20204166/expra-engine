@@ -18,6 +18,8 @@ from expra_engine.runtime import (
     Viewport,
     project_runner,
 )
+from expra_engine.runtime.input import ActionId, InputMap, PhysicalInput
+from expra_engine.runtime.normal_mapping import NormalMapResolver
 from expra_engine.runtime.pygame_renderer import PygameRenderFrame
 from expra_engine.runtime.pygame_screen_pipeline import PygameScreenPipeline, PygameScreenSnapshot
 from expra_engine.runtime.render_pipeline import RenderPlan, RenderPlanBuilder
@@ -270,6 +272,36 @@ class TestPygameRuntime(unittest.TestCase):
         runtime.run()
 
         self.assertEqual(engine.signals, [])
+
+    def test_unhandled_mouse_buttons_use_mouse_physical_inputs(self) -> None:
+        pygame = _FakePygame(
+            [
+                [
+                    SimpleNamespace(type=_FakePygame.MOUSEBUTTONDOWN, pos=(10, 10), button=1),
+                    SimpleNamespace(type=_FakePygame.MOUSEBUTTONUP, pos=(10, 10), button=1),
+                ],
+                [SimpleNamespace(type=_FakePygame.QUIT)],
+            ]
+        )
+        pygame.key = SimpleNamespace(name=lambda _key: "")
+        engine = _FakeEngine()
+        engine.input_map = InputMap()
+        engine.input_map.bind(ActionId("fire"), PhysicalInput("mouse", "button-1"))
+        runtime = PygameRuntime(
+            engine,
+            pygame_module=pygame,
+            clock=_FakeClock([16, 16]),
+            surface_factory=pygame.display.set_mode,
+        )
+
+        runtime.run()
+
+        self.assertEqual([event.phase for event in engine.signals], ["pressed", "released"])
+        self.assertEqual(
+            [event.physical for event in engine.signals],
+            [PhysicalInput("mouse", "button-1"), PhysicalInput("mouse", "button-1")],
+        )
+
     def test_runtime_stops_when_engine_returns_to_edit(self) -> None:
         pygame = _FakePygame([[], []])
         engine = _FakeEngine()
@@ -594,8 +626,8 @@ def test_project_runner_carries_effect_submissions_and_legacy_payload(
     captured: dict[str, Any] = {}
 
     class Renderer:
-        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
-            pass
+        def __init__(self, *_args: Any, **kwargs: Any) -> None:
+            captured["renderer_kwargs"] = kwargs
 
     class Runtime:
         def __init__(self, engine: Any, _renderer: Any, **kwargs: Any) -> None:
@@ -634,6 +666,7 @@ def test_project_runner_carries_effect_submissions_and_legacy_payload(
     assert frame.payload.active_scene.scene_id == captured["engine"].edit_scene.scene_id
     assert captured["engine"].active_scene is captured["engine"].edit_scene
     assert captured["engine"].run_state.value == "edit"
+    assert isinstance(captured["renderer_kwargs"]["normal_map_resolver"], NormalMapResolver)
 
     empty_frame = captured["empty_frame"]
     assert empty_frame.items == ()

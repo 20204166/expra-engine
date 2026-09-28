@@ -15,10 +15,16 @@ from expra_engine.runtime.canvas_effects import CanvasModulateComponent
 from expra_engine.runtime.lighting_2d import Light2DComponent
 from expra_engine.runtime.material_component import MaterialComponent
 from expra_engine.runtime.material_lighting import LightingMode, MaterialLightResponse
+from expra_engine.runtime.normal_mapping import (
+    NormalMapEncoding,
+    NormalMapMode,
+    NormalYConvention,
+)
 from expra_engine.runtime.pygame_renderer import PygameRenderer
 from expra_engine.runtime.render_extractor import extract_render_frame
 from expra_engine.runtime.rendering import (
     MaterialDescriptor,
+    NormalMapDescriptor,
     OrthographicCamera,
     PrimitiveDescriptor,
     RenderContext,
@@ -46,6 +52,60 @@ def test_material_light_response_has_a_validated_neutral_lit_default() -> None:
 def test_render_material_rejects_noncanonical_light_response_values() -> None:
     with pytest.raises(TypeError, match="MaterialLightResponse"):
         MaterialDescriptor(light_response=cast(Any, object()))
+
+
+def test_normal_map_render_contract_is_validated_and_optional() -> None:
+    descriptor = NormalMapDescriptor(
+        mode=NormalMapMode.EXPLICIT,
+        texture_id="assets://tiles/stone_normal.png",
+        strength=2.0,
+        y_convention=NormalYConvention.DIRECTX,
+        encoding=NormalMapEncoding.RG_XY,
+    )
+    material = MaterialDescriptor(normal_map=descriptor)
+
+    assert material.normal_map is descriptor
+    assert MaterialDescriptor().normal_map is None
+    with pytest.raises(ValueError, match="normal_strength"):
+        NormalMapDescriptor(
+            mode=NormalMapMode.EXPLICIT,
+            texture_id="assets://tiles/stone_normal.png",
+            strength=4.1,
+        )
+    with pytest.raises(ValueError, match="requires normal_texture_id"):
+        NormalMapDescriptor(mode=NormalMapMode.EXPLICIT, texture_id=None)
+
+
+def test_extractor_attaches_enabled_material_normal_map_to_each_visual() -> None:
+    scene = Scene("normal mapping extraction")
+    entity = scene.create_entity("sprite")
+    entity.add_component(SpriteComponent("assets://sprites/stone.png"))
+    entity.add_component(
+        MaterialComponent(
+            normal_map_mode="auto_pair",
+            normal_strength=2.0,
+            normal_y_convention="directx",
+            normal_encoding="rg_xy",
+        )
+    )
+
+    item = extract_render_frame(scene).items[0]
+
+    assert item.material.normal_map == NormalMapDescriptor(
+        mode=NormalMapMode.AUTO_PAIR,
+        strength=2.0,
+        y_convention=NormalYConvention.DIRECTX,
+        encoding=NormalMapEncoding.RG_XY,
+    )
+
+
+def test_disabled_material_normal_map_does_not_extend_render_item_semantics() -> None:
+    scene = Scene("normal mapping disabled")
+    entity = scene.create_entity("sprite")
+    entity.add_component(SpriteComponent("assets://sprites/stone.png"))
+    entity.add_component(MaterialComponent())
+
+    assert extract_render_frame(scene).items[0].material.normal_map is None
 
 
 def test_unlit_and_toon_responses_have_explicit_light_semantics() -> None:
@@ -87,7 +147,14 @@ def test_entity_material_response_serializes_authors_and_reaches_render_contract
     }
     component = component_from_dict(data)
     assert isinstance(component, MaterialComponent)
-    assert component.to_dict() == data
+    assert component.to_dict() == {
+        **data,
+        "normal_map_mode": "disabled",
+        "normal_texture_id": None,
+        "normal_strength": 1.0,
+        "normal_y_convention": "opengl",
+        "normal_encoding": "rgb_xyz",
+    }
     assert {field.name for field in component_type_spec("material").fields} >= {
         "mode",
         "ambient_response",
@@ -114,6 +181,76 @@ def test_entity_material_response_serializes_authors_and_reaches_render_contract
     )
 
 
+def test_material_normal_mapping_settings_default_additively_and_round_trip() -> None:
+    defaults = MaterialComponent()
+    assert defaults.normal_map_mode == "disabled"
+    assert defaults.normal_texture_id is None
+    assert defaults.normal_strength == 1.0
+    assert defaults.normal_y_convention == "opengl"
+    assert defaults.normal_encoding == "rgb_xyz"
+
+    legacy = {
+        "type": "material",
+        "enabled": True,
+        "mode": "lit",
+        "ambient_response": 1.0,
+        "diffuse": 1.0,
+        "emission": 0.0,
+        "emission_color": [1.0, 1.0, 1.0, 1.0],
+        "toon_steps": 3,
+    }
+    loaded_legacy = MaterialComponent.from_dict(legacy)
+    assert loaded_legacy.normal_map_mode == "disabled"
+    assert loaded_legacy.normal_texture_id is None
+
+    configured = MaterialComponent(
+        mode="unlit",
+        normal_map_mode="explicit",
+        normal_texture_id="assets://tiles/stone_normal.png",
+        normal_strength=2.5,
+        normal_y_convention="directx",
+        normal_encoding="rg_xy",
+    )
+    serialized = configured.to_dict()
+    assert serialized["normal_map_mode"] == "explicit"
+    assert serialized["normal_texture_id"] == "assets://tiles/stone_normal.png"
+    assert serialized["normal_strength"] == 2.5
+    assert serialized["normal_y_convention"] == "directx"
+    assert serialized["normal_encoding"] == "rg_xy"
+    assert MaterialComponent.from_dict(serialized).to_dict() == serialized
+    defaults.normal_texture_id = ""
+    assert defaults.normal_texture_id is None
+    with pytest.raises(ValueError, match="requires normal_texture_id"):
+        configured.normal_texture_id = ""
+
+    assert {field.name for field in component_type_spec("material").fields} >= {
+        "normal_map_mode",
+        "normal_texture_id",
+        "normal_strength",
+        "normal_y_convention",
+        "normal_encoding",
+    }
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"normal_map_mode": "world_space"},
+        {"normal_map_mode": "explicit"},
+        {"normal_texture_id": "../outside.png"},
+        {"normal_strength": -0.1},
+        {"normal_strength": 4.01},
+        {"normal_strength": float("nan")},
+        {"normal_strength": float("inf")},
+        {"normal_y_convention": "unknown"},
+        {"normal_encoding": "dxt5nm"},
+    ],
+)
+def test_material_normal_mapping_settings_reject_invalid_values(kwargs) -> None:
+    with pytest.raises((TypeError, ValueError)):
+        MaterialComponent(**kwargs)
+
+
 def test_material_properties_are_editable_through_the_existing_inspector_command() -> None:
     scene = Scene("inspector")
     entity = scene.create_entity("visual")
@@ -126,9 +263,24 @@ def test_material_properties_are_editable_through_the_existing_inspector_command
     SetComponentPropertyCommand(
         scene, entity.entity_id, MaterialComponent, "ambient_response", 0.25
     ).execute()
+    SetComponentPropertyCommand(
+        scene,
+        entity.entity_id,
+        MaterialComponent,
+        "normal_texture_id",
+        "assets://tiles/stone_normal.png",
+    ).execute()
+    SetComponentPropertyCommand(
+        scene, entity.entity_id, MaterialComponent, "normal_map_mode", "explicit"
+    ).execute()
+    SetComponentPropertyCommand(
+        scene, entity.entity_id, MaterialComponent, "normal_strength", 2.0
+    ).execute()
 
     assert material.response.mode is LightingMode.TOON
     assert material.response.ambient_response == 0.25
+    assert material.normal_map_mode == "explicit"
+    assert material.normal_strength == 2.0
 
 
 def test_material_response_absence_retains_the_legacy_render_contract() -> None:
@@ -267,6 +419,46 @@ def test_lit_and_unlit_visuals_respond_independently_to_the_same_light() -> None
     unlit_pixel = surface.get_at((70, 50))
     assert lit_pixel.r > 100 and lit_pixel.g < 20 and lit_pixel.b < 20
     assert unlit_pixel.r > 240 and unlit_pixel.g > 240 and unlit_pixel.b > 240
+
+
+def test_pygame_renderer_uses_normal_direction_instead_of_flat_material_light() -> None:
+    import pygame
+
+    albedo_id = "assets://sprites/stone.png"
+    normal_id = "assets://sprites/stone_normal.png"
+    albedo = pygame.Surface((4, 4), pygame.SRCALPHA, 32)
+    albedo.fill((255, 255, 255, 255))
+    normal = pygame.Surface((4, 4), pygame.SRCALPHA, 32)
+    normal.fill((0, 128, 128, 255))
+    scene = Scene("normal direction")
+    visual = scene.create_entity("stone")
+    visual.add_component(SpriteComponent(albedo_id, width=2.0, height=2.0))
+    visual.add_component(
+        MaterialComponent(
+            ambient_response=0.0,
+            normal_map_mode="explicit",
+            normal_texture_id=normal_id,
+        )
+    )
+    light = scene.create_entity("right light")
+    light.add_component(TransformComponent(x=1.0))
+    light.add_component(Light2DComponent(radius=3.0, height=0.0))
+    surface = pygame.Surface((51, 51), pygame.SRCALPHA, 32)
+    textures = {albedo_id: albedo, normal_id: normal}
+    renderer = PygameRenderer(
+        pygame,
+        surface,
+        resource_provider=textures.__getitem__,
+        clear_color=(0, 0, 0),
+    )
+    renderer.start(
+        RenderContext(Viewport(0, 0, 51, 51), OrthographicCamera(width=10.0, height=10.0))
+    )
+
+    renderer.render(extract_render_frame(scene))
+
+    assert renderer.capabilities.normal_mapping_2d is True
+    assert surface.get_at((25, 25)).r < 20
 
 
 def test_runtime_renderer_accepts_tuple_colors_assigned_after_primitive_creation() -> None:

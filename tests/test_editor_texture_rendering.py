@@ -855,6 +855,7 @@ def test_inspector_tuple_values_use_parser_friendly_text() -> None:
     from expra_engine.ui.inspector import InspectorPanel
 
     assert InspectorPanel.format_component_value((1.5, -2.0)) == "1.5, -2.0"
+    assert InspectorPanel.format_component_value(None) == ""
 
 
 def test_viewport_resource_service_replacement_discards_decoded_provider() -> None:

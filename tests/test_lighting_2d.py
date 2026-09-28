@@ -24,6 +24,7 @@ def _light_payload(**overrides: object) -> dict[str, object]:
         "radius": 2.0,
         "falloff": 2.0,
         "cone_angle": 60.0,
+        "height": 1.0,
         **overrides,
     }
 
@@ -39,6 +40,7 @@ def test_light_component_round_trips_through_the_canonical_registry() -> None:
         "radius",
         "falloff",
         "cone_angle",
+        "height",
         "visible",
         "enabled",
     )
@@ -64,6 +66,25 @@ def test_extractor_emits_parent_composed_world_space_lights() -> None:
     assert light.direction_degrees == 90.0
     assert light.radius == 4.0
     assert light.color == Color(1.0, 0.7, 0.4, 1.0)
+    assert light.height == 1.0
+
+
+@pytest.mark.parametrize("height", [-0.1, 1024.1, math.nan, math.inf, True])
+def test_light_component_rejects_invalid_normal_map_height(height: object) -> None:
+    with pytest.raises(ValueError, match="height"):
+        component_from_dict(_light_payload(height=height))
+
+
+def test_light_height_is_separate_from_entity_z_and_only_affects_normal_lighting() -> None:
+    scene = Scene("normal light height")
+    entity = scene.create_entity("light")
+    entity.add_component(TransformComponent(x=4.0))
+    entity.add_component(component_from_dict(_light_payload(height=5.0)))
+
+    descriptor = extract_render_frame(scene).lights[0]
+
+    assert descriptor.position == (4.0, 0.0, 0.0)
+    assert descriptor.height == 5.0
 
 
 def test_disabled_or_invisible_lights_are_not_extracted() -> None:

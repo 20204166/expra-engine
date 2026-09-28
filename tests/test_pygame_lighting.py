@@ -4,6 +4,7 @@ import math
 from dataclasses import replace
 
 import pygame
+import pytest
 
 from expra_engine.core.component import TransformComponent, component_from_dict
 from expra_engine.core.scene import Scene
@@ -105,6 +106,19 @@ def test_spot_direction_retains_small_continuous_rotation_changes() -> None:
 
     renderer.render(_light_frame("spot", rotation=-2.0, cone_angle=4.0, radius=3.0))
     assert surface.get_at((70, 51)).r > unrotated_brightness
+
+
+def test_normal_map_mask_reuses_the_canonical_point_spot_attenuation_image() -> None:
+    frame = _light_frame("spot", rotation=31.0, cone_angle=80.0, color=(1, 1, 1, 1))
+    context = RenderContext(Viewport(0, 0, 101, 101), OrthographicCamera(width=10.0, height=10.0))
+    lighting = PygameLightingPass(pygame)
+    normal_mask, center, origin = lighting.normal_map_mask_for(frame.lights[0], context)
+    color_mask, color_center, color_origin = lighting._image_for(frame.lights[0], context)
+
+    assert (center, origin) == (color_center, color_origin)
+    assert pygame.surfarray.array_alpha(normal_mask) == pytest.approx(
+        pygame.surfarray.array_alpha(color_mask)
+    )
 
 
 def test_offscreen_lights_are_culled_by_camera_without_moving_them() -> None:

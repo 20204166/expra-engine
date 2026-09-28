@@ -11,6 +11,13 @@ from typing import Protocol, runtime_checkable
 from expra_engine.core.math_utils import compose_2d_pose
 from expra_engine.core.scene.camera import Camera2D
 from expra_engine.runtime.animation import SpriteRegion
+from expra_engine.runtime.normal_mapping import (
+    NormalMapEncoding,
+    NormalMapMode,
+    NormalYConvention,
+    validate_normal_strength,
+    validate_normal_texture_id,
+)
 from expra_engine.runtime.validation import finite_float as _finite
 from expra_engine.ui_model.geometry import Rect
 from expra_engine.ui_model.nine_slice import NineSlice
@@ -20,6 +27,7 @@ __all__ = (
     "LightDescriptor",
     "MaterialDescriptor",
     "NineSliceDescriptor",
+    "NormalMapDescriptor",
     "OrthographicCamera",
     "PrimitiveDescriptor",
     "RenderContext",
@@ -60,6 +68,7 @@ class RendererCapabilities:
     screen_texture: bool = False
     screen_texture_mipmaps: bool = False
     lighting_2d: bool = False
+    normal_mapping_2d: bool = False
 
 
 @dataclass(frozen=True)
@@ -193,6 +202,7 @@ class LightDescriptor:
     falloff: float
     direction_degrees: float = 0.0
     cone_angle: float = 60.0
+    height: float = 1.0
 
     def __post_init__(self) -> None:
         if not isinstance(self.entity_id, str) or not self.entity_id:
@@ -210,6 +220,7 @@ class LightDescriptor:
             ("falloff", self.falloff),
             ("direction_degrees", self.direction_degrees),
             ("cone_angle", self.cone_angle),
+            ("height", self.height),
         )
         if any(isinstance(value, bool) or not isinstance(value, Real) for _, value in numeric_fields):
             invalid = next(name for name, value in numeric_fields if isinstance(value, bool) or not isinstance(value, Real))
@@ -219,6 +230,7 @@ class LightDescriptor:
         falloff = _finite(self.falloff, "falloff")
         direction = _finite(self.direction_degrees, "direction_degrees")
         cone = _finite(self.cone_angle, "cone_angle")
+        height = _finite(self.height, "height")
         if not 0.0 <= energy <= 8.0:
             raise ValueError("energy must be between 0 and 8")
         if radius <= 0.0:
@@ -227,11 +239,14 @@ class LightDescriptor:
             raise ValueError("falloff must be between 0.1 and 8")
         if not 0.0 < cone <= 360.0:
             raise ValueError("cone_angle must be greater than 0 and at most 360")
+        if not 0.0 <= height <= 1024.0:
+            raise ValueError("height must be between 0 and 1024")
         object.__setattr__(self, "energy", energy)
         object.__setattr__(self, "radius", radius)
         object.__setattr__(self, "falloff", falloff)
         object.__setattr__(self, "direction_degrees", direction)
         object.__setattr__(self, "cone_angle", cone)
+        object.__setattr__(self, "height", height)
 
     def is_visible(self, context: RenderContext) -> bool:
         """Conservatively cull lights outside the camera viewport or depth range."""
@@ -252,6 +267,35 @@ class LightDescriptor:
 
 
 @dataclass(frozen=True)
+class NormalMapDescriptor:
+    """Backend-neutral normal-map binding and tangent-space interpretation."""
+
+    mode: NormalMapMode | str
+    texture_id: str | None = None
+    strength: float = 1.0
+    y_convention: NormalYConvention | str = NormalYConvention.OPENGL
+    encoding: NormalMapEncoding | str = NormalMapEncoding.RGB_XYZ
+
+    def __post_init__(self) -> None:
+        try:
+            mode = NormalMapMode(self.mode)
+            convention = NormalYConvention(self.y_convention)
+            encoding = NormalMapEncoding(self.encoding)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("unsupported normal-map mode, convention or encoding") from exc
+        if mode is NormalMapMode.DISABLED:
+            raise ValueError("disabled normal mapping must use a None descriptor")
+        texture_id = validate_normal_texture_id(self.texture_id)
+        if mode is NormalMapMode.EXPLICIT and texture_id is None:
+            raise ValueError("explicit normal mapping requires normal_texture_id")
+        object.__setattr__(self, "mode", mode)
+        object.__setattr__(self, "texture_id", texture_id)
+        object.__setattr__(self, "strength", validate_normal_strength(self.strength))
+        object.__setattr__(self, "y_convention", convention)
+        object.__setattr__(self, "encoding", encoding)
+
+
+@dataclass(frozen=True)
 class MaterialDescriptor:
     color: Color = field(default_factory=lambda: Color(1.0, 1.0, 1.0))
     opacity: float = 1.0
@@ -262,6 +306,7 @@ class MaterialDescriptor:
     blend_mode: str = "normal"
     source_region: SpriteRegion | None = None
     light_response: MaterialLightResponse | None = None
+    normal_map: NormalMapDescriptor | None = None
 
     def __post_init__(self) -> None:
         opacity = _finite(self.opacity, "opacity")
@@ -276,6 +321,8 @@ class MaterialDescriptor:
             self.light_response, MaterialLightResponse
         ):
             raise TypeError("light_response must be MaterialLightResponse or None")
+        if self.normal_map is not None and not isinstance(self.normal_map, NormalMapDescriptor):
+            raise TypeError("normal_map must be NormalMapDescriptor or None")
 
 
 @dataclass(frozen=True)

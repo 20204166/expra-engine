@@ -10,7 +10,9 @@ from io import BytesIO
 from typing import Any, cast
 
 from expra_engine.observability import ObservabilityWatcher
+from expra_engine.runtime.normal_mapping import NormalMapResolver
 from expra_engine.runtime.pygame_lighting import PygameLightingPass
+from expra_engine.runtime.pygame_normal_mapping import PygameNormalMapCache
 from expra_engine.runtime.pygame_renderer import PygameRenderer, PygameResourceProvider
 from expra_engine.runtime.render_diagnostics import RenderDiagnostics
 from expra_engine.runtime.rendering import (
@@ -411,6 +413,8 @@ def render_editor_frame_to_tk_image(
     observer: ObservabilityWatcher | None = None,
     photo_image_reuse: Any | None = None,
     lighting_pass: PygameLightingPass | None = None,
+    normal_map_resolver: NormalMapResolver | None = None,
+    normal_map_cache: PygameNormalMapCache | None = None,
 ) -> Any | None:
     """Render a complete editor frame, or return ``None`` for Tk fallback.
 
@@ -463,6 +467,14 @@ def render_editor_frame_to_tk_image(
                 diagnostics=diagnostics,
                 observer=observer,
                 lighting_pass=lighting_pass,
+                normal_map_resolver=(
+                    normal_map_resolver
+                    if normal_map_resolver is not None
+                    else NormalMapResolver(resource_service)
+                    if resource_service is not None
+                    else None
+                ),
+                normal_map_cache=normal_map_cache,
             )
 
         return _render_pillow_bridge(
@@ -524,6 +536,10 @@ class EditorPixelRenderer:
         self._photo_image: Any | None = None
         self._photo_image_master: Any | None = None
         self._lighting_pass: PygameLightingPass | None = None
+        self._normal_map_resolver: NormalMapResolver | None = (
+            NormalMapResolver(resource_service) if resource_service is not None else None
+        )
+        self._normal_map_cache: PygameNormalMapCache | None = None
 
     @property
     def resource_service(self) -> Any | None:
@@ -544,6 +560,12 @@ class EditorPixelRenderer:
         self._resource_service = resource_service
         self._provider = None
         self._provider_resources = None
+        self._normal_map_resolver = (
+            NormalMapResolver(resource_service) if resource_service is not None else None
+        )
+        if self._normal_map_cache is not None:
+            self._normal_map_cache.clear()
+        self._normal_map_cache = None
         self._diagnostics.clear()
         self._last_image = None
         self._photo_image = None
@@ -555,6 +577,12 @@ class EditorPixelRenderer:
         """Discard backend state and any image retained for failure recovery."""
         self._provider = None
         self._provider_resources = None
+        if self._normal_map_resolver is not None:
+            self._normal_map_resolver.clear()
+        self._normal_map_resolver = None
+        if self._normal_map_cache is not None:
+            self._normal_map_cache.clear()
+        self._normal_map_cache = None
         self._diagnostics.clear()
         self._last_image = None
         self._photo_image = None
@@ -577,6 +605,10 @@ class EditorPixelRenderer:
 
             if self._lighting_pass is None or self._lighting_pass.pygame is not pygame:
                 self._lighting_pass = PygameLightingPass(pygame)
+            if self._normal_map_cache is None and any(
+                item.material.normal_map is not None for item in frame.items
+            ):
+                self._normal_map_cache = PygameNormalMapCache(pygame)
 
             if (
                 self._resource_service is not None
@@ -586,6 +618,8 @@ class EditorPixelRenderer:
                     pygame, self._resource_service, observer=self._observer
                 )
                 self._provider_resources = self._resource_service
+            if self._resource_service is not None and self._normal_map_resolver is None:
+                self._normal_map_resolver = NormalMapResolver(self._resource_service)
             if self._photo_image_master is not image_master:
                 self._photo_image = None
                 self._photo_image_master = image_master
@@ -603,6 +637,8 @@ class EditorPixelRenderer:
                 observer=self._observer,
                 photo_image_reuse=self._photo_image,
                 lighting_pass=self._lighting_pass,
+                normal_map_resolver=self._normal_map_resolver,
+                normal_map_cache=self._normal_map_cache,
             )
             if image is not None:
                 self._last_image = image

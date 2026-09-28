@@ -61,6 +61,7 @@ class Light2DComponent(Component):
         visible: bool = True,
         *,
         enabled: bool = True,
+        height: float = 1.0,
     ) -> None:
         if type(enabled) is not bool:
             raise ValueError("enabled must be a bool")
@@ -75,6 +76,7 @@ class Light2DComponent(Component):
         self.radius = _finite(radius, "radius")
         self.falloff = _finite(falloff, "falloff")
         self.cone_angle = _finite(cone_angle, "cone_angle")
+        self.height = _finite(height, "height")
         if not 0.0 <= self.energy <= 8.0:
             raise ValueError("energy must be between 0 and 8")
         if self.radius <= 0.0:
@@ -83,6 +85,8 @@ class Light2DComponent(Component):
             raise ValueError("falloff must be between 0.1 and 8")
         if not 0.0 < self.cone_angle <= 360.0:
             raise ValueError("cone_angle must be greater than 0 and at most 360")
+        if not 0.0 <= self.height <= 1024.0:
+            raise ValueError("height must be between 0 and 1024")
         self.visible = visible
 
     def to_dict(self) -> dict[str, Any]:
@@ -96,6 +100,7 @@ class Light2DComponent(Component):
             "radius": self.radius,
             "falloff": self.falloff,
             "cone_angle": self.cone_angle,
+            "height": self.height,
         }
 
     @classmethod
@@ -107,6 +112,7 @@ class Light2DComponent(Component):
             radius=data.get("radius", 4.0),
             falloff=data.get("falloff", 2.0),
             cone_angle=data.get("cone_angle", 60.0),
+            height=data.get("height", 1.0),
             visible=data.get("visible", True),
             enabled=data.get("enabled", True),
         )

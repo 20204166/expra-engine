@@ -10,6 +10,7 @@ from expra_engine.core.scene import Scene
 from expra_engine.core.world import World
 from expra_engine.messages import project as project_messages
 from expra_engine.observability import ObservabilityWatcher
+from expra_engine.runtime.normal_mapping import NormalMapResolver
 from expra_engine.runtime.pygame_renderer import (
     PygameRenderer,
     PygameRenderFrame,
@@ -41,13 +42,13 @@ def run_project(project_dir: Path | str = ".") -> None:
         engine.set_scene(document)
     else:
         raise ProjectError(project_messages.project_entrypoint_document_unsupported())
+    resources = project.resource_service(observer=observer)
     renderer = PygameRenderer(
         pygame,
         None,
         screen_size=(960, 640),
-        resource_provider=PygameResourceProvider(
-            pygame, project.resource_service(observer=observer)
-        ),
+        resource_provider=PygameResourceProvider(pygame, resources),
+        normal_map_resolver=NormalMapResolver(resources),
         observer=observer,
     )
 

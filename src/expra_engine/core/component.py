@@ -351,6 +351,31 @@ def _register_visual_components() -> None:
                 PropertyDescriptor("emission", "Emission", float, 0.0, minimum=0.0, maximum=1.0),
                 PropertyDescriptor("emission_color", "Emission Color", tuple, (1.0, 1.0, 1.0, 1.0)),
                 PropertyDescriptor("toon_steps", "Toon Steps", int, 3, minimum=2, maximum=8),
+                PropertyDescriptor(
+                    "normal_map_mode",
+                    "Normal Mapping",
+                    str,
+                    "disabled",
+                    enum_values=("disabled", "explicit", "auto_pair"),
+                ),
+                PropertyDescriptor("normal_texture_id", "Normal Texture", str, ""),
+                PropertyDescriptor(
+                    "normal_strength", "Normal Strength", float, 1.0, minimum=0.0, maximum=4.0
+                ),
+                PropertyDescriptor(
+                    "normal_y_convention",
+                    "Normal Y Convention",
+                    str,
+                    "opengl",
+                    enum_values=("opengl", "directx"),
+                ),
+                PropertyDescriptor(
+                    "normal_encoding",
+                    "Normal Encoding",
+                    str,
+                    "rgb_xyz",
+                    enum_values=("rgb_xyz", "rg_xy"),
+                ),
                 PropertyDescriptor("enabled", "Enabled", bool, True),
             ),
         ),
@@ -394,6 +419,7 @@ def _register_visual_components() -> None:
                 PropertyDescriptor(
                     "cone_angle", "Cone Angle", float, 60.0, minimum=0.000001, maximum=360.0
                 ),
+                PropertyDescriptor("height", "Normal Map Height", float, 1.0, minimum=0.0, maximum=1024.0),
                 PropertyDescriptor("visible", "Visible", bool, True),
                 PropertyDescriptor("enabled", "Enabled", bool, True),
             ),

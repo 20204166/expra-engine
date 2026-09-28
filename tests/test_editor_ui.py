@@ -19,6 +19,7 @@ from expra_engine.editor.window_placement import initial_hierarchy_width
 from expra_engine.filesystem import ResourceId
 from expra_engine.observability import ObservabilityWatcher
 from expra_engine.runtime.collider import ColliderComponent
+from expra_engine.runtime.material_component import MaterialComponent
 from expra_engine.runtime.rendering import Color
 from expra_engine.runtime.script_component import ScriptComponent
 from expra_engine.runtime.visual_components import PrimitiveComponent, TextComponent
@@ -387,6 +388,32 @@ def test_inspector_value_conversion_uses_descriptor_rejection_policy() -> None:
 
 @unittest.skipUnless(DISPLAY_AVAILABLE, "no display for real Tk editor tests")
 class EditorPanelTests(unittest.TestCase):
+    def test_material_inspector_routes_normal_map_preview_and_level_auto_map_actions(self) -> None:
+        calls: list[tuple[object, ...]] = []
+        panel = InspectorPanel(
+            self.root,
+            on_normal_map_preview=lambda entity_id, index: calls.append(("preview", entity_id, index)),
+            on_normal_map_auto_map=lambda: calls.append(("auto_map",)),
+        )
+        panel.pack(fill="both", expand=True)
+        scene = Scene("Normal map actions")
+        entity = scene.create_entity("Stone")
+        entity.add_component(MaterialComponent(normal_map_mode="auto_pair"))
+        panel.render(entity)
+        self.root.update_idletasks()
+
+        def descendants(widget: tk.Widget) -> list[tk.Widget]:
+            children = list(widget.winfo_children())
+            return children + [child for item in children for child in descendants(item)]
+
+        buttons = [widget for widget in descendants(panel._content) if isinstance(widget, ttk.Button)]
+        preview = next(button for button in buttons if button.cget("text") == "Preview Normal Map")
+        auto_map = next(button for button in buttons if button.cget("text") == "Auto-map this Level…")
+        preview.invoke()
+        auto_map.invoke()
+
+        self.assertEqual(calls, [("preview", entity.entity_id, 0), ("auto_map",)])
+
     def test_editor_entity_marker_roles_are_name_based(self) -> None:
         self.assertEqual(editor_entity_kind("Camera"), "camera")
         self.assertEqual(editor_entity_kind("Camera Marker"), "camera_compact")

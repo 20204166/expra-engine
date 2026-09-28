@@ -8,6 +8,7 @@ from collections import OrderedDict
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import replace
+from importlib.util import find_spec
 from typing import Any, cast
 
 from expra_engine.observability import ObservabilityWatcher
@@ -15,6 +16,7 @@ from expra_engine.runtime.canvas_effects import modulate_color
 from expra_engine.runtime.pygame_geometry import draw_rounded_rectangle, projected_rectangle_points
 from expra_engine.runtime.pygame_lighting import PygameLightingPass
 from expra_engine.runtime.pygame_lighting_renderer import PygameLightingRenderMixin
+from expra_engine.runtime.pygame_normal_mapping import PygameNormalMapCache
 from expra_engine.runtime.pygame_renderer_legacy import (
     LegacyPygameRenderMixin,
     RenderFrame,
@@ -61,6 +63,8 @@ class PygameRenderer(PygameLightingRenderMixin, LegacyPygameRenderMixin):
         diagnostics: RenderDiagnostics | None = None,
         observer: ObservabilityWatcher | None = None,
         lighting_pass: PygameLightingPass | None = None,
+        normal_map_resolver: Any | None = None,
+        normal_map_cache: PygameNormalMapCache | None = None,
     ) -> None:
         self.pygame = pygame_module
         self.surface = surface
@@ -83,6 +87,9 @@ class PygameRenderer(PygameLightingRenderMixin, LegacyPygameRenderMixin):
         self._owns_lighting_pass = lighting_pass is None
         self._lighting_pass = lighting_pass or PygameLightingPass(pygame_module)
         self._lighting_failed = False
+        self._normal_map_resolver = normal_map_resolver
+        self._owns_normal_map_cache = normal_map_cache is None
+        self._normal_map_cache = normal_map_cache
         try:
             self.font = self._font_provider(None, font_size)
         except Exception:  # noqa: BLE001 - backend/font failures must not abort a frame
@@ -102,6 +109,12 @@ class PygameRenderer(PygameLightingRenderMixin, LegacyPygameRenderMixin):
             screen_texture=False,
             screen_texture_mipmaps=False,
             lighting_2d=self._lighting_pass.supported,
+            normal_mapping_2d=(
+                resource_provider is not None
+                and find_spec("numpy") is not None
+                and callable(getattr(getattr(pygame_module, "surfarray", None), "array3d", None))
+                and callable(getattr(getattr(pygame_module, "surfarray", None), "blit_array", None))
+            ),
         )
         self._update_screen_capabilities()
 
@@ -142,6 +155,9 @@ class PygameRenderer(PygameLightingRenderMixin, LegacyPygameRenderMixin):
     def stop(self) -> None:
         self._screen_pipeline.clear()
         self._material_scratch = None
+        if self._owns_normal_map_cache and self._normal_map_cache is not None:
+            self._normal_map_cache.clear()
+            self._normal_map_cache = None
         if self._owns_lighting_pass:
             self._lighting_pass.clear()
         self._diagnostics.clear()

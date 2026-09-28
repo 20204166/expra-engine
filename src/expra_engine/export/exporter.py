@@ -11,6 +11,7 @@ Atomic build contract:
 from __future__ import annotations
 
 import datetime
+import re
 import shutil
 import tempfile
 import threading
@@ -31,7 +32,7 @@ from expra_engine.export.plan import ExportPlan, ExportTarget, RuntimeProfile
 from expra_engine.export.verify import verify_export
 
 if TYPE_CHECKING:
-    from expra_engine.filesystem import ResourceService
+    from expra_engine.filesystem import ResourceId, ResourceService
 
 
 class ExportError(RuntimeError):
@@ -117,6 +118,12 @@ class GameExporter:
     ) -> None:
         game_source_dir = build_dir / safe_name
         runtime_dir = build_dir / "runtime"
+        normal_resource_ids, uses_normal_mapping, discovered_resource_service, normal_warnings = (
+            _discover_normal_map_resources(plan)
+        )
+        resource_service = plan.resource_service or discovered_resource_service
+        for warning in normal_warnings:
+            emit(ExportPhase.PLANNING, warning, 5)
 
         if plan.target == ExportTarget.WINDOWS:
             python_dir = runtime_dir / "python"
@@ -135,14 +142,15 @@ class GameExporter:
             extra_exclude_patterns=plan.exclude_patterns,
             include_source=True,
         )
-        if plan.resource_service is not None and plan.resource_ids:
+        resolved_resource_ids = tuple(dict.fromkeys((*plan.resource_ids, *normal_resource_ids)))
+        if resource_service is not None and resolved_resource_ids:
             resolved_manifest = AssetManifest.collect(
                 plan.project_dir,
-                resource_service=plan.resource_service,
-                logical_ids=plan.resource_ids,
+                resource_service=resource_service,
+                logical_ids=resolved_resource_ids,
             )
             asset_manifest = _merge_manifests(asset_manifest, resolved_manifest)
-        _copy_assets(plan.project_dir, game_source_dir, asset_manifest, plan.resource_service)
+        _copy_assets(plan.project_dir, game_source_dir, asset_manifest, resource_service)
 
         # Stage 2: bytecode (optional)
         if plan.compile_bytecode:
@@ -179,7 +187,7 @@ class GameExporter:
             return
         if plan.runtime_profile is RuntimeProfile.PYGAME:
             _stage_pygame_runtime(site_packages)
-        packages = _runtime_packages(plan)
+        packages = _runtime_packages(plan, include_numpy=uses_normal_mapping)
         packager.install_packages(
             packages,
             plan.python_version,
@@ -310,11 +318,87 @@ def _stage_pygame_runtime(site_packages: Path) -> None:
     shutil.copytree(source_root / "runtime", runtime_root)
 
 
-def _runtime_packages(plan: ExportPlan) -> list[str]:
+def _runtime_packages(plan: ExportPlan, *, include_numpy: bool = False) -> list[str]:
     packages = list(plan.extra_packages)
     if plan.runtime_profile is RuntimeProfile.PYGAME:
         packages.insert(0, "pygame>=2.6")
+        if include_numpy and not any(
+            re.split(r"[<>=!~\[\s]", package.strip(), maxsplit=1)[0].casefold() == "numpy"
+            for package in packages
+        ):
+            packages.append("numpy>=2.0,<3")
     return packages
+
+
+def _discover_normal_map_resources(
+    plan: ExportPlan,
+) -> tuple[tuple[ResourceId, ...], bool, ResourceService | None, tuple[str, ...]]:
+    """Resolve statically authored normal bindings through the runtime resolver."""
+    if plan.runtime_profile is not RuntimeProfile.PYGAME:
+        return (), False, plan.resource_service, ()
+    if not (plan.project_dir / "project.json").is_file():
+        return (), False, plan.resource_service, ()
+
+    from expra_engine.core.project import Project
+    from expra_engine.core.scene import Scene
+    from expra_engine.core.world import World
+    from expra_engine.filesystem import ResourceId
+    from expra_engine.runtime.material_component import MaterialComponent
+    from expra_engine.runtime.normal_mapping import (
+        NormalMapMode,
+        NormalMapResolutionStatus,
+        NormalMapResolver,
+        normal_texture_sources,
+    )
+
+    project = Project.load(plan.project_dir)
+    resources = plan.resource_service or project.resource_service()
+    resolver = NormalMapResolver(resources)
+    document_paths = list(dict.fromkeys((*project.scene_paths(), *project.level_paths())))
+    for world_path in project.world_paths():
+        world = project.read_document(world_path)
+        if isinstance(world, World):
+            document_paths.extend(level.resource_path for level in world.levels)
+
+    normal_ids: set[ResourceId] = set()
+    warnings: set[str] = set()
+    for document_path in dict.fromkeys(document_paths):
+        document = project.read_document(document_path)
+        if not isinstance(document, Scene):
+            continue
+        for entity in document.entities:
+            material = entity.get_component(MaterialComponent)
+            if material is None or not material.enabled:
+                continue
+            descriptor = material.normal_map_descriptor
+            if descriptor is None:
+                continue
+            for _visual_name, base_texture_id in normal_texture_sources(entity):
+                resolution = resolver.inspect(
+                    base_texture_id,
+                    descriptor.mode,
+                    explicit_texture_id=descriptor.texture_id,
+                )
+                if resolution.status is NormalMapResolutionStatus.RESOLVED:
+                    assert resolution.normal_texture_id is not None
+                    resolver.register_dependency(base_texture_id, resolution.normal_texture_id)
+                    normal_ids.add(ResourceId.parse(resolution.normal_texture_id))
+                elif descriptor.mode is NormalMapMode.EXPLICIT:
+                    raise ValueError(
+                        f"Explicit normal map for {entity.name!r} is unavailable: "
+                        f"{resolution.detail or resolution.status.value}"
+                    )
+                else:
+                    warnings.add(
+                        f"Normal auto-pair for {entity.name!r} is unavailable; "
+                        "the exported game will use flat lighting"
+                    )
+    return (
+        tuple(sorted(normal_ids, key=str)),
+        bool(normal_ids),
+        resources,
+        tuple(sorted(warnings)),
+    )
 
 
 def _merge_manifests(*manifests: AssetManifest) -> AssetManifest:

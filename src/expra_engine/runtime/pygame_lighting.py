@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from collections import OrderedDict
+from dataclasses import replace
 from typing import Any
 
 from expra_engine.runtime.rendering import Color, LightDescriptor, RenderContext
@@ -127,6 +128,13 @@ class PygameLightingPass:
                 special_flags=self.pygame.BLEND_RGBA_ADD,
             )
         return lightmap
+
+    def normal_map_mask_for(
+        self, light: LightDescriptor, context: RenderContext
+    ) -> tuple[Any, tuple[float, float], tuple[float, float]]:
+        """Return the canonical uncolored attenuation/cone image for N·L work."""
+        geometry_light = replace(light, color=Color(1.0, 1.0, 1.0, 1.0), energy=1.0)
+        return self._image_for(geometry_light, context, diffuse=1.0, toon_steps=None)
 
     def _get_lightmap(self, size: tuple[int, int]) -> Any:
         if self._lightmap is None or self._lightmap_size != size:

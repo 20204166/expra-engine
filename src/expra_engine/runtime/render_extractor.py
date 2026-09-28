@@ -18,6 +18,7 @@ from expra_engine.runtime.rendering import (
     Color,
     LightDescriptor,
     MaterialDescriptor,
+    NormalMapDescriptor,
     PrimitiveDescriptor,
     RenderFrame,
     RenderItem,
@@ -70,6 +71,7 @@ def _item(
     transform: Transform,
     player: AnimatedSpritePlayer2D | None = None,
     light_response: MaterialLightResponse | None = None,
+    normal_map: NormalMapDescriptor | None = None,
 ) -> RenderItem:
     if isinstance(visual, PrimitiveComponent):
         if visual.kind not in {"point", "rectangle", "circle", "rounded_rectangle"}:
@@ -97,6 +99,7 @@ def _item(
             texture_id=visual.asset,
             source_region=visual.region,
             light_response=light_response,
+            normal_map=normal_map,
         )
         payload = visual.to_dict()
         layer = visual.layer
@@ -111,6 +114,7 @@ def _item(
             texture_id=view.asset_id,
             source_region=view.region,
             light_response=light_response,
+            normal_map=normal_map,
         )
         payload = visual.to_dict()
         layer = view.layer
@@ -218,6 +222,7 @@ def extract_render_frame(
                             visual.falloff,
                             direction_degrees=transform.rotation,
                             cone_angle=visual.cone_angle,
+                            height=visual.height,
                         )
                     )
                 except (TypeError, ValueError, OverflowError):
@@ -241,6 +246,13 @@ def extract_render_frame(
                             material.response
                             if (material := entity.get_component(MaterialComponent)) is not None
                             and material.enabled
+                            else None
+                        ),
+                        (
+                            material.normal_map_descriptor
+                            if material is not None
+                            and material.enabled
+                            and isinstance(visual, (SpriteComponent, AnimatedSprite2DComponent))
                             else None
                         ),
                     )

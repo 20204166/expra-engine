@@ -6,7 +6,14 @@ from typing import Any
 
 from expra_engine.core.component import Component
 from expra_engine.runtime.material_lighting import LightingMode, MaterialLightResponse
-from expra_engine.runtime.rendering import Color
+from expra_engine.runtime.normal_mapping import (
+    NormalMapEncoding,
+    NormalMapMode,
+    NormalYConvention,
+    validate_normal_strength,
+    validate_normal_texture_id,
+)
+from expra_engine.runtime.rendering import Color, NormalMapDescriptor
 
 __all__ = ("MaterialComponent",)
 
@@ -28,6 +35,11 @@ class MaterialComponent(Component):
         toon_steps: int = 3,
         *,
         enabled: bool = True,
+        normal_map_mode: NormalMapMode | str = NormalMapMode.DISABLED,
+        normal_texture_id: str | None = None,
+        normal_strength: float = 1.0,
+        normal_y_convention: NormalYConvention | str = NormalYConvention.OPENGL,
+        normal_encoding: NormalMapEncoding | str = NormalMapEncoding.RGB_XYZ,
     ) -> None:
         super().__init__(enabled=enabled)
         response = MaterialLightResponse(
@@ -46,6 +58,76 @@ class MaterialComponent(Component):
         self.emission = response.emission
         self.emission_color = response.emission_color
         self.toon_steps = response.toon_steps
+        try:
+            mode = NormalMapMode(normal_map_mode)
+            y_convention = NormalYConvention(normal_y_convention)
+            encoding = NormalMapEncoding(normal_encoding)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("unsupported normal-map mode, convention or encoding") from exc
+        texture_id = validate_normal_texture_id(normal_texture_id)
+        strength = validate_normal_strength(normal_strength)
+        if mode is NormalMapMode.EXPLICIT and texture_id is None:
+            raise ValueError("explicit normal mapping requires normal_texture_id")
+        self._normal_map_mode = mode.value
+        self._normal_texture_id = texture_id
+        self._normal_strength = strength
+        self._normal_y_convention = y_convention.value
+        self._normal_encoding = encoding.value
+
+    @property
+    def normal_map_mode(self) -> str:
+        return self._normal_map_mode
+
+    @normal_map_mode.setter
+    def normal_map_mode(self, value: NormalMapMode | str) -> None:
+        try:
+            mode = NormalMapMode(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("unsupported normal-map mode") from exc
+        if mode is NormalMapMode.EXPLICIT and self._normal_texture_id is None:
+            raise ValueError("explicit normal mapping requires normal_texture_id")
+        self._normal_map_mode = mode.value
+
+    @property
+    def normal_texture_id(self) -> str | None:
+        return self._normal_texture_id
+
+    @normal_texture_id.setter
+    def normal_texture_id(self, value: str | None) -> None:
+        texture_id = validate_normal_texture_id(value)
+        if self._normal_map_mode == NormalMapMode.EXPLICIT.value and texture_id is None:
+            raise ValueError("explicit normal mapping requires normal_texture_id")
+        self._normal_texture_id = texture_id
+
+    @property
+    def normal_strength(self) -> float:
+        return self._normal_strength
+
+    @normal_strength.setter
+    def normal_strength(self, value: float) -> None:
+        self._normal_strength = validate_normal_strength(value)
+
+    @property
+    def normal_y_convention(self) -> str:
+        return self._normal_y_convention
+
+    @normal_y_convention.setter
+    def normal_y_convention(self, value: NormalYConvention | str) -> None:
+        try:
+            self._normal_y_convention = NormalYConvention(value).value
+        except (TypeError, ValueError) as exc:
+            raise ValueError("unsupported normal-map Y convention") from exc
+
+    @property
+    def normal_encoding(self) -> str:
+        return self._normal_encoding
+
+    @normal_encoding.setter
+    def normal_encoding(self, value: NormalMapEncoding | str) -> None:
+        try:
+            self._normal_encoding = NormalMapEncoding(value).value
+        except (TypeError, ValueError) as exc:
+            raise ValueError("unsupported normal-map encoding") from exc
 
     @property
     def emission_color(self) -> Color:
@@ -66,6 +148,18 @@ class MaterialComponent(Component):
             toon_steps=self.toon_steps,
         )
 
+    @property
+    def normal_map_descriptor(self) -> NormalMapDescriptor | None:
+        if self.normal_map_mode == NormalMapMode.DISABLED.value:
+            return None
+        return NormalMapDescriptor(
+            mode=self.normal_map_mode,
+            texture_id=self.normal_texture_id,
+            strength=self.normal_strength,
+            y_convention=self.normal_y_convention,
+            encoding=self.normal_encoding,
+        )
+
     def to_dict(self) -> dict[str, Any]:
         response = self.response
         return {
@@ -82,6 +176,11 @@ class MaterialComponent(Component):
                 response.emission_color.alpha,
             ],
             "toon_steps": response.toon_steps,
+            "normal_map_mode": self.normal_map_mode,
+            "normal_texture_id": self.normal_texture_id,
+            "normal_strength": self.normal_strength,
+            "normal_y_convention": self.normal_y_convention,
+            "normal_encoding": self.normal_encoding,
         }
 
     @classmethod
@@ -94,4 +193,9 @@ class MaterialComponent(Component):
             emission_color=data.get("emission_color", (1.0, 1.0, 1.0, 1.0)),
             toon_steps=data.get("toon_steps", 3),
             enabled=bool(data.get("enabled", True)),
+            normal_map_mode=data.get("normal_map_mode", NormalMapMode.DISABLED.value),
+            normal_texture_id=data.get("normal_texture_id"),
+            normal_strength=data.get("normal_strength", 1.0),
+            normal_y_convention=data.get("normal_y_convention", NormalYConvention.OPENGL.value),
+            normal_encoding=data.get("normal_encoding", NormalMapEncoding.RGB_XYZ.value),
         )

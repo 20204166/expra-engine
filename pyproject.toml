@@ -15,6 +15,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+normal-mapping = ["numpy>=2.0,<3"]
 dev = [
     "ruff>=0.6",
     "pyright>=1.1",

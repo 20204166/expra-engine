@@ -14,6 +14,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 from expra_engine._version import __version__
+from expra_engine.core.project import Project
+from expra_engine.core.scene import Scene
 from expra_engine.export.events import ExportPhase, ExportProgressEvent
 from expra_engine.export.exporter import (
     ExportError,
@@ -26,6 +28,8 @@ from expra_engine.export.packager import TargetPackager
 from expra_engine.export.plan import ExportPlan, ExportTarget, PythonArch, RuntimeProfile
 from expra_engine.export.verify import verify_export
 from expra_engine.filesystem import DirectoryMount, MountSpec, ResourceResolver, ResourceService
+from expra_engine.runtime.material_component import MaterialComponent
+from expra_engine.runtime.visual_components import SpriteComponent
 
 
 class _NoopPackager(TargetPackager):
@@ -133,6 +137,78 @@ class TestGameExporter(unittest.TestCase):
 
         manifest = json.loads((out / "build_manifest.json").read_text())
         self.assertEqual(manifest["runtime_profile"], "pygame")
+
+    def test_pygame_export_discovers_normal_resources_and_adds_numpy(self) -> None:
+        project_path = self._tmp / "normal_game"
+        project = Project.create("Normal Game", project_path)
+        (project_path / "assets" / "stone.png").write_bytes(b"albedo")
+        (project_path / "assets" / "stone_normal.png").write_bytes(b"normal")
+        scene = Scene("normal export")
+        entity = scene.create_entity("stone")
+        entity.add_component(SpriteComponent("assets://stone.png"))
+        entity.add_component(MaterialComponent(normal_map_mode="auto_pair"))
+        project.save_document(scene, "scenes/main.scene.pb")
+        plan = self._plan(
+            project_dir=project_path,
+            entry_point="__main__.py",
+            runtime_profile=RuntimeProfile.PYGAME,
+            resource_ids=("assets://stone.png",),
+        )
+        packager = _NoopPackager(plan.target)
+
+        out = self._export(plan, packager=packager)
+
+        self.assertEqual(packager.packages, ["pygame>=2.6", "numpy>=2.0,<3"])
+        manifest = AssetManifest.from_json((out / "asset_manifest.json").read_text())
+        logical_ids = {alias for entry in manifest.entries for alias in entry.aliases}
+        self.assertIn("assets://stone_normal.png", logical_ids)
+
+    def test_pygame_export_rejects_a_missing_explicit_normal_resource(self) -> None:
+        project_path = self._tmp / "missing_normal_game"
+        project = Project.create("Missing Normal Game", project_path)
+        (project_path / "assets" / "stone.png").write_bytes(b"albedo")
+        scene = Scene("missing normal export")
+        entity = scene.create_entity("stone")
+        entity.add_component(SpriteComponent("assets://stone.png"))
+        entity.add_component(
+            MaterialComponent(
+                normal_map_mode="explicit",
+                normal_texture_id="assets://missing_normal.png",
+            )
+        )
+        project.save_document(scene, "scenes/main.scene.pb")
+        plan = self._plan(
+            project_dir=project_path,
+            entry_point="__main__.py",
+            runtime_profile=RuntimeProfile.PYGAME,
+            resource_service=project.resource_service(),
+        )
+
+        with self.assertRaisesRegex(ExportError, "Explicit normal map"):
+            self._export(plan)
+
+    def test_pygame_export_warns_for_a_missing_auto_pair_but_still_succeeds(self) -> None:
+        project_path = self._tmp / "missing_pair_game"
+        project = Project.create("Missing Pair Game", project_path)
+        (project_path / "assets" / "stone.png").write_bytes(b"albedo")
+        scene = Scene("missing pair export")
+        entity = scene.create_entity("stone")
+        entity.add_component(SpriteComponent("assets://stone.png"))
+        entity.add_component(MaterialComponent(normal_map_mode="auto_pair"))
+        project.save_document(scene, "scenes/main.scene.pb")
+        plan = self._plan(
+            project_dir=project_path,
+            entry_point="__main__.py",
+            runtime_profile=RuntimeProfile.PYGAME,
+        )
+        packager = _NoopPackager(plan.target)
+        events: list[ExportProgressEvent] = []
+
+        self._export(plan, packager=packager, progress=events.append)
+
+        warnings = [event.message for event in events if event.phase is ExportPhase.PLANNING]
+        self.assertTrue(any("flat lighting" in message for message in warnings))
+        self.assertEqual(packager.packages, ["pygame>=2.6"])
 
     def test_linux_runtime_profile_uses_python_specific_site_packages(self) -> None:
         plan = self._plan(
