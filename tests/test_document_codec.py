@@ -22,6 +22,7 @@ from expra_engine.core.scene.document_codec import (
     kind_for_document_path,
     to_json,
 )
+from expra_engine.schema.generated import common_pb2, level_pb2, scene_pb2
 
 
 def _level() -> Level:
@@ -215,6 +216,89 @@ def test_document_path_kind_recognizes_typed_and_legacy_extensions() -> None:
     assert kind_for_document_path("scenes/door.json") is None
     with pytest.raises(DocumentCodecError, match="typed"):
         kind_for_document_path("data/document.pb")
+
+
+# ---------------------------------------------------------------------------
+# Fail-closed value validation — unrepresentable or type-confused schema values
+# ---------------------------------------------------------------------------
+
+
+def _scene_document_with_payload(payload_value: object) -> dict[str, object]:
+    return {
+        "kind": "scene",
+        "scene_id": "scene-1",
+        "name": "Values",
+        "entities": [
+            {
+                "entity_id": "root",
+                "name": "Root",
+                "components": [{"type": "vendor.future", "payload": {"value": payload_value}}],
+            }
+        ],
+    }
+
+
+def test_encode_protobuf_rejects_integer_outside_int64_range() -> None:
+    with pytest.raises(DocumentCodecError, match="int64"):
+        encode_protobuf(_scene_document_with_payload(2**63))
+    with pytest.raises(DocumentCodecError, match="int64"):
+        encode_protobuf(_scene_document_with_payload(-(2**63) - 1))
+
+
+def test_encode_protobuf_rejects_non_finite_float() -> None:
+    with pytest.raises(DocumentCodecError, match="finite"):
+        encode_protobuf(_scene_document_with_payload(float("nan")))
+    with pytest.raises(DocumentCodecError, match="finite"):
+        encode_protobuf(_scene_document_with_payload(float("inf")))
+
+
+def test_to_json_rejects_non_finite_values() -> None:
+    with pytest.raises(DocumentCodecError, match="finite"):
+        to_json({"camera": {"zoom": float("nan")}})
+
+
+def test_document_rejects_bool_schema_version() -> None:
+    document = {
+        "kind": "scene",
+        "scene_id": "scene-1",
+        "name": "Values",
+        "schema_version": True,
+        "entities": [],
+    }
+
+    with pytest.raises(DocumentCodecError, match="schema_version"):
+        from_json(document)
+    with pytest.raises(DocumentCodecError, match="schema_version"):
+        encode_protobuf(document)
+
+
+def _foreign_nan_scene_payload() -> bytes:
+    value = common_pb2.JsonValue()  # type: ignore[attr-defined]
+    value.float_value = float("nan")
+    payload = common_pb2.JsonObject()  # type: ignore[attr-defined]
+    payload.values["value"].CopyFrom(value)
+    component = common_pb2.Component()  # type: ignore[attr-defined]
+    component.type_id = "vendor.future"
+    component.payload.CopyFrom(payload)
+    component.payload_explicit = True
+    entity = common_pb2.Entity()  # type: ignore[attr-defined]
+    entity.entity_id = "root"
+    entity.name = "Root"
+    entity.components.add().CopyFrom(component)
+    scene = scene_pb2.SceneDocument()  # type: ignore[attr-defined]
+    scene.schema_version = 1
+    scene.document_kind = "scene"
+    scene.scene_id = "scene-1"
+    scene.name = "Values"
+    scene.entities.add().CopyFrom(entity)
+    envelope = level_pb2.DocumentEnvelope()  # type: ignore[attr-defined]
+    envelope.scene.CopyFrom(scene)
+    return envelope.SerializeToString(deterministic=True)
+
+
+def test_decode_protobuf_rejects_non_finite_float() -> None:
+    with pytest.raises(DocumentCodecError, match="finite"):
+        decode_protobuf(_foreign_nan_scene_payload())
 
 
 # ---------------------------------------------------------------------------

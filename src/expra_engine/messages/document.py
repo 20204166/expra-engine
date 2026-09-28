@@ -11,3 +11,11 @@ def unsupported_document_kind(kind: str) -> str:
 
 def invalid_world_document(detail: str) -> str:
     return f"invalid World document: {bounded_text(detail, 512)}"
+
+
+def invalid_document_value(detail: str) -> str:
+    return f"document contains a non-finite or unrepresentable value: {bounded_text(detail, 512)}"
+
+
+def document_int_out_of_range() -> str:
+    return "document contains an integer outside the protobuf int64 range"

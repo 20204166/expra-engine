@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -71,7 +72,12 @@ def canonical_pb_path(source: str | Path, kind: DocumentKind) -> str:
 def to_json(document: Scene | World | dict[str, Any]) -> dict[str, Any]:
     """Return the stable, JSON-friendly authoring representation."""
     data = document.to_dict() if isinstance(document, (Scene, World)) else deepcopy(document)
-    return json.loads(json.dumps(data, sort_keys=True, separators=(",", ":")))
+    try:
+        return json.loads(
+            json.dumps(data, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        )
+    except (TypeError, ValueError) as error:
+        raise DocumentCodecError(document_messages.invalid_document_value(str(error))) from error
 
 
 def from_json(document: str | dict[str, Any]) -> Scene | World:
@@ -236,7 +242,7 @@ def _validate_document_data(data: dict[str, Any], kind: str) -> None:
     if not isinstance(data.get("name"), str) or not data["name"].strip():
         raise DocumentCodecError("document requires a non-empty name")
     version = data.get("schema_version", CURRENT_DOCUMENT_SCHEMA_VERSION)
-    if not isinstance(version, int) or version < 1:
+    if type(version) is not int or version < 1:
         raise DocumentCodecError("document schema_version must be a positive integer")
     if version > CURRENT_DOCUMENT_SCHEMA_VERSION:
         raise DocumentCodecError(f"unsupported future document schema: {version}")
@@ -510,6 +516,8 @@ def _value(value: Any) -> Any:
     elif isinstance(value, bool):
         result.bool_value = value
     elif isinstance(value, int) and not isinstance(value, bool):
+        if not -(2**63) <= value <= 2**63 - 1:
+            raise DocumentCodecError(document_messages.document_int_out_of_range())
         result.int_value = value
     elif isinstance(value, float):
         result.float_value = value
@@ -537,7 +545,12 @@ def _value_to_python(value: Any) -> Any:
     if kind == "int_value":
         return value.int_value
     if kind == "float_value":
-        return value.float_value
+        result = value.float_value
+        if not math.isfinite(result):
+            raise DocumentCodecError(
+                document_messages.invalid_document_value("non-finite float")
+            )
+        return result
     if kind == "string_value":
         return value.string_value
     if kind == "object_value":
