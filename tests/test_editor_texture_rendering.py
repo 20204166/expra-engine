@@ -905,6 +905,12 @@ def test_open_project_replaces_viewport_resources(tmp_path: Path) -> None:
         _command_stack=SimpleNamespace(clear=lambda: None, can_undo=False),
         _assets=SimpleNamespace(set_root_directory=lambda _path: None),
         _preferences=EditorPreferences(),
+        _active_document=SimpleNamespace(
+            open=lambda *_args: None,
+            is_dirty=False,
+            mark_saved=lambda *_args: None,
+            document=None,
+        ),
         _selected_id=None,
         _last_save_path=None,
         _root=SimpleNamespace(title=lambda _value: None),
