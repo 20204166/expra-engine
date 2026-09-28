@@ -561,6 +561,24 @@ def test_world_persistent_actor_survives_level_unload_and_source_reload() -> Non
     system.close()
 
 
+def test_cross_owner_persistent_actor_parenting_is_rejected_during_materialization() -> None:
+    from expra_engine.runtime.level_anchor import WorldPersistentActorComponent
+    from expra_engine.runtime.world_materialize import _materialize_world_level
+
+    authored = Level("Town")
+    parent = authored.create_entity("Group", entity_id="group")
+    authored.create_entity(
+        "Courier", entity_id="courier", parent_id=parent.entity_id
+    ).add_component(WorldPersistentActorComponent("courier"))
+
+    with pytest.raises(ValueError, match="Level root"):
+        _materialize_world_level(
+            authored,
+            LevelDescriptor("town", "levels/town.level.pb"),
+            world_id="world",
+        )
+
+
 def test_fresh_world_start_places_primary_actor_at_initial_entrance_in_world_space() -> None:
     from expra_engine.runtime.level_anchor import (
         LevelAnchorComponent,

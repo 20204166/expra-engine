@@ -49,6 +49,22 @@ def test_nonfade_modes_switch_immediately_once_destination_is_ready(mode) -> Non
     assert transition.alpha == 0.0
 
 
+def test_loading_mode_has_no_separate_presentation_yet() -> None:
+    # TransitionMode.LOADING is declared but not yet implemented: it must
+    # currently resolve to the same immediate-switch path as INSTANT and never
+    # enter a fade or loading presentation phase. This pin documents the no-op
+    # so a future loading-indicator implementation is an intentional change.
+    transition = WorldTransitionController()
+    transition.begin("route", "town", "forest", TransitionMode.LOADING)
+    transition.destination_ready()
+    assert transition.status is TransitionStatus.SWITCHING
+
+    transition.complete_switch()
+
+    assert transition.status is TransitionStatus.COMPLETE
+    assert transition.alpha == 0.0
+
+
 def test_destination_failure_never_requests_switch_or_fades_into_invalid_level() -> None:
     transition = WorldTransitionController(fade_duration=0.1)
     transition.begin("route", "town", "forest", TransitionMode.FADE)

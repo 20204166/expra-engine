@@ -110,5 +110,10 @@ def component_type_spec(name: str) -> ComponentTypeSpec:
         raise KeyError(component_messages.unknown_component_type(name)) from exc
 
 
+def has_component_spec(name: str) -> bool:
+    """Return True when ``name`` has a registered component spec."""
+    return name in _COMPONENT_SPECS
+
+
 def registered_component_specs() -> tuple[ComponentTypeSpec, ...]:
     return tuple(_COMPONENT_SPECS.values())

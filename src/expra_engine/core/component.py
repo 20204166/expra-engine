@@ -14,7 +14,9 @@ from expra_engine.core.component_schema import (
     ComponentTypeSpec,
     PropertyDescriptor,
     component_type_spec,
+    has_component_spec,
     register_component_spec,
+    registered_component_specs,
 )
 from expra_engine.messages import component as component_messages
 
@@ -113,9 +115,6 @@ class TransformComponent(Component):
         )
 
 
-_COMPONENT_REGISTRY: dict[str, type[Component]] = {
-    "transform": TransformComponent,
-}
 _BUILTINS_REGISTERED = False
 
 register_component_spec(
@@ -147,23 +146,23 @@ def component_from_dict(data: dict[str, Any]) -> Component:
             UnresolvedScriptComponent,
         )
 
-        _COMPONENT_REGISTRY[component_type] = ScriptComponent
         try:
             return ScriptComponent.from_dict(data)
         except (TypeError, ValueError, KeyError):
             return UnresolvedScriptComponent(data)
-    cls = _COMPONENT_REGISTRY.get(component_type)
-    if cls is None:
+    if not has_component_spec(component_type):
         raise ValueError(component_messages.unknown_component_type(component_type))
-    return cls.from_dict(data)
+    return component_type_spec(component_type).cls.from_dict(data)
 
 
 def register_component_type(name: str, cls: type[Component]) -> None:
-    """Register a custom component type for deserialization."""
-    _COMPONENT_REGISTRY[name] = cls
-    try:
-        component_type_spec(name)
-    except KeyError:
+    """Register a custom component type for deserialization and editor tooling."""
+    if has_component_spec(name):
+        existing = component_type_spec(name)
+        register_component_spec(
+            ComponentTypeSpec(name, cls, existing.fields, existing.required_types)
+        )
+    else:
         register_component_spec(ComponentTypeSpec(name, cls))
 
 
@@ -171,7 +170,7 @@ def registered_component_types() -> tuple[tuple[str, type[Component]], ...]:
     """Return registered component types in registration order for editor tooling."""
     if not _BUILTINS_REGISTERED:
         _register_builtin_components()
-    return tuple(_COMPONENT_REGISTRY.items())
+    return tuple((spec.name, spec.cls) for spec in registered_component_specs())
 
 
 def _register_component(
@@ -180,8 +179,7 @@ def _register_component(
     fields: tuple[PropertyDescriptor, ...] = (),
     required_types: tuple[type, ...] = (),
 ) -> None:
-    """Record ``cls`` in both the serialization registry and the editor spec registry."""
-    _COMPONENT_REGISTRY[component_type] = cls
+    """Record ``cls`` in the canonical editor spec registry (single owner)."""
     register_component_spec(ComponentTypeSpec(component_type, cls, fields, required_types))
 
 
@@ -201,7 +199,7 @@ def _register_builtin_components() -> None:
 
 def _register_world_components() -> None:
     if all(
-        name in _COMPONENT_REGISTRY
+        has_component_spec(name)
         for name in (
             "level_anchor",
             "streaming_anchor",
@@ -217,7 +215,7 @@ def _register_world_components() -> None:
     )
     from expra_engine.runtime.world_state import WorldSessionStateComponent
 
-    if "level_anchor" not in _COMPONENT_REGISTRY:
+    if not has_component_spec("level_anchor"):
         _register_component(
             LevelAnchorComponent.component_type,
             LevelAnchorComponent,
@@ -247,19 +245,19 @@ def _register_world_components() -> None:
                 ),
             ),
         ),
-    if "streaming_anchor" not in _COMPONENT_REGISTRY:
+    if not has_component_spec("streaming_anchor"):
         _register_component(
             StreamingAnchorComponent.component_type,
             StreamingAnchorComponent,
             (PropertyDescriptor("anchor_id", "Anchor ID", str, "primary"),),
         )
-    if "world_persistent_actor" not in _COMPONENT_REGISTRY:
+    if not has_component_spec("world_persistent_actor"):
         _register_component(
             WorldPersistentActorComponent.component_type,
             WorldPersistentActorComponent,
             (PropertyDescriptor("persistent_id", "Persistent ID", str, "actor"),),
         )
-    if "world_session_state" not in _COMPONENT_REGISTRY:
+    if not has_component_spec("world_session_state"):
         _register_component(
             WorldSessionStateComponent.component_type,
             WorldSessionStateComponent,
@@ -268,7 +266,7 @@ def _register_world_components() -> None:
 
 
 def _register_visual_components() -> None:
-    if "primitive" in _COMPONENT_REGISTRY:
+    if has_component_spec("primitive"):
         return
     from expra_engine.runtime.animated_sprite_2d import AnimatedSprite2DComponent, SpriteFrames2D
     from expra_engine.runtime.canvas_effects import CanvasModulateComponent
@@ -430,7 +428,7 @@ def _register_visual_components() -> None:
 
 
 def _register_screen_components() -> None:
-    if "back_buffer_copy" in _COMPONENT_REGISTRY:
+    if has_component_spec("back_buffer_copy"):
         return
     from expra_engine.runtime.screen_texture import (
         BackBufferCopyComponent,
@@ -510,7 +508,7 @@ def _register_screen_components() -> None:
 
 
 def _register_physics_components() -> None:
-    if "collider" not in _COMPONENT_REGISTRY:
+    if not has_component_spec("collider"):
         from expra_engine.runtime.collider import ColliderComponent
 
         collider_fields: tuple[PropertyDescriptor, ...] = (
@@ -529,7 +527,7 @@ def _register_physics_components() -> None:
         )
         _register_component("collider", ColliderComponent, collider_fields)
 
-    if "area" not in _COMPONENT_REGISTRY:
+    if not has_component_spec("area"):
         from expra_engine.runtime.area import AreaComponent, SpaceOverride
         from expra_engine.runtime.collider import ColliderComponent
 
@@ -558,7 +556,7 @@ def _register_physics_components() -> None:
 
 
 def _register_audio_components() -> None:
-    if "audio_listener_2d" in _COMPONENT_REGISTRY:
+    if has_component_spec("audio_listener_2d"):
         return
     from expra_engine.runtime.audio_2d import (
         AudioListener2DComponent,
@@ -608,7 +606,7 @@ def _register_audio_components() -> None:
 
 
 def _register_composition_components() -> None:
-    if "scene_instance" in _COMPONENT_REGISTRY:
+    if has_component_spec("scene_instance"):
         return
     from expra_engine.core.scene.scene_instance import SceneInstanceComponent
 

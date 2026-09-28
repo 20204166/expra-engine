@@ -236,6 +236,8 @@ def test_optional_material_and_draw_descriptors_validate_and_remain_immutable() 
     with pytest.raises(ValueError):
         MaterialDescriptor(outline_width=-1)
     with pytest.raises(ValueError):
+        MaterialDescriptor(blend_mode="screen")
+    with pytest.raises(ValueError):
         TextDescriptor("x", size=0)
     with pytest.raises(ValueError):
         TextDescriptor("x", max_width=0)

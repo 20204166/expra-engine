@@ -780,6 +780,14 @@ class TestPygameRenderer(unittest.TestCase):
         self.assertTrue(renderer.capabilities.outline)
         self.assertTrue(renderer.capabilities.nine_slice)
 
+    def test_capabilities_do_not_claim_blend_mode_support(self) -> None:
+        # ``MaterialDescriptor.blend_mode`` is a declared contract, but the
+        # Pygame renderer does not yet honor it. This pin makes the no-op
+        # explicit: any backend that starts consuming blend_mode must flip
+        # this capability so the contract and the capability cannot drift.
+        renderer = PygameRenderer(_FakePygame(_FakeFont()), _FakeSurface())
+        self.assertFalse(renderer.capabilities.blend_mode)
+
     def test_primitive_applies_tint_and_outline_width(self) -> None:
         renderer = PygameRenderer(_FakePygame(_FakeFont()), _FakeSurface())
         renderer.start(RenderContext(Viewport(0, 0, 100, 100)))

@@ -144,6 +144,11 @@ class GamepadAxis:
     deadzone, not simple zero-out).
 
     ``deadzone`` must be in [0, 1).  A deadzone of 0.0 never suppresses.
+
+    Declared-but-unwired: this is the public gamepad-axis contract, but no
+    backend consumes it yet. ``PygameRuntime._poll_events`` translates only
+    keyboard and mouse; no ``JOYAXISMOTION``/``JOYBUTTON``/``JOYHAT`` events are
+    processed, so ``GamepadAxis`` never receives a raw hardware value today.
     """
 
     value: float

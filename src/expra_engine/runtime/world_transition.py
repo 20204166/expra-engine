@@ -58,7 +58,14 @@ class WorldTransitionSnapshot:
 
 
 class WorldTransitionController:
-    """Coordinate preparation, optional fade presentation, and one safe commit."""
+    """Coordinate preparation, optional fade presentation, and one safe commit.
+
+    Only ``TransitionMode.FADE`` has a distinct presentation phase today
+    (FADING_OUT -> SWITCHING -> FADING_IN). ``TransitionMode.LOADING`` is
+    declared but not yet implemented: it resolves to the same immediate-switch
+    path as ``TransitionMode.INSTANT`` (PREPARING -> SWITCHING -> COMPLETE) with
+    no loading indicator, so the two must currently be treated as equivalent.
+    """
 
     def __init__(self, *, fade_duration: float = 0.2) -> None:
         if not math.isfinite(fade_duration) or fade_duration <= 0.0:

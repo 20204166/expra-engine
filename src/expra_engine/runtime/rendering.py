@@ -303,6 +303,12 @@ class MaterialDescriptor:
     tint: Color = field(default_factory=lambda: Color(1.0, 1.0, 1.0))
     outline: Color | None = None
     outline_width: float = 0.0
+    # Declared forward-compatibility contract, not yet a live behavior. No
+    # current backend consumes blend_mode: the reference Pygame renderer
+    # advertises ``RendererCapabilities.blend_mode == False`` and draws every
+    # material through the same compositing path regardless of this value. The
+    # three-value validation stays so a future backend can rely on it, but
+    # "add"/"multiply" must not be assumed to change rendering today.
     blend_mode: str = "normal"
     source_region: SpriteRegion | None = None
     light_response: MaterialLightResponse | None = None
