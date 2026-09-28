@@ -3,6 +3,14 @@
 A game engine and editor with coordinated background work, deterministic runtime
 state, and a renderer-neutral design language.
 
+## Documentation
+
+The canonical documentation lives in [`docs/guide/`](docs/guide/README.md):
+getting started, architecture, the document model (projects/worlds/levels/scenes),
+entities and components, scripting, lighting, physics, input, world streaming,
+the editor, export, and more. Older design and planning notes remain at the
+[`docs/`](docs) root for history.
+
 ## Architecture
 
 | Coordinator | Owns |
@@ -235,9 +243,9 @@ Results from background tasks cross from worker threads through the
 `AppCoordinator`/`UICoordinator` delivery path onto the Tk main thread.
 No worker ever calls `widget.configure()` directly.
 
-See `docs/THREADING.md` for details.
+See `docs/guide/ARCHITECTURE.md` for the threading model.
 
-See `docs/GAME_EXPORT_FUTURE.md` for the runtime profile and export boundary.
+See `docs/guide/EXPORT.md` for the runtime profile and export boundary.
 
-See `docs/FILESYSTEM.md` for the logical-ID, mount, resource-service, package,
-and user-data APIs.
+See `docs/guide/RESOURCES_AND_ASSETS.md` for the logical-ID, mount,
+resource-service, package, and user-data APIs.
