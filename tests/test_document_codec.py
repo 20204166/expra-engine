@@ -257,6 +257,36 @@ def test_to_json_rejects_non_finite_values() -> None:
         to_json({"camera": {"zoom": float("nan")}})
 
 
+def test_document_rejects_non_boolean_entity_enabled() -> None:
+    document = {
+        "kind": "scene",
+        "scene_id": "scene-1",
+        "name": "Values",
+        "entities": [{"entity_id": "root", "name": "Root", "enabled": "false"}],
+    }
+
+    with pytest.raises(DocumentCodecError, match="enabled"):
+        from_json(document)
+
+
+def test_document_rejects_non_boolean_component_enabled() -> None:
+    document = {
+        "kind": "scene",
+        "scene_id": "scene-1",
+        "name": "Values",
+        "entities": [
+            {
+                "entity_id": "root",
+                "name": "Root",
+                "components": [{"type": "transform", "enabled": 0, "x": 1.0}],
+            }
+        ],
+    }
+
+    with pytest.raises(DocumentCodecError, match="enabled"):
+        from_json(document)
+
+
 def test_document_rejects_bool_schema_version() -> None:
     document = {
         "kind": "scene",

@@ -25,10 +25,10 @@ class DependencyGraph:
         *,
         available: Iterable[ResourceId | str] | None = None,
     ) -> None:
-        resource_id = _resource_id(resource_id)
-        dependency_set = {_resource_id(dependency) for dependency in dependencies}
+        resource_id = ResourceId.coerce(resource_id)
+        dependency_set = {ResourceId.coerce(dependency) for dependency in dependencies}
         if available is not None:
-            available_ids = {_resource_id(item) for item in available}
+            available_ids = {ResourceId.coerce(item) for item in available}
             missing = sorted(dependency_set - available_ids, key=str)
             if missing:
                 raise MissingDependencyError(
@@ -53,14 +53,14 @@ class DependencyGraph:
             self._dependents.setdefault(dependency, set()).add(resource_id)
 
     def dependencies_of(self, resource_id: ResourceId | str) -> tuple[ResourceId, ...]:
-        return tuple(sorted(self._dependencies.get(_resource_id(resource_id), set()), key=str))
+        return tuple(sorted(self._dependencies.get(ResourceId.coerce(resource_id), set()), key=str))
 
     def dependents_of(self, resource_id: ResourceId | str) -> tuple[ResourceId, ...]:
-        return tuple(sorted(self._dependents.get(_resource_id(resource_id), set()), key=str))
+        return tuple(sorted(self._dependents.get(ResourceId.coerce(resource_id), set()), key=str))
 
     def invalidate(self, resource_id: ResourceId | str) -> set[ResourceId]:
         """Return the resource and every registered resource depending on it."""
-        root = _resource_id(resource_id)
+        root = ResourceId.coerce(resource_id)
         invalidated: set[ResourceId] = set()
         pending = [root]
         while pending:
@@ -84,8 +84,8 @@ class DependencyGraph:
         available: Iterable[ResourceId | str] | None = None,
     ) -> set[ResourceId]:
         """Return all dependencies, checking availability and traversal bounds."""
-        root = _resource_id(resource_id)
-        available_ids = None if available is None else {_resource_id(item) for item in available}
+        root = ResourceId.coerce(resource_id)
+        available_ids = None if available is None else {ResourceId.coerce(item) for item in available}
         found: set[ResourceId] = set()
         pending = list(self._dependencies.get(root, ()))
         while pending:
@@ -120,9 +120,3 @@ class DependencyGraph:
             visited.add(current)
             pending.extend(self._dependencies.get(current, ()))
         return False
-
-
-def _resource_id(value: ResourceId | str) -> ResourceId:
-    if isinstance(value, ResourceId):
-        return value
-    return ResourceId.parse(value)

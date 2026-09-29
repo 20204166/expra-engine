@@ -270,6 +270,9 @@ def _validate_document_data(data: dict[str, Any], kind: str) -> None:
         if entity_id in entity_ids:
             raise DocumentCodecError(f"duplicate entity_id: {entity_id!r}")
         entity_ids.add(entity_id)
+        enabled = entity.get("enabled", True)
+        if type(enabled) is not bool:
+            raise DocumentCodecError(f"entity {entity_id!r} enabled must be a boolean")
         parent_id = entity.get("parent_id")
         if parent_id is not None and (not isinstance(parent_id, str) or not parent_id.strip()):
             raise DocumentCodecError(f"entity {entity_id!r} has an invalid parent_id")
@@ -283,6 +286,11 @@ def _validate_document_data(data: dict[str, Any], kind: str) -> None:
             component_type = component.get("type", component.get("type_id"))
             if not isinstance(component_type, str) or not component_type.strip():
                 raise DocumentCodecError(f"entity {entity_id!r} has a component without type")
+            component_enabled = component.get("enabled", True)
+            if type(component_enabled) is not bool:
+                raise DocumentCodecError(
+                    f"entity {entity_id!r} component enabled must be a boolean"
+                )
     for entity_id, parent_id in parent_ids.items():
         if parent_id is not None and parent_id not in entity_ids:
             raise DocumentCodecError(f"entity {entity_id!r} has missing parent {parent_id!r}")

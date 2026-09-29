@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .errors import MalformedPackageManifestError, ResourceNotFoundError, UnsafeArchiveMemberError
+from .ids import is_safe_path_component
 
 if TYPE_CHECKING:
     from .ids import ResourceId
@@ -56,6 +57,8 @@ class PackageManifest:
             or any(not isinstance(item, str) for item in raw_dependencies)
         ):
             raise MalformedPackageManifestError("Package manifest has invalid top-level fields")
+        if not is_safe_path_component(identity):
+            raise MalformedPackageManifestError("Package identity is not a safe path component")
         resources: list[PackageResource] = []
         paths: set[str] = set()
         for raw in raw_resources:
@@ -103,11 +106,21 @@ def extract_archive_resource(mount: ArchiveMount, resource_id: ResourceId, cache
         raise UnsafeArchiveMemberError(
             "Extraction target is unsafe", operation="extract", mount=mount.spec.name
         )
-    target_root = (
-        Path(cache_dir).resolve()
-        / (mount.manifest.identity if mount.manifest else mount.spec.name)
-        / digest
-    )
+    cache_root = Path(cache_dir).resolve()
+    identity_segment = mount.manifest.identity if mount.manifest else mount.spec.name
+    if not is_safe_path_component(identity_segment):
+        raise UnsafeArchiveMemberError(
+            "Extraction target is unsafe", operation="extract", mount=mount.spec.name
+        )
+    target_root = cache_root / identity_segment / digest
+    try:
+        target_root.resolve().relative_to(cache_root)
+    except ValueError as exc:
+        raise UnsafeArchiveMemberError(
+            "Extraction target escapes cache directory",
+            operation="extract",
+            mount=mount.spec.name,
+        ) from exc
     target = target_root / relative
     target_root.mkdir(parents=True, exist_ok=True)
     try:

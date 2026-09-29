@@ -81,6 +81,23 @@ def _reader_thread(command_queue: queue.Queue[dict[str, Any]]) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _safe(value: Any) -> Any:
+    """Best-effort JSON-safe conversion (kept aligned with _static_runner.py)."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, (list, tuple)):
+        return [_safe(v) for v in value]
+    if isinstance(value, dict):
+        return {str(k): _safe(v) for k, v in value.items()}
+    to_dict = getattr(value, "to_dict", None)
+    if callable(to_dict):
+        try:
+            return to_dict()
+        except Exception:  # noqa: BLE001 -- last-resort fallback below
+            pass
+    return repr(value)
+
+
 def _color_to_list(color: Any) -> list[float] | None:
     if color is None:
         return None
@@ -129,7 +146,7 @@ def _render_item_to_dict(item: Any) -> dict:
         "key": item.key,
         "primitive": {
             "kind": getattr(primitive, "kind", None),
-            "size": list(getattr(primitive, "size", ()) or ()),
+            "size": _safe(getattr(primitive, "size", None)),
             "radius": getattr(primitive, "radius", None),
         },
         "transform": {
@@ -139,7 +156,12 @@ def _render_item_to_dict(item: Any) -> dict:
         },
         "material": {
             "color": _color_to_list(getattr(material, "color", None)),
+            "opacity": getattr(material, "opacity", None),
             "texture_id": getattr(material, "texture_id", None),
+            "tint": _color_to_list(getattr(material, "tint", None)),
+            "outline": _color_to_list(getattr(material, "outline", None)),
+            "outline_width": getattr(material, "outline_width", None),
+            "blend_mode": getattr(material, "blend_mode", None),
         },
         "phase": getattr(item.phase, "name", str(item.phase)),
         "layer": item.layer,

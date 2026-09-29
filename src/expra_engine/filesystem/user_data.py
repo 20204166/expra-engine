@@ -3,16 +3,15 @@
 from __future__ import annotations
 
 import os
-import re
 from pathlib import Path
 from typing import Literal
 
 from expra_engine.core.persistence import atomic_write_bytes, atomic_write_text
 
 from .errors import FilesystemError
+from .ids import _DRIVE_RE
 
 UserDataNamespace = Literal["application", "game"]
-_DRIVE_RE = re.compile(r"^[a-zA-Z]:([/\\]|$)")
 
 
 class UserDataError(FilesystemError):

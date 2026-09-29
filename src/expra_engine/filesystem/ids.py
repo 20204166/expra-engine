@@ -59,6 +59,13 @@ class ResourceId:
             raise InvalidResourceIdError("parse", logical_id=value) from None
 
     @classmethod
+    def coerce(cls, value: ResourceId | str) -> ResourceId:
+        """Return ``value`` when already a ResourceId, otherwise parse it."""
+        if isinstance(value, ResourceId):
+            return value
+        return cls.parse(value)
+
+    @classmethod
     def from_project_path(cls, path: str | PathLike[str], *, scheme: str = "assets") -> ResourceId:
         """Create an assets ID from a project-relative path."""
         raw_path = str(path).replace("\\", "/")
@@ -81,10 +88,23 @@ class ResourceId:
 def _validate_component(
     component: str, label: str, operation: str, logical_id: ResourceId | str | None
 ) -> None:
-    if not component or component in {".", ".."} or "/" in component or "\\" in component:
+    if not is_safe_path_component(component):
         raise InvalidResourceIdError(f"Invalid {label}", operation=operation, logical_id=logical_id)
-    if "\x00" in component or ":" in component:
-        raise InvalidResourceIdError(f"Invalid {label}", operation=operation, logical_id=logical_id)
+
+
+def is_safe_path_component(value: str) -> bool:
+    """Return True when ``value`` is a single, portable path component.
+
+    A safe component is a non-empty string that is not ``.`` or ``..`` and
+    contains no path separators, null bytes, colons, or drive markers.
+    """
+    if not isinstance(value, str) or not value:
+        return False
+    if value in {".", ".."}:
+        return False
+    if "\x00" in value or "/" in value or "\\" in value or ":" in value:
+        return False
+    return not _DRIVE_RE.match(value)
 
 
 def _validate_path(path: str, operation: str, logical_id: ResourceId | str | None) -> None:

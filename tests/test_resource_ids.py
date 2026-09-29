@@ -70,6 +70,18 @@ def test_direct_construction_requires_namespace_for_package_scheme() -> None:
         ResourceId("package", None, "textures/player.png")
 
 
+def test_coerce_returns_existing_resource_id() -> None:
+    resource_id = ResourceId.parse("assets://textures/player.png")
+
+    assert ResourceId.coerce(resource_id) is resource_id
+
+
+def test_coerce_parses_string_into_resource_id() -> None:
+    assert ResourceId.coerce("assets://textures/player.png") == ResourceId.parse(
+        "assets://textures/player.png"
+    )
+
+
 def test_typed_errors_keep_safe_context_without_absolute_paths() -> None:
     error = ResourceNotFoundError(
         operation="read",

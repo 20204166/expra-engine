@@ -119,3 +119,26 @@ def test_package_scheme_archive_without_manifest_is_rejected(tmp_path: Path) -> 
 
     with pytest.raises(MalformedPackageManifestError):
         ArchiveMount(archive, MountSpec(name="no-manifest", scheme="package", namespace="demo"))
+
+
+@pytest.mark.parametrize(
+    "identity",
+    ["../evil", "a/b", "a\\b", "C:evil", "", ".", "..", "a:b"],
+)
+def test_manifest_rejects_unsafe_identity(identity: str) -> None:
+    with pytest.raises(MalformedPackageManifestError):
+        PackageManifest.from_mapping({**_manifest(b"hello"), "identity": identity})
+
+
+def test_extract_confines_target_within_cache_dir(tmp_path: Path) -> None:
+    archive = tmp_path / "assets.zip"
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr("data/file.txt", b"hello")
+    mount = ArchiveMount(archive, MountSpec(name="../evil", scheme="assets"))
+    resource_id = ResourceId.parse("assets://data/file.txt")
+    cache = tmp_path / "cache"
+
+    with pytest.raises(UnsafeArchiveMemberError):
+        mount.extract(resource_id, cache)
+
+    assert not (tmp_path / "evil").exists()

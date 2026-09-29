@@ -38,7 +38,7 @@ class ResourceService:
         self._observer = observer
 
     def metadata(self, resource_id: ResourceId | str) -> ResourceMetadata:
-        return self.resolver.resolve(_resource_id(resource_id)).metadata
+        return self.resolver.resolve(ResourceId.coerce(resource_id)).metadata
 
     def read_bytes(
         self,
@@ -47,7 +47,7 @@ class ResourceService:
         cache_policy: CachePolicy | None = None,
     ) -> bytes:
         observer = self._observer
-        logical_id = _resource_id(resource_id)
+        logical_id = ResourceId.coerce(resource_id)
         resolve_token = observer.begin("resource:resolve") if observer is not None else None
         try:
             handle = self.resolver.resolve(logical_id)
@@ -83,7 +83,7 @@ class ResourceService:
         return self.read_bytes(resource_id, cache_policy=cache_policy).decode(encoding, errors)
 
     def open_stream(self, resource_id: ResourceId | str) -> IO[bytes]:
-        return self.resolver.resolve(_resource_id(resource_id)).open()
+        return self.resolver.resolve(ResourceId.coerce(resource_id)).open()
 
     def read_stream(self, resource_id: ResourceId | str) -> IO[bytes]:
         return self.open_stream(resource_id)
@@ -130,7 +130,7 @@ class ResourceService:
     ) -> int | None:
         if self.coordinator is None:
             raise RuntimeError("async resource loading requires an AppCoordinator")
-        logical_id = _resource_id(resource_id)
+        logical_id = ResourceId.coerce(resource_id)
         key = str(logical_id)
 
         def load(cancel: threading.Event, _progress: Callable[[str], None]) -> bytes:
@@ -151,11 +151,7 @@ class ResourceService:
 
     def cancel(self, resource_id: ResourceId | str) -> None:
         if self.coordinator is not None:
-            self.coordinator.cancel(str(_resource_id(resource_id)))
+            self.coordinator.cancel(str(ResourceId.coerce(resource_id)))
 
     def clear_cache(self) -> set[ResourceId]:
         return self.cache.clear()
-
-
-def _resource_id(value: ResourceId | str) -> ResourceId:
-    return value if isinstance(value, ResourceId) else ResourceId.parse(value)
