@@ -135,19 +135,20 @@ class PhysicsWorld2D:
         current: tuple[float, float], value: tuple[float, float], mode: SpaceOverride
     ) -> tuple[tuple[float, float], bool]:
         if mode is SpaceOverride.DISABLED:
-            return current, True
-        if mode in {SpaceOverride.REPLACE, SpaceOverride.REPLACE_COMBINE}:
-            result = value
-        else:
-            result = (current[0] + value[0], current[1] + value[1])
-        return result, mode in {SpaceOverride.COMBINE, SpaceOverride.REPLACE_COMBINE}
+            return current, mode.continues_resolution
+        result = (
+            value
+            if mode.replaces_existing
+            else (current[0] + value[0], current[1] + value[1])
+        )
+        return result, mode.continues_resolution
 
     @staticmethod
     def _apply_scalar(current: float, value: float, mode: SpaceOverride) -> tuple[float, bool]:
         if mode is SpaceOverride.DISABLED:
-            return current, True
-        result = value if mode in {SpaceOverride.REPLACE, SpaceOverride.REPLACE_COMBINE} else current + value
-        return result, mode in {SpaceOverride.COMBINE, SpaceOverride.REPLACE_COMBINE}
+            return current, mode.continues_resolution
+        result = value if mode.replaces_existing else current + value
+        return result, mode.continues_resolution
 
     @staticmethod
     def _area_gravity(area_item: _Collider, body: _Collider, area: AreaComponent) -> tuple[float, float]:

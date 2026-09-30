@@ -23,10 +23,11 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
 from __future__ import annotations
 
 import math
+from collections.abc import Hashable
 from dataclasses import dataclass
-from typing import Hashable
 
 from expra_engine.core.component import TransformComponent
+from expra_engine.core.math_utils import lerp, lerp_angle
 from expra_engine.core.scene import Scene
 from expra_engine.runtime.rendering import Transform
 
@@ -41,19 +42,19 @@ def _fraction(value: float) -> float:
 
 
 def _interpolate(previous: Transform, current: Transform, alpha: float) -> Transform:
-    def lerp(a: float, b: float) -> float:
-        return a + (b - a) * alpha
-
     # Expra's Transform.rotation is degrees around Z. Interpolate over the
-    # shortest arc so 350° -> 10° passes through 0°, not through 180°.
-    delta = (current.rotation - previous.rotation + 180.0) % 360.0 - 180.0
+    # shortest arc (via lerp_angle) so 350° -> 10° passes through 0°, not 180°.
     return Transform(
-        position=tuple(
-            lerp(a, b) for a, b in zip(previous.position, current.position, strict=True)
+        position=(
+            lerp(previous.position[0], current.position[0], alpha),
+            lerp(previous.position[1], current.position[1], alpha),
+            lerp(previous.position[2], current.position[2], alpha),
         ),
-        rotation=previous.rotation + delta * alpha,
-        scale=tuple(
-            lerp(a, b) for a, b in zip(previous.scale, current.scale, strict=True)
+        rotation=lerp_angle(previous.rotation, current.rotation, alpha),
+        scale=(
+            lerp(previous.scale[0], current.scale[0], alpha),
+            lerp(previous.scale[1], current.scale[1], alpha),
+            lerp(previous.scale[2], current.scale[2], alpha),
         ),
     )
 

@@ -56,6 +56,21 @@ def test_area_validates_finite_values_and_round_trips() -> None:
         AreaComponent(linear_damp=-1.0)
 
 
+@pytest.mark.parametrize(
+    ("mode", "replaces", "continues"),
+    [
+        (SpaceOverride.DISABLED, False, True),
+        (SpaceOverride.COMBINE, False, True),
+        (SpaceOverride.COMBINE_REPLACE, False, False),
+        (SpaceOverride.REPLACE, True, False),
+        (SpaceOverride.REPLACE_COMBINE, True, True),
+    ],
+)
+def test_space_override_owns_shared_resolution_policy(mode, replaces, continues):
+    assert mode.replaces_existing is replaces
+    assert mode.continues_resolution is continues
+
+
 def test_scene_round_trip_and_missing_collider_keep_area_data_without_activation() -> None:
     scene = Scene("areas")
     entity = add_entity(scene, "area-without-volume", 0.0, 0.0)

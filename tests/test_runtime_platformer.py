@@ -35,6 +35,17 @@ class PlatformerTests(unittest.TestCase):
         self.assertEqual(controller.phase, PlatformerPhase.COYOTE)
         self.assertTrue(controller.jump())
 
+    def test_coyote_jump_does_not_consume_the_same_jump_twice(self) -> None:
+        controller = PlatformerController2d(max_jumps=2, coyote_time=0.1)
+        controller.land()
+        controller.leave_ground()
+
+        self.assertTrue(controller.jump())
+        self.assertEqual(controller.jumps_left, 1)
+        self.assertTrue(controller.jump())
+        self.assertEqual(controller.jumps_left, 0)
+        self.assertFalse(controller.jump())
+
     def test_coyote_time_expires(self) -> None:
         controller = PlatformerController2d(max_jumps=1, coyote_time=0.1)
         controller.land()

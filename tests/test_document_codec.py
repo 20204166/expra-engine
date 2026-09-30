@@ -15,6 +15,7 @@ from expra_engine.core.scene import Level, LevelMetadata, document_codec
 from expra_engine.core.scene.document_codec import (
     DocumentCodecError,
     canonical_pb_path,
+    clone_document,
     decode_protobuf,
     decode_protobuf_document,
     encode_protobuf,
@@ -54,6 +55,22 @@ def test_json_round_trip_preserves_typed_level_and_order() -> None:
     assert restored.entities[1].parent_id == "player"
     assert restored.level_metadata.world_bounds == (-10.0, -5.0, 100.0, 50.0)
     assert restored.camera.target_entity_id == "player"
+
+
+def test_clone_document_preserves_level_kind_and_is_independent() -> None:
+    original = _level()
+
+    clone = clone_document(original)
+
+    assert isinstance(clone, Level)
+    assert clone is not original
+    assert clone.level_metadata.world_bounds == (-10.0, -5.0, 100.0, 50.0)
+    assert [entity.entity_id for entity in clone.entities] == ["player", "weapon"]
+    assert clone.entities[1].parent_id == "player"
+
+    original.create_entity("Later", entity_id="later")
+
+    assert clone.find_entity("later") is None
 
 
 def test_protobuf_round_trip_preserves_recursive_values_and_int_float_distinction() -> None:

@@ -23,7 +23,7 @@ import math
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from expra_engine.core.component import Component
 from expra_engine.core.scene import Scene
@@ -32,6 +32,9 @@ from expra_engine.runtime.audio import AudioClip, AudioMixer
 from expra_engine.runtime.events import SceneContinued, SceneStarted, SceneStopped, Update
 from expra_engine.runtime.system import RuntimeSystem
 from expra_engine.runtime.validation import coerce_finite_float as _finite
+from expra_engine.runtime.validation import coerce_integer as _integer
+from expra_engine.runtime.validation import coerce_non_negative_float as _non_negative
+from expra_engine.runtime.validation import coerce_positive_float as _positive
 
 _AUDIO_TARGET = "runtime:audio:update"
 
@@ -63,29 +66,10 @@ class PlaybackType2D(StrEnum):
     SAMPLE = "sample"
 
 
-def _non_negative(value: object, name: str) -> float:
-    result = _finite(value, name)
-    if result < 0.0:
-        raise ValueError(f"{name} must be non-negative")
-    return result
-
-
-def _positive(value: object, name: str) -> float:
-    result = _finite(value, name)
-    if result <= 0.0:
-        raise ValueError(f"{name} must be positive")
-    return result
-
-
-def _integer(value: object, name: str, *, minimum: int = 0, maximum: int | None = None) -> int:
-    if isinstance(value, bool):
-        raise ValueError(f"{name} must be an integer")
-    try:
-        converted = int(cast(Any, value))
-        if float(cast(Any, value)) != converted:
-            raise ValueError
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError(f"{name} must be an integer") from exc
+def _bounded_integer(
+    value: object, name: str, *, minimum: int = 0, maximum: int | None = None
+) -> int:
+    converted = _integer(value, name)
     if converted < minimum or (maximum is not None and converted > maximum):
         raise ValueError(f"{name} is outside its allowed range")
     return converted
@@ -171,10 +155,10 @@ class AudioStreamPlayer2DComponent(Component):
         self.stream_paused = bool(stream_paused)
         self.max_distance = _positive(max_distance, "max_distance")
         self.attenuation = _non_negative(attenuation, "attenuation")
-        self.max_polyphony = _integer(max_polyphony, "max_polyphony", minimum=1)
+        self.max_polyphony = _bounded_integer(max_polyphony, "max_polyphony", minimum=1)
         self.panning_strength = _non_negative(panning_strength, "panning_strength")
         self.bus = _bus(bus)
-        self.area_mask = _integer(area_mask, "area_mask", maximum=0xFFFFFFFF)
+        self.area_mask = _bounded_integer(area_mask, "area_mask", maximum=0xFFFFFFFF)
         self.playback_type = (
             playback_type
             if isinstance(playback_type, PlaybackType2D)

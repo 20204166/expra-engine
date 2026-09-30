@@ -33,6 +33,11 @@ class HitResult2DTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             HitResult2D(hit=True, entity_id="e1", fraction=-0.1)
 
+    def test_non_convertible_hit_metrics_are_value_errors(self) -> None:
+        for field in ("distance", "fraction"):
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                HitResult2D(hit=True, entity_id="e1", **{field: object()})
+
     def test_nearest_returns_closest(self) -> None:
         results = [
             HitResult2D(hit=True, entity_id="far", distance=10.0),

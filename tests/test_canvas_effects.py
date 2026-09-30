@@ -51,6 +51,16 @@ def test_three_channel_color_defaults_alpha_to_one() -> None:
     assert component.color == Color(0.2, 0.3, 0.4, 1.0)
 
 
+def test_color_owns_sequence_normalization_and_rgba_serialization() -> None:
+    color = Color.from_value((0.2, 0.3, 0.4))
+
+    assert color == Color(0.2, 0.3, 0.4, 1.0)
+    assert color.to_list() == [0.2, 0.3, 0.4, 1.0]
+    assert Color.from_value(color) is color
+    with pytest.raises(ValueError):
+        Color.from_value((0.2, 0.3))
+
+
 @pytest.mark.parametrize(
     "value",
     [

@@ -38,6 +38,15 @@ class TestSpriteSheetAndClips(unittest.TestCase):
         with self.assertRaises(ValueError):
             SpriteRegion(1.5, 0, 8, 8)  # type: ignore[arg-type]
 
+    def test_sprite_region_from_value_normalizes_integral_values_without_truncating(self) -> None:
+        region = SpriteRegion.from_value((1.0, 2, 8, 9))
+
+        self.assertEqual(region, SpriteRegion(1, 2, 8, 9))
+        self.assertIs(SpriteRegion.from_value(region), region)
+        for value in ((1.5, 2, 8, 9), (True, 2, 8, 9), (1, 2, 0, 9)):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                SpriteRegion.from_value(value)
+
     def test_sprite_sheet_returns_renderer_neutral_tile_region(self) -> None:
         sheet = SpriteSheet("atlas", tile_width=16, tile_height=24, columns=3, rows=2)
 

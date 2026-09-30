@@ -152,21 +152,13 @@ class BehaviourSystem(RuntimeSystem):
                         continue
                     cls = self.registry.resolve(resource, component.behaviour_class)
                     new = cls()
-                    new._system_owned = True
-                    schema = cls.exposed_schema()
-                    for name, value in component.exposed_values.items():
-                        if name in schema:
-                            try:
-                                setattr(new, name, value)
-                            except (AttributeError, TypeError, ValueError):
-                                continue
-                    new.enabled = component.enabled
+                    self._configure_behaviour(new, component)
                     try:
                         entity.add_behaviour(new, runtime_factory=cls)
                         new._bind_context(
                             input_map=self.engine.input_map,
                             engine=self.engine,
-                            scene=self.engine.active_scene,
+                            scene=old.scene,
                             signal=self.engine._eq.signal if self.engine._eq is not None else None,
                         )
                         new._set_started(True)
@@ -235,6 +227,19 @@ class BehaviourSystem(RuntimeSystem):
                 cleanup_error = exc
         return cleanup_error
 
+    @staticmethod
+    def _configure_behaviour(behaviour: Behaviour, component: ScriptComponent) -> None:
+        """Apply serialized component fields before the Behaviour is started."""
+        behaviour._system_owned = True
+        schema = type(behaviour).exposed_schema()
+        for name, value in component.exposed_values.items():
+            if name in schema:
+                try:
+                    setattr(behaviour, name, value)
+                except (AttributeError, TypeError, ValueError):
+                    continue
+        behaviour.enabled = component.enabled
+
     def _start_scene(self, scene: Any) -> None:
         if scene is None or scene.scene_id in self._started_scenes:
             return
@@ -268,15 +273,7 @@ class BehaviourSystem(RuntimeSystem):
                         del self._errors[:-64]
                         continue
                     behaviour = cls()
-                    behaviour._system_owned = True
-                    schema = cls.exposed_schema()
-                    for name, value in component.exposed_values.items():
-                        if name in schema:
-                            try:
-                                setattr(behaviour, name, value)
-                            except (AttributeError, TypeError, ValueError):
-                                continue
-                    behaviour.enabled = component.enabled
+                    self._configure_behaviour(behaviour, component)
                     entity.add_behaviour(behaviour, runtime_factory=cls)
                     behaviour._bind_context(
                         input_map=self.engine.input_map,

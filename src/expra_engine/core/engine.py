@@ -24,8 +24,6 @@ Runtime event system adapted from ppb/engine.py GameEngine
 from __future__ import annotations
 
 import contextlib
-import json
-import time
 from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -320,7 +318,7 @@ class Engine:
         for system in reversed(tuple(self._systems)):
             try:
                 system.on_world_level_deactivated(world_scene, level_id, entity_ids)
-            except Exception as error:
+            except Exception as error:  # noqa: BLE001 - record and continue across teardown
                 self._record_world_lifecycle_error("deactivation", level_id, error)
 
     def _record_world_lifecycle_error(
@@ -362,7 +360,7 @@ class Engine:
             self._runtime_scene = runtime_scene
             self._state = EngineRunState.PLAY
             self._quit_requested = False
-            self._last_update = time.monotonic()
+            self._last_update = get_time()
             try:
                 self._start_runtime()
             except Exception:
@@ -379,7 +377,7 @@ class Engine:
             if self._clock is not None:
                 self._clock.resume()
             self._transform_interpolator.reset_history()
-            self._last_update = time.monotonic()
+            self._last_update = get_time()
             return True
         return False
 
@@ -424,7 +422,7 @@ class Engine:
 
         Returns the elapsed dt used.
         """
-        now = time.monotonic()
+        now = get_time()
         if self._state != EngineRunState.PLAY:
             self._last_update = None
             return 0.0
@@ -834,10 +832,12 @@ class Engine:
 
     @staticmethod
     def _copy_scene(scene: Scene | None) -> Scene | None:
-        """Deep-copy a scene through JSON round-trip for runtime isolation."""
+        """Deep-copy a scene through the canonical codec for runtime isolation."""
         if scene is None:
             return None
-        return Scene.from_dict(json.loads(json.dumps(scene.to_dict())))
+        from expra_engine.core.scene.document_codec import clone_document
+
+        return clone_document(scene)  # type: ignore[return-value]
 
     def __repr__(self) -> str:
         return (

@@ -7,11 +7,13 @@ PhysicsWorld2D owns overlap detection and effect resolution.
 
 from __future__ import annotations
 
-import math
 from enum import Enum
 from typing import Any
 
 from expra_engine.core.component import Component
+from expra_engine.runtime.validation import coerce_finite_float as _finite
+from expra_engine.runtime.validation import coerce_integer as _integer
+from expra_engine.runtime.validation import coerce_non_negative_float as _non_negative
 from expra_engine.runtime.validation import pair_values
 
 __all__ = ("AreaComponent", "SpaceOverride")
@@ -28,22 +30,17 @@ class SpaceOverride(str, Enum):
     REPLACE = "replace"
     REPLACE_COMBINE = "replace_combine"
 
+    @property
+    def replaces_existing(self) -> bool:
+        return self in {SpaceOverride.REPLACE, SpaceOverride.REPLACE_COMBINE}
 
-def _finite(value: object, name: str) -> float:
-    try:
-        converted = float(value)
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError(f"{name} must be a finite number") from exc
-    if not math.isfinite(converted):
-        raise ValueError(f"{name} must be a finite number")
-    return converted
-
-
-def _non_negative(value: object, name: str) -> float:
-    converted = _finite(value, name)
-    if converted < 0.0:
-        raise ValueError(f"{name} must be non-negative")
-    return converted
+    @property
+    def continues_resolution(self) -> bool:
+        return self in {
+            SpaceOverride.DISABLED,
+            SpaceOverride.COMBINE,
+            SpaceOverride.REPLACE_COMBINE,
+        }
 
 
 def _vec2(value: object, name: str) -> Vec2:
@@ -59,18 +56,6 @@ def _mode(value: SpaceOverride | str, name: str) -> SpaceOverride:
     except ValueError as exc:
         allowed = ", ".join(mode.value for mode in SpaceOverride)
         raise ValueError(f"{name} must be one of: {allowed}") from exc
-
-
-def _priority(value: object) -> int:
-    if isinstance(value, bool):
-        raise ValueError("priority must be an integer")
-    try:
-        converted = int(value)
-        if float(value) != converted:
-            raise ValueError
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError("priority must be an integer") from exc
-    return converted
 
 
 class AreaComponent(Component):
@@ -95,7 +80,7 @@ class AreaComponent(Component):
         enabled: bool = True,
     ) -> None:
         super().__init__(enabled=enabled)
-        self.priority = _priority(priority)
+        self.priority = _integer(priority, "priority")
         self.gravity_mode = _mode(gravity_mode, "gravity_mode")
         self.gravity = _finite(gravity, "gravity")
         self.gravity_direction = _vec2(gravity_direction, "gravity_direction")

@@ -81,8 +81,11 @@ class PlatformerController2d:
             self._jumps_left = max(0, self._jumps_left - 1)
 
     def jump(self) -> bool:
-        if self._phase in (PlatformerPhase.GROUNDED, PlatformerPhase.COYOTE):
+        if self._phase == PlatformerPhase.GROUNDED:
             self._jumps_left = max(0, self._jumps_left - 1)
+        elif self._phase == PlatformerPhase.COYOTE:
+            # leave_ground already consumes the grounded jump opportunity.
+            pass
         elif self._jumps_left > 0:
             self._jumps_left -= 1
         else:

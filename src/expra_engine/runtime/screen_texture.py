@@ -114,19 +114,6 @@ def _rect(value: Rect | tuple[float, float, float, float] | list[float], name: s
     return Rect(*(float(item) for item in values))
 
 
-def _color(value: Color | tuple[float, ...] | list[float]) -> Color:
-    if isinstance(value, Color):
-        return value
-    values = tuple(value)
-    if len(values) not in (3, 4):
-        raise ValueError("color must contain 3 or 4 values")
-    return Color(*values)
-
-
-def _color_dict(value: Color) -> list[float]:
-    return [value.red, value.green, value.blue, value.alpha]
-
-
 def render_phase_from_value(value: RenderPhase | str | int) -> RenderPhase:
     if isinstance(value, RenderPhase):
         return value
@@ -278,7 +265,7 @@ class ScreenTextureComponent(Component):
             else ScreenTextureFilter(str(filter))
         )
         self.lod = _non_negative(lod, "lod")
-        self.tint = _color(tint)
+        self.tint = Color.from_value(tint)
         self.opacity = _non_negative(opacity, "opacity")
         if self.opacity > 1.0:
             raise ValueError("opacity must be in [0, 1]")
@@ -309,7 +296,7 @@ class ScreenTextureComponent(Component):
             "height": self.height,
             "filter": self.filter.value,
             "lod": self.lod,
-            "tint": _color_dict(self.tint),
+            "tint": self.tint.to_list(),
             "opacity": self.opacity,
             "layer": self.layer,
             "phase": _phase_name(self.phase),

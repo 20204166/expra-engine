@@ -24,11 +24,12 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from types import MappingProxyType
-from typing import Any, ClassVar, cast
+from typing import Any, ClassVar
 
 from expra_engine.core.component import Component
 from expra_engine.runtime.animation import SpriteRegion
 from expra_engine.runtime.validation import coerce_finite_float as _finite
+from expra_engine.runtime.validation import coerce_positive_float as _positive
 from expra_engine.runtime.validation import pair_values
 
 __all__ = (
@@ -60,13 +61,6 @@ _EVENT_KINDS = frozenset(
 )
 
 
-def _positive(value: object, name: str) -> float:
-    result = _finite(value, name)
-    if result <= 0.0:
-        raise ValueError(f"{name} must be positive")
-    return result
-
-
 def _progress(value: object) -> float:
     result = _finite(value, "frame_progress")
     if not 0.0 <= result <= 1.0:
@@ -86,17 +80,7 @@ def _region_dict(region: SpriteRegion | None) -> list[int] | None:
 
 
 def _region(value: object) -> SpriteRegion | None:
-    if value is None or isinstance(value, SpriteRegion):
-        return value
-    if isinstance(value, (str, bytes)):
-        raise ValueError("region must contain x, y, width, height")
-    try:
-        items: tuple[Any, ...] = tuple(cast(Any, value))
-    except TypeError as exc:
-        raise ValueError("region must contain x, y, width, height") from exc
-    if len(items) != 4:
-        raise ValueError("region must contain x, y, width, height")
-    return SpriteRegion(*(int(item) for item in items))
+    return None if value is None else SpriteRegion.from_value(value)
 
 
 @dataclass(frozen=True)

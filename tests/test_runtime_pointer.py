@@ -77,6 +77,16 @@ class PointerTrackerEdgeTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             tracker.move((0.0, 0.0), target=None, timestamp=inf)
 
+    def test_non_convertible_numeric_inputs_are_value_errors(self) -> None:
+        with self.assertRaises(ValueError):
+            PointerTracker(double_click_interval=object())  # type: ignore[arg-type]
+
+        tracker = PointerTracker()
+        with self.assertRaises(ValueError):
+            tracker.move((object(), 0.0), target=None, timestamp=0.0)  # type: ignore[arg-type]
+        with self.assertRaises(ValueError):
+            tracker.move((0.0, 0.0), target=None, timestamp=object())  # type: ignore[arg-type]
+
     def test_capture_survives_release_of_one_of_multiple_buttons(self) -> None:
         tracker = PointerTracker()
         tracker.move((0.0, 0.0), target="widget", timestamp=0.0)

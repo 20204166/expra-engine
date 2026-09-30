@@ -126,6 +126,11 @@ def test_view_exposes_region_offset_center_and_flips_without_backend_objects():
     assert view.layer == 7
 
 
+def test_animated_sprite_rejects_fractional_frame_regions_instead_of_truncating():
+    with pytest.raises(ValueError, match="integer pixel values"):
+        SpriteFrame2D("hero.png", region=(1.5, 0, 16, 16))
+
+
 @pytest.mark.parametrize("delta", [-1.0, math.inf, math.nan])
 def test_invalid_deltas_are_rejected(delta):
     player = AnimatedSpritePlayer2D(AnimatedSprite2DComponent(frames(), animation="walk"))

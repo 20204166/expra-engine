@@ -13,6 +13,8 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 
+from expra_engine.runtime.validation import coerce_finite_float
+
 __all__ = (
     "AudioBus",
     "AudioClip",
@@ -23,9 +25,7 @@ _BUS_NAMES = frozenset({"master", "music", "sfx", "ambience", "dialogue", "ui"})
 
 
 def _volume(value: float, name: str) -> float:
-    v = float(value)
-    if not math.isfinite(v):
-        raise ValueError(f"{name} must be finite")
+    v = coerce_finite_float(value, name)
     return max(0.0, min(1.0, v))
 
 

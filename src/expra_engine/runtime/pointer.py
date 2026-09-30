@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import isfinite
+
+from expra_engine.runtime.validation import (
+    coerce_finite_float,
+    coerce_non_negative_float,
+    pair_values,
+)
 
 __all__ = ("PointerEvent", "PointerTracker")
 
@@ -23,9 +28,11 @@ class PointerTracker:
     """Track one pointer's interaction state without backend or global state."""
 
     def __init__(self, *, double_click_interval: float = 0.3) -> None:
-        if not isfinite(double_click_interval) or double_click_interval < 0.0:
-            raise ValueError("double_click_interval must be finite and nonnegative")
-        self.double_click_interval = double_click_interval
+        try:
+            interval = coerce_non_negative_float(double_click_interval, "double_click_interval")
+        except ValueError as exc:
+            raise ValueError("double_click_interval must be finite and nonnegative") from exc
+        self.double_click_interval = interval
         self.hovered: str | None = None
         self.captured: str | None = None
         self.held: frozenset[str] = frozenset()
@@ -36,9 +43,14 @@ class PointerTracker:
 
     @staticmethod
     def _position(position: tuple[float, float]) -> tuple[float, float]:
-        if len(position) != 2 or not all(isfinite(float(value)) for value in position):
-            raise ValueError("pointer position must contain two finite values")
-        return (float(position[0]), float(position[1]))
+        x, y = pair_values(position, "pointer position", expectation="two finite values")
+        try:
+            return (
+                coerce_finite_float(x, "pointer position"),
+                coerce_finite_float(y, "pointer position"),
+            )
+        except ValueError as exc:
+            raise ValueError("pointer position must contain two finite values") from exc
 
     @staticmethod
     def _event(
@@ -52,10 +64,7 @@ class PointerTracker:
 
     @staticmethod
     def _timestamp(timestamp: float) -> float:
-        value = float(timestamp)
-        if not isfinite(value):
-            raise ValueError("pointer timestamp must be finite")
-        return value
+        return coerce_finite_float(timestamp, "pointer timestamp")
 
     def move(
         self,

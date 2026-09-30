@@ -120,6 +120,19 @@ def from_document_data(
         raise DocumentCodecError(f"invalid {kind.title()} document: {exc}") from exc
 
 
+def clone_document(document: Scene | World) -> Scene | World:
+    """Return an independent, kind-aware deep copy of a Scene/Level/World.
+
+    Round-trips the document through the canonical ``to_json`` /
+    ``from_document_data`` path so the clone is deterministic, validated, and
+    preserves document kind (a ``Level`` clones back to a ``Level``, a
+    ``World`` to a ``World``). This is the single owner for "clone a document
+    through the codec"; callers such as ``Engine`` runtime scene isolation
+    delegate here rather than hand-rolling a ``json`` round-trip.
+    """
+    return from_document_data(to_json(document))
+
+
 def decode_json_payload(payload: bytes) -> dict[str, Any]:
     """Parse legacy JSON bytes without constructing the document model."""
     try:

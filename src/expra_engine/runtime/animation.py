@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from math import isfinite
+from typing import Any, cast
 
 __all__ = (
     "AnimationClip",
@@ -46,6 +47,30 @@ class SpriteRegion:
 
     def __str__(self) -> str:
         return f"{self.x}, {self.y}, {self.width}, {self.height}"
+
+    @classmethod
+    def from_value(cls, value: object) -> SpriteRegion:
+        """Normalize a four-value region without silently truncating pixels."""
+        if isinstance(value, cls):
+            return value
+        if isinstance(value, (str, bytes)):
+            raise ValueError("region must contain x, y, width, height")
+        try:
+            values = tuple(cast(Sequence[object], value))
+        except TypeError as exc:
+            raise ValueError("region must contain x, y, width, height") from exc
+        if len(values) != 4:
+            raise ValueError("region must contain x, y, width, height")
+        try:
+            numeric = tuple(float(cast(Any, item)) for item in values)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("region must contain integer pixel values") from exc
+        if any(
+            isinstance(value, bool) or not isfinite(number) or not number.is_integer()
+            for value, number in zip(values, numeric, strict=True)
+        ):
+            raise ValueError("region must contain integer pixel values")
+        return cls(*(int(value) for value in numeric))
 
 
 @dataclass(frozen=True)

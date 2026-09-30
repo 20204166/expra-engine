@@ -490,6 +490,58 @@ class SecondBehaviour(Behaviour):
             self.assertLessEqual(len(engine.behaviour_system.errors), 64)
             engine.stop()
 
+    def test_reload_preserves_each_behaviours_owning_scene_context(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            scripts = root / "scripts"
+            scripts.mkdir()
+            script = scripts / "player.py"
+            script.write_text(
+                "from expra_engine.runtime.behaviour import Behaviour\n"
+                "class PlayerBehaviour(Behaviour):\n"
+                "    pass\n",
+                encoding="utf-8",
+            )
+            registry = ScriptRegistry(root)
+            base_scene = Scene("Base")
+            base_entity = base_scene.create_entity("Base actor", entity_id="base-actor")
+            component = ScriptComponent("project://scripts/player.py", "PlayerBehaviour")
+            base_entity.add_component(component)
+            engine = Engine()
+            engine.set_scene(base_scene)
+            engine.set_script_registry(registry)
+            engine.play()
+
+            pushed_scene = Scene("Pushed")
+            pushed_entity = pushed_scene.create_entity("Pushed actor", entity_id="pushed-actor")
+            pushed_entity.add_component(
+                ScriptComponent("project://scripts/player.py", "PlayerBehaviour")
+            )
+            engine.push_scene(pushed_scene)
+            system = engine.behaviour_system
+
+            script.write_text(
+                "from expra_engine.runtime.behaviour import Behaviour\n"
+                "class PlayerBehaviour(Behaviour):\n"
+                "    version = 2\n",
+                encoding="utf-8",
+            )
+            system.reload_script(component.script_id)
+
+            owning_scene_ids = {
+                behaviour.entity.entity_id: behaviour.scene.scene_id
+                for behaviour in system.instances
+                if behaviour.entity is not None
+            }
+            self.assertEqual(
+                owning_scene_ids,
+                {
+                    "base-actor": base_scene.scene_id,
+                    "pushed-actor": pushed_scene.scene_id,
+                },
+            )
+            engine.stop()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -20,6 +20,7 @@ __all__ = (
     "NormalMapResolutionStatus",
     "NormalMapResolver",
     "NormalYConvention",
+    "coerce_normal_map_enums",
     "decode_normal_sample",
     "normal_texture_sources",
     "validate_normal_strength",
@@ -242,6 +243,27 @@ def normal_texture_sources(entity: object) -> tuple[tuple[str, str], ...]:
                     for index, frame in enumerate(animation.frames)
                 )
     return tuple(dict.fromkeys(visuals))
+
+
+def coerce_normal_map_enums(
+    mode: NormalMapMode | str,
+    y_convention: NormalYConvention | str,
+    encoding: NormalMapEncoding | str,
+) -> tuple[NormalMapMode, NormalYConvention, NormalMapEncoding]:
+    """Coerce the three normal-map enum fields together.
+
+    Single owner for the shared mode/convention/encoding coercion used by both
+    ``NormalMapDescriptor`` and ``MaterialComponent`` so their error semantics
+    cannot drift.
+    """
+    try:
+        return (
+            NormalMapMode(mode),
+            NormalYConvention(y_convention),
+            NormalMapEncoding(encoding),
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError("unsupported normal-map mode, convention or encoding") from exc
 
 
 def validate_normal_texture_id(value: str | None) -> str | None:

@@ -7,7 +7,7 @@ from numbers import Real
 from typing import Any
 
 from expra_engine.core.component import Component
-from expra_engine.runtime.rendering import Color
+from expra_engine.runtime.rendering import Color, validate_light_bounds
 
 __all__ = ("Light2DComponent",)
 
@@ -40,7 +40,7 @@ def _color(value: Color | tuple[float, ...] | list[float]) -> Color:
     if any(isinstance(channel, bool) or not isinstance(channel, Real) for channel in values):
         raise ValueError("color channels must be numeric, not bool or text")
     try:
-        return Color(*values)
+        return Color.from_value(values)
     except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError("color channels must be finite numbers between 0 and 1") from exc
 
@@ -77,16 +77,7 @@ class Light2DComponent(Component):
         self.falloff = _finite(falloff, "falloff")
         self.cone_angle = _finite(cone_angle, "cone_angle")
         self.height = _finite(height, "height")
-        if not 0.0 <= self.energy <= 8.0:
-            raise ValueError("energy must be between 0 and 8")
-        if self.radius <= 0.0:
-            raise ValueError("radius must be positive")
-        if not 0.1 <= self.falloff <= 8.0:
-            raise ValueError("falloff must be between 0.1 and 8")
-        if not 0.0 < self.cone_angle <= 360.0:
-            raise ValueError("cone_angle must be greater than 0 and at most 360")
-        if not 0.0 <= self.height <= 1024.0:
-            raise ValueError("height must be between 0 and 1024")
+        validate_light_bounds(self.energy, self.radius, self.falloff, self.cone_angle, self.height)
         self.visible = visible
 
     def to_dict(self) -> dict[str, Any]:
@@ -95,7 +86,7 @@ class Light2DComponent(Component):
             "enabled": self.enabled,
             "visible": self.visible,
             "kind": self.kind,
-            "color": [self.color.red, self.color.green, self.color.blue, self.color.alpha],
+            "color": self.color.to_list(),
             "energy": self.energy,
             "radius": self.radius,
             "falloff": self.falloff,

@@ -14,21 +14,6 @@ from expra_engine.runtime.validation import pair_values
 __all__ = ("PrimitiveComponent", "SpriteComponent", "TextComponent")
 
 
-def _color(value: Color | tuple[float, ...] | list[float]) -> Color:
-    if isinstance(value, Color):
-        return value
-    values = tuple(value)
-    if len(values) not in (3, 4):
-        raise ValueError("color must contain 3 or 4 values")
-    return Color(*values)
-
-
-def _color_dict(value: Color | None) -> list[float] | None:
-    if value is None:
-        return None
-    return [value.red, value.green, value.blue, value.alpha]
-
-
 def _vec2(value: object, name: str) -> tuple[float, float]:
     x, y = pair_values(value, name)
     return (_finite(x, f"{name}.x"), _finite(y, f"{name}.y"))
@@ -123,7 +108,7 @@ class PrimitiveComponent(Component):
 
     @fill.setter
     def fill(self, value: Color | tuple[float, ...] | list[float]) -> None:
-        self._fill = _color(value)
+        self._fill = Color.from_value(value)
 
     @property
     def outline(self) -> Color | None:
@@ -131,7 +116,7 @@ class PrimitiveComponent(Component):
 
     @outline.setter
     def outline(self, value: Color | tuple[float, ...] | list[float] | None) -> None:
-        self._outline = None if value is None else _color(value)
+        self._outline = None if value is None else Color.from_value(value)
 
     def to_dict(self) -> dict[str, Any]:
         data: dict[str, Any] = {
@@ -141,8 +126,8 @@ class PrimitiveComponent(Component):
             "width": self.width,
             "height": self.height,
             "radius": self.radius,
-            "fill": _color_dict(self.fill),
-            "outline": _color_dict(self.outline),
+            "fill": self.fill.to_list(),
+            "outline": None if self.outline is None else self.outline.to_list(),
             "outline_width": self.outline_width,
             "layer": self.layer,
             "visible": self.visible,
@@ -192,7 +177,7 @@ class SpriteComponent(Component):
     ) -> None:
         super().__init__(enabled=enabled)
         self.asset = str(asset)
-        self.tint = _color(tint)
+        self.tint = Color.from_value(tint)
         self.width = _finite(width, "width")
         self.height = _finite(height, "height")
         self.region = region
@@ -216,7 +201,7 @@ class SpriteComponent(Component):
             "type": self.component_type,
             "enabled": self.enabled,
             "asset": self.asset,
-            "tint": _color_dict(self.tint),
+            "tint": self.tint.to_list(),
             "width": self.width,
             "height": self.height,
             "region": _region_dict(self.region),
@@ -266,7 +251,7 @@ class TextComponent(Component):
         self.text = str(text)
         self.font = str(font)
         self.size = _finite(size, "size")
-        self.color = _color(color)
+        self.color = Color.from_value(color)
         self.max_width = None if max_width is None else _finite(max_width, "max_width")
         self.align = str(align)
         self.layer = int(layer)
@@ -279,7 +264,7 @@ class TextComponent(Component):
             "text": self.text,
             "font": self.font,
             "size": self.size,
-            "color": _color_dict(self.color),
+            "color": self.color.to_list(),
             "max_width": self.max_width,
             "align": self.align,
             "layer": self.layer,

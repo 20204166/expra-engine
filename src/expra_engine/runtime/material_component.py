@@ -10,6 +10,7 @@ from expra_engine.runtime.normal_mapping import (
     NormalMapEncoding,
     NormalMapMode,
     NormalYConvention,
+    coerce_normal_map_enums,
     validate_normal_strength,
     validate_normal_texture_id,
 )
@@ -47,9 +48,7 @@ class MaterialComponent(Component):
             ambient_response=ambient_response,
             diffuse=diffuse,
             emission=emission,
-            emission_color=(
-                emission_color if isinstance(emission_color, Color) else Color(*emission_color)
-            ),
+            emission_color=Color.from_value(emission_color),
             toon_steps=toon_steps,
         )
         self.mode = LightingMode(response.mode).value
@@ -58,12 +57,9 @@ class MaterialComponent(Component):
         self.emission = response.emission
         self.emission_color = response.emission_color
         self.toon_steps = response.toon_steps
-        try:
-            mode = NormalMapMode(normal_map_mode)
-            y_convention = NormalYConvention(normal_y_convention)
-            encoding = NormalMapEncoding(normal_encoding)
-        except (TypeError, ValueError) as exc:
-            raise ValueError("unsupported normal-map mode, convention or encoding") from exc
+        mode, y_convention, encoding = coerce_normal_map_enums(
+            normal_map_mode, normal_y_convention, normal_encoding
+        )
         texture_id = validate_normal_texture_id(normal_texture_id)
         strength = validate_normal_strength(normal_strength)
         if mode is NormalMapMode.EXPLICIT and texture_id is None:
@@ -135,7 +131,7 @@ class MaterialComponent(Component):
 
     @emission_color.setter
     def emission_color(self, value: Color | tuple[float, ...] | list[float]) -> None:
-        self._emission_color = value if isinstance(value, Color) else Color(*value)
+        self._emission_color = Color.from_value(value)
 
     @property
     def response(self) -> MaterialLightResponse:
@@ -169,12 +165,7 @@ class MaterialComponent(Component):
             "ambient_response": response.ambient_response,
             "diffuse": response.diffuse,
             "emission": response.emission,
-            "emission_color": [
-                response.emission_color.red,
-                response.emission_color.green,
-                response.emission_color.blue,
-                response.emission_color.alpha,
-            ],
+            "emission_color": response.emission_color.to_list(),
             "toon_steps": response.toon_steps,
             "normal_map_mode": self.normal_map_mode,
             "normal_texture_id": self.normal_texture_id,

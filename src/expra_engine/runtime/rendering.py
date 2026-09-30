@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import IntEnum
 from numbers import Real
-from typing import Protocol, runtime_checkable
+from typing import Protocol, cast, runtime_checkable
 
 from expra_engine.core.math_utils import compose_2d_pose
 from expra_engine.core.scene.camera import Camera2D
@@ -15,6 +16,7 @@ from expra_engine.runtime.normal_mapping import (
     NormalMapEncoding,
     NormalMapMode,
     NormalYConvention,
+    coerce_normal_map_enums,
     validate_normal_strength,
     validate_normal_texture_id,
 )
@@ -41,6 +43,7 @@ __all__ = (
     "Transform",
     "Viewport",
     "render_item_order_key",
+    "validate_light_bounds",
 )
 
 Vec2 = tuple[float, float]
@@ -195,6 +198,46 @@ class Color:
             if not 0.0 <= value <= 1.0:
                 raise ValueError(f"{name} must be between 0 and 1")
 
+    @classmethod
+    def from_value(cls, value: Color | Iterable[float]) -> Color:
+        """Normalize a three- or four-channel value to an RGBA Color."""
+        if isinstance(value, cls):
+            return value
+        values = tuple(cast(Iterable[float], value))
+        if len(values) not in (3, 4):
+            raise ValueError("color must contain 3 or 4 values")
+        if len(values) == 3:
+            return cls(values[0], values[1], values[2])
+        return cls(values[0], values[1], values[2], values[3])
+
+    def to_list(self) -> list[float]:
+        """Return the canonical RGBA list used by serialized components."""
+        return [self.red, self.green, self.blue, self.alpha]
+
+
+def validate_light_bounds(
+    energy: float,
+    radius: float,
+    falloff: float,
+    cone_angle: float,
+    height: float,
+) -> None:
+    """Validate the canonical 2D light parameter ranges.
+
+    Shared by ``LightDescriptor`` (render contract) and ``Light2DComponent``
+    (authored component) so the two cannot drift.
+    """
+    if not 0.0 <= energy <= 8.0:
+        raise ValueError("energy must be between 0 and 8")
+    if radius <= 0.0:
+        raise ValueError("radius must be positive")
+    if not 0.1 <= falloff <= 8.0:
+        raise ValueError("falloff must be between 0.1 and 8")
+    if not 0.0 < cone_angle <= 360.0:
+        raise ValueError("cone_angle must be greater than 0 and at most 360")
+    if not 0.0 <= height <= 1024.0:
+        raise ValueError("height must be between 0 and 1024")
+
 
 @dataclass(frozen=True)
 class LightDescriptor:
@@ -244,16 +287,7 @@ class LightDescriptor:
         direction = _finite(self.direction_degrees, "direction_degrees")
         cone = _finite(self.cone_angle, "cone_angle")
         height = _finite(self.height, "height")
-        if not 0.0 <= energy <= 8.0:
-            raise ValueError("energy must be between 0 and 8")
-        if radius <= 0.0:
-            raise ValueError("radius must be positive")
-        if not 0.1 <= falloff <= 8.0:
-            raise ValueError("falloff must be between 0.1 and 8")
-        if not 0.0 < cone <= 360.0:
-            raise ValueError("cone_angle must be greater than 0 and at most 360")
-        if not 0.0 <= height <= 1024.0:
-            raise ValueError("height must be between 0 and 1024")
+        validate_light_bounds(energy, radius, falloff, cone, height)
         object.__setattr__(self, "energy", energy)
         object.__setattr__(self, "radius", radius)
         object.__setattr__(self, "falloff", falloff)
@@ -290,12 +324,9 @@ class NormalMapDescriptor:
     encoding: NormalMapEncoding | str = NormalMapEncoding.RGB_XYZ
 
     def __post_init__(self) -> None:
-        try:
-            mode = NormalMapMode(self.mode)
-            convention = NormalYConvention(self.y_convention)
-            encoding = NormalMapEncoding(self.encoding)
-        except (TypeError, ValueError) as exc:
-            raise ValueError("unsupported normal-map mode, convention or encoding") from exc
+        mode, convention, encoding = coerce_normal_map_enums(
+            self.mode, self.y_convention, self.encoding
+        )
         if mode is NormalMapMode.DISABLED:
             raise ValueError("disabled normal mapping must use a None descriptor")
         texture_id = validate_normal_texture_id(self.texture_id)

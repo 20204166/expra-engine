@@ -38,19 +38,6 @@ __all__ = (
 _WHITE = Color(1.0, 1.0, 1.0, 1.0)
 
 
-def _color(value: Color | tuple[float, ...] | list[float]) -> Color:
-    if isinstance(value, Color):
-        return value
-    values = tuple(value)
-    if len(values) not in (3, 4):
-        raise ValueError("color must contain 3 or 4 values")
-    return Color(*values)
-
-
-def _color_dict(value: Color) -> list[float]:
-    return [value.red, value.green, value.blue, value.alpha]
-
-
 def modulate_color(color: Color, modulation: Color) -> Color:
     """Multiply two RGBA colours channel-by-channel."""
 
@@ -85,13 +72,13 @@ class CanvasModulateComponent(Component):
         enabled: bool = True,
     ) -> None:
         super().__init__(enabled=enabled)
-        self.color = _color(color)
+        self.color = Color.from_value(color)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "type": self.component_type,
             "enabled": self.enabled,
-            "color": _color_dict(self.color),
+            "color": self.color.to_list(),
         }
 
     @classmethod

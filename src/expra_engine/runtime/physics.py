@@ -12,7 +12,8 @@ the backend physics engine chosen later.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import isfinite
+
+from expra_engine.runtime.validation import coerce_finite_float
 
 __all__ = (
     "AreaEffect2D",
@@ -58,13 +59,19 @@ class HitResult2D:
         if self.hit and self.entity_id is None:
             raise ValueError("entity_id must be provided when hit is True")
         if self.distance is not None:
-            d = float(self.distance)
-            if not isfinite(d) or d < 0.0:
+            try:
+                d = coerce_finite_float(self.distance, "distance")
+            except ValueError as exc:
+                raise ValueError("distance must be finite and non-negative") from exc
+            if d < 0.0:
                 raise ValueError("distance must be finite and non-negative")
             object.__setattr__(self, "distance", d)
         if self.fraction is not None:
-            f = float(self.fraction)
-            if not isfinite(f) or not 0.0 <= f <= 1.0:
+            try:
+                f = coerce_finite_float(self.fraction, "fraction")
+            except ValueError as exc:
+                raise ValueError("fraction must be in [0, 1]") from exc
+            if not 0.0 <= f <= 1.0:
                 raise ValueError("fraction must be in [0, 1]")
             object.__setattr__(self, "fraction", f)
 
