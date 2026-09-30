@@ -10,10 +10,9 @@ from typing import Any
 from expra_engine.core.component import TransformComponent
 from expra_engine.runtime.input import PhysicalInput
 from expra_engine.runtime.pygame_input import (
-    gamepad_button_name,
     keyboard_control_name,
-    mouse_button_name,
     translate_axis_event,
+    translate_event,
 )
 from expra_engine.runtime.rendering import (
     OrthographicCamera,
@@ -265,10 +264,7 @@ class PygameRuntime:
                     is not None
                 )
                 if not handled:
-                    self._signal_input(
-                        "press",
-                        PhysicalInput("keyboard", keyboard_control_name(self.pygame, event.key)),
-                    )
+                    self._signal_translated_input(event)
             elif event_type == self.pygame.KEYUP:
                 self._keys.discard(event.key)
                 handled = (
@@ -279,10 +275,7 @@ class PygameRuntime:
                     is not None
                 )
                 if not handled:
-                    self._signal_input(
-                        "release",
-                        PhysicalInput("keyboard", keyboard_control_name(self.pygame, event.key)),
-                    )
+                    self._signal_translated_input(event)
             elif event_type == getattr(self.pygame, "MOUSEMOTION", object()):
                 if self.ui_root is not None:
                     self.ui_root.dispatch(UIEvent("pointer_move", position=tuple(event.pos)))
@@ -295,9 +288,7 @@ class PygameRuntime:
                     is not None
                 )
                 if not handled:
-                    self._signal_input(
-                        "press", PhysicalInput("mouse", mouse_button_name(event.button))
-                    )
+                    self._signal_translated_input(event)
             elif event_type == getattr(self.pygame, "MOUSEBUTTONUP", object()):
                 handled = (
                     self.ui_root is not None
@@ -307,22 +298,23 @@ class PygameRuntime:
                     is not None
                 )
                 if not handled:
-                    self._signal_input(
-                        "release", PhysicalInput("mouse", mouse_button_name(event.button))
-                    )
-            elif event_type == getattr(self.pygame, "JOYBUTTONDOWN", object()):
-                self._signal_input(
-                    "press", PhysicalInput("gamepad", gamepad_button_name(event.button))
-                )
-            elif event_type == getattr(self.pygame, "JOYBUTTONUP", object()):
-                self._signal_input(
-                    "release", PhysicalInput("gamepad", gamepad_button_name(event.button))
-                )
+                    self._signal_translated_input(event)
+            elif (
+                event_type == getattr(self.pygame, "JOYBUTTONDOWN", object())
+                or event_type == getattr(self.pygame, "JOYBUTTONUP", object())
+            ):
+                self._signal_translated_input(event)
             elif event_type == getattr(self.pygame, "JOYAXISMOTION", object()):
                 translated = translate_axis_event(self.pygame, event)
                 if translated is not None:
                     physical, value = translated
                     self._signal_axis(physical, value)
+
+    def _signal_translated_input(self, event: Any) -> None:
+        """Pass an unhandled Pygame event through the canonical input adapter."""
+        translated = translate_event(self.pygame, event)
+        if translated is not None:
+            self._signal_input(*translated)
 
     def _signal_input(self, phase: str, physical: PhysicalInput) -> None:
         """Resolve a translated physical input through the engine's input map."""

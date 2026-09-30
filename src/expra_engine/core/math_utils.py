@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable
 
 
 def finite_float(value: float, name: str) -> float:
@@ -64,17 +65,40 @@ def compose_2d_pose(
     (``Transform.compose``) -- keep them delegating here rather than
     reimplementing the trigonometry twice.
     """
-    px, py, parent_rotation, parent_scale_x, parent_scale_y = parent
+    _, _, parent_rotation, parent_scale_x, parent_scale_y = parent
     x, y, rotation, scale_x, scale_y = child
-    angle = math.radians(parent_rotation)
-    scaled_x = x * parent_scale_x
-    scaled_y = y * parent_scale_y
+    world_x, world_y = transform_2d_points(
+        parent,
+        ((x, y),),
+    )[0]
     return (
-        px + scaled_x * math.cos(angle) - scaled_y * math.sin(angle),
-        py + scaled_x * math.sin(angle) + scaled_y * math.cos(angle),
+        world_x,
+        world_y,
         parent_rotation + rotation,
         parent_scale_x * scale_x,
         parent_scale_y * scale_y,
+    )
+
+
+def transform_2d_points(
+    parent: tuple[float, float, float, float, float],
+    points: Iterable[tuple[float, float]],
+) -> tuple[tuple[float, float], ...]:
+    """Transform a batch of local 2D points through one parent pose.
+
+    The pose tuple is ``(x, y, rotation_degrees, scale_x, scale_y)``. Rotation
+    terms are computed once for the batch, and ``compose_2d_pose`` delegates its
+    position mapping here so both operations share one transform implementation.
+    """
+    px, py, rotation, scale_x, scale_y = parent
+    angle = math.radians(rotation)
+    cosine, sine = math.cos(angle), math.sin(angle)
+    return tuple(
+        (
+            px + local_x * scale_x * cosine - local_y * scale_y * sine,
+            py + local_x * scale_x * sine + local_y * scale_y * cosine,
+        )
+        for local_x, local_y in points
     )
 
 
@@ -87,4 +111,5 @@ __all__ = [
     "lerp_angle",
     "lerp_exponential_decay",
     "round_to_closest",
+    "transform_2d_points",
 ]

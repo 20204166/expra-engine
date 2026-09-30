@@ -838,6 +838,23 @@ class TestPygameRenderer(unittest.TestCase):
         self.assertTrue(all(len(points) == 4 for _, _, points in pygame.draw.polygons))
         self.assertEqual(pygame.draw.polygon_widths, [2])
 
+    def test_rotated_rectangle_applies_transform_scale_once(self) -> None:
+        pygame = _FakePygame(_FakeFont())
+        renderer = PygameRenderer(pygame, _FakeSurface())
+        renderer.start(RenderContext(Viewport(0, 0, 100, 100), OrthographicCamera(width=10, height=10)))
+        item = RenderItem(
+            "scaled-rotated",
+            PrimitiveDescriptor("rectangle", size=(2.0, 1.0)),
+            Transform(rotation=90.0, scale=(2.0, 3.0, 1.0)),
+        )
+
+        renderer.render(RenderContractFrame((item,)))
+
+        self.assertEqual(
+            pygame.draw.polygons[0][2],
+            ((65, 70), (35, 70), (35, 30), (65, 30)),
+        )
+
     def test_circle_and_point_outlines_use_canonical_draw_support(self) -> None:
         pygame = _FakePygame(_FakeFont())
         renderer = PygameRenderer(pygame, _FakeSurface())

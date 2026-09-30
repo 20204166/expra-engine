@@ -38,6 +38,16 @@ def test_contract_values_are_immutable_and_validate_finite_inputs() -> None:
         Color(2.0, 0.0, 0.0)
 
 
+def test_transform_maps_local_point_through_scale_rotation_and_translation() -> None:
+    transform = Transform(
+        position=(10.0, 20.0, 3.0),
+        rotation=90.0,
+        scale=(2.0, 3.0, 4.0),
+    )
+
+    assert transform.transform_point((1.0, 2.0, 5.0)) == pytest.approx((4.0, 22.0, 23.0))
+
+
 def test_orthographic_camera_maps_world_coordinates_into_viewport() -> None:
     camera = OrthographicCamera(position=(10.0, 20.0), width=20.0, height=10.0)
     viewport = Viewport(100, 50, 400, 200)

@@ -22,22 +22,20 @@ def projected_rectangle_points(
     context: RenderContext,
 ) -> tuple[tuple[int, int], ...]:
     """Project a transformed rectangle into integer Pygame points."""
-    half_width = abs(item.primitive.size[0] * transform.scale[0]) / 2.0
-    half_height = abs(item.primitive.size[1] * transform.scale[1]) / 2.0
-    angle = math.radians(transform.rotation)
-    cos_angle, sin_angle = math.cos(angle), math.sin(angle)
-    points: list[tuple[int, int]] = []
-    for local_x, local_y in (
+    half_width = abs(item.primitive.size[0]) / 2.0
+    half_height = abs(item.primitive.size[1]) / 2.0
+    local_points = (
         (-half_width, -half_height),
         (-half_width, half_height),
         (half_width, half_height),
         (half_width, -half_height),
-    ):
-        world_point = (
-            transform.position[0] + local_x * cos_angle - local_y * sin_angle,
-            transform.position[1] + local_x * sin_angle + local_y * cos_angle,
-        )
-        projected = context.camera.project(world_point, context.viewport)
+    )
+    world_points = transform.transform_points(
+        tuple((local_x, local_y, 0.0) for local_x, local_y in local_points)
+    )
+    points: list[tuple[int, int]] = []
+    for world_point in world_points:
+        projected = context.camera.project(world_point[:2], context.viewport)
         points.append((round(projected[0]), round(projected[1])))
     return tuple(points)
 
@@ -53,17 +51,12 @@ def projected_polygon_points(
     transform (position + rotation + scale) and the camera, matching the
     ``projected_rectangle_points`` convention.
     """
-    angle = math.radians(transform.rotation)
-    cos_angle, sin_angle = math.cos(angle), math.sin(angle)
+    world_points = transform.transform_points(
+        tuple((local_x, local_y, 0.0) for local_x, local_y in item.primitive.points)
+    )
     points: list[tuple[int, int]] = []
-    for local_x, local_y in item.primitive.points:
-        scaled_x = local_x * transform.scale[0]
-        scaled_y = local_y * transform.scale[1]
-        world_point = (
-            transform.position[0] + scaled_x * cos_angle - scaled_y * sin_angle,
-            transform.position[1] + scaled_x * sin_angle + scaled_y * cos_angle,
-        )
-        projected = context.camera.project(world_point, context.viewport)
+    for world_point in world_points:
+        projected = context.camera.project(world_point[:2], context.viewport)
         points.append((round(projected[0]), round(projected[1])))
     return tuple(points)
 

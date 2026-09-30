@@ -237,18 +237,17 @@ class LegacyPygameRenderMixin:
                 self._rect_from_center(self._legacy_project(x, y), round(width), round(height)),
             )
             return
-        angle = math.radians(rotation)
-        cos_angle, sin_angle = math.cos(angle), math.sin(angle)
-        corners = []
-        for local_x, local_y in (
+        transform = Transform(position=(x, y, 0.0), rotation=rotation)
+        local_points = (
             (-width / 2, -height / 2),
             (-width / 2, height / 2),
             (width / 2, height / 2),
             (width / 2, -height / 2),
-        ):
-            world_x = x + local_x * cos_angle - local_y * sin_angle
-            world_y = y + local_x * sin_angle + local_y * cos_angle
-            corners.append(self._legacy_project(world_x, world_y))
+        )
+        world_points = transform.transform_points(
+            tuple((local_x, local_y, 0.0) for local_x, local_y in local_points)
+        )
+        corners = [self._legacy_project(x, y) for x, y, _ in world_points]
         if rotation or self.context.camera.rotation:
             polygon = getattr(draw, "polygon", None)
             if polygon is not None:

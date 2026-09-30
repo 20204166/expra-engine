@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import patch
 
 from expra_engine.core.component import TransformComponent
 from expra_engine.core.project import Project
@@ -304,6 +305,40 @@ class TestPygameRuntime(unittest.TestCase):
             [event.physical for event in engine.signals],
             [PhysicalInput("mouse", "button-1"), PhysicalInput("mouse", "button-1")],
         )
+
+    def test_unhandled_input_uses_the_canonical_pygame_translator(self) -> None:
+        event = SimpleNamespace(
+            type=_FakePygame.MOUSEBUTTONDOWN,
+            pos=(10, 10),
+            button=1,
+        )
+        translated = PhysicalInput("mouse", "canonical-control")
+        calls: list[tuple[object, object]] = []
+
+        def translate(pygame_module: object, current_event: object):
+            calls.append((pygame_module, current_event))
+            return "press", translated
+
+        pygame = _FakePygame([[event], [SimpleNamespace(type=_FakePygame.QUIT)]])
+        engine = _FakeEngine()
+        engine.input_map = InputMap()
+        engine.input_map.bind(ActionId("fire"), translated)
+        runtime = PygameRuntime(
+            engine,
+            pygame_module=pygame,
+            clock=_FakeClock([16, 16]),
+            surface_factory=pygame.display.set_mode,
+        )
+
+        with patch(
+            "expra_engine.runtime.pygame_runtime.translate_event",
+            side_effect=translate,
+            create=True,
+        ):
+            runtime.run()
+
+        self.assertEqual(calls, [(pygame, event)])
+        self.assertEqual([signal.physical for signal in engine.signals], [translated])
 
     def test_unhandled_gamepad_buttons_and_axes_flow_through_input_map(self) -> None:
         pygame = _FakePygame(

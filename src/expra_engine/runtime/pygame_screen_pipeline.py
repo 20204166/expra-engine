@@ -407,19 +407,6 @@ class PygameScreenPipeline:
             surface = self._ensure_alpha_surface(surface)
         return method(surface, size)
 
-    @staticmethod
-    def _world_point(
-        local: tuple[float, float],
-        transform: Transform,
-    ) -> tuple[float, float]:
-        x = local[0] * transform.scale[0]
-        y = local[1] * transform.scale[1]
-        angle = math.radians(transform.rotation)
-        return (
-            transform.position[0] + x * math.cos(angle) - y * math.sin(angle),
-            transform.position[1] + x * math.sin(angle) + y * math.cos(angle),
-        )
-
     @classmethod
     def _project_local_rect(
         cls,
@@ -433,9 +420,11 @@ class PygameScreenPipeline:
             (rect.x + rect.width, rect.y + rect.height),
             (rect.x, rect.y + rect.height),
         )
+        world_points = transform.transform_points(
+            tuple((point[0], point[1], 0.0) for point in corners)
+        )
         projected = tuple(
-            context.camera.project(cls._world_point(point, transform), context.viewport)
-            for point in corners
+            context.camera.project(point[:2], context.viewport) for point in world_points
         )
         xs = tuple(point[0] for point in projected)
         ys = tuple(point[1] for point in projected)

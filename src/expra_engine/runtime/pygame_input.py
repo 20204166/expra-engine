@@ -68,9 +68,8 @@ def gamepad_axis_name(axis: Any) -> str:
 def translate_event(pygame_module: Any, event: Any) -> tuple[str, PhysicalInput] | None:
     """Translate a pygame input event into ``(phase, PhysicalInput)``, else ``None``.
 
-    Only digital keyboard and mouse events are translated; joystick and other
-    event classes return ``None`` (they are not yet consumed by the runtime, see
-    ``runtime/input.py``'s ``GamepadAxis`` note).
+    Digital keyboard, mouse-button, and gamepad-button events are translated.
+    Analog joystick axes use :func:`translate_axis_event` instead.
     """
     event_type = getattr(event, "type", None)
     if event_type == getattr(pygame_module, "KEYDOWN", object()):

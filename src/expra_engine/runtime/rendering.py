@@ -9,7 +9,7 @@ from enum import IntEnum
 from numbers import Real
 from typing import Protocol, cast, runtime_checkable
 
-from expra_engine.core.math_utils import compose_2d_pose
+from expra_engine.core.math_utils import compose_2d_pose, transform_2d_points
 from expra_engine.core.scene.camera import Camera2D
 from expra_engine.runtime.animation import SpriteRegion
 from expra_engine.runtime.normal_mapping import (
@@ -182,6 +182,22 @@ class Transform:
             position=(x, y, self.position[2] + child.position[2] * self.scale[2]),
             rotation=rotation,
             scale=(scale_x, scale_y, self.scale[2] * child.scale[2]),
+        )
+
+    def transform_point(self, point: Vec3) -> Vec3:
+        """Map a local point into world coordinates through this transform."""
+        return self.transform_points((point,))[0]
+
+    def transform_points(self, points: Iterable[Vec3]) -> tuple[Vec3, ...]:
+        """Map a batch of local points through this transform efficiently."""
+        local_points = tuple(_tuple(point, 3, "point") for point in points)
+        world_points = transform_2d_points(
+            (self.position[0], self.position[1], self.rotation, self.scale[0], self.scale[1]),
+            ((point[0], point[1]) for point in local_points),
+        )
+        return tuple(
+            (world[0], world[1], self.position[2] + point[2] * self.scale[2])
+            for point, world in zip(local_points, world_points, strict=True)
         )
 
 
