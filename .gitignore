@@ -18,6 +18,7 @@ venv/
 .expra-mcp.toml
 /opencode.json
 /.mcp.json
+/docs/bug_hunts/
 /docs/bug_hunts/patch_reviews/
 /docs/plans/
 /docs/audits/
