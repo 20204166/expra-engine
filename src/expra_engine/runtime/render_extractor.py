@@ -15,6 +15,7 @@ from expra_engine.runtime.lighting_2d import Light2DComponent
 from expra_engine.runtime.material_component import MaterialComponent
 from expra_engine.runtime.material_lighting import MaterialLightResponse
 from expra_engine.runtime.rendering import (
+    SUPPORTED_PRIMITIVE_KINDS,
     Color,
     LightDescriptor,
     MaterialDescriptor,
@@ -74,11 +75,31 @@ def _item(
     normal_map: NormalMapDescriptor | None = None,
 ) -> RenderItem:
     if isinstance(visual, PrimitiveComponent):
-        if visual.kind not in {"point", "rectangle", "circle", "rounded_rectangle"}:
+        if visual.kind not in SUPPORTED_PRIMITIVE_KINDS:
             raise ValueError("unsupported primitive kind")
-        if visual.width <= 0 or visual.height <= 0 or visual.outline_width < 0:
+        if visual.outline_width < 0:
             raise ValueError("invalid primitive dimensions")
-        primitive = PrimitiveDescriptor(visual.kind, (visual.width, visual.height), visual.radius)
+        if visual.kind in ("polygon", "line"):
+            points = visual.points
+            if visual.kind == "polygon" and (points is None or len(points) < 3):
+                raise ValueError("polygon primitive requires at least three points")
+            if visual.kind == "line" and (points is None or len(points) != 2):
+                raise ValueError("line primitive requires exactly two points")
+            if points is None:
+                raise ValueError("primitive points are required")
+            xs = [point[0] for point in points]
+            ys = [point[1] for point in points]
+            width = max(max(xs) - min(xs), 1e-6)
+            height = max(max(ys) - min(ys), 1e-6)
+            primitive = PrimitiveDescriptor(
+                visual.kind, (width, height), None, tuple(points), visual.thickness
+            )
+        else:
+            if visual.width <= 0 or visual.height <= 0:
+                raise ValueError("invalid primitive dimensions")
+            primitive = PrimitiveDescriptor(
+                visual.kind, (visual.width, visual.height), visual.radius
+            )
         color = visual.fill
         material = MaterialDescriptor(
             color=color,

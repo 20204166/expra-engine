@@ -698,7 +698,7 @@ def op_render_inspect(req: dict) -> dict:
                 "edit_viewport_width/height and runtime_viewport_width/height were not "
                 "supplied, so both default to 400x300 (identical aspect) -- this comparison "
                 "is NOT informative until you supply the real pixel size of the live editor "
-                "panel (Tk Canvas) and the real game window size (found via source_read on "
+                "panel (Qt viewport) and the real game window size (found via source_read on "
                 "the project's __main__.py, since that is hardcoded there and not discoverable "
                 "from project.json)."
                 if default_viewports_used

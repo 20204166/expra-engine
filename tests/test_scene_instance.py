@@ -125,6 +125,26 @@ class TestResolveSceneInstances(unittest.TestCase):
         assert script is not None
         self.assertEqual(script.exposed_values["open_speed"], 9.5)
 
+    def test_missing_override_target_fails_without_discarding_previous_materialization(self) -> None:
+        scene, root_id = _owning_scene_with_instance()
+        resolve_scene_instances(scene, resolve_source=lambda _path: _source_scene())
+        root = scene.find_entity(root_id)
+        assert root is not None
+        component = root.get_component(SceneInstanceComponent)
+        assert component is not None
+        component.overrides = {"Missing Door": {"open_speed": 9.5}}
+
+        with self.assertRaisesRegex(ValueError, "Missing Door.*not found"):
+            resolve_scene_instances(scene, resolve_source=lambda _path: _source_scene())
+
+        self.assertEqual({entity.name for entity in scene.entities}, {"Room Instance", "Wall", "Door A"})
+
+    def test_override_target_without_script_fails_explicitly(self) -> None:
+        scene, _root_id = _owning_scene_with_instance(overrides={"Wall": {"open_speed": 9.5}})
+
+        with self.assertRaisesRegex(ValueError, "Wall.*does not have a ScriptComponent"):
+            resolve_scene_instances(scene, resolve_source=lambda _path: _source_scene())
+
     def test_missing_source_raises_explicit_error_naming_entity_and_path(self) -> None:
         scene, _root_id = _owning_scene_with_instance()
 
@@ -240,6 +260,51 @@ class TestResolveSceneInstances(unittest.TestCase):
         script = door.get_component(ScriptComponent)
         assert script is not None
         self.assertEqual(script.exposed_values["open_speed"], 3.0)
+
+
+class TestEntityOrigin(unittest.TestCase):
+    def test_authored_entity_reports_authored(self) -> None:
+        scene = Scene("plain")
+        authored = scene.create_entity("plain entity")
+        origin = scene.entity_origin(authored.entity_id)
+        self.assertEqual(origin.kind, "authored")
+        self.assertIsNone(origin.instance_root_id)
+        self.assertIsNone(origin.source_path)
+
+    def test_instance_root_reports_instance_root(self) -> None:
+        scene, root_id = _owning_scene_with_instance()
+        origin = scene.entity_origin(root_id)
+        self.assertEqual(origin.kind, "instance_root")
+
+    def test_materialized_descendant_reports_owning_root_and_source(self) -> None:
+        scene, root_id = _owning_scene_with_instance()
+        resolve_scene_instances(scene, resolve_source=lambda path: _source_scene())
+        wall = scene.find_entity_by_name("Wall")
+        assert wall is not None
+        origin = scene.entity_origin(wall.entity_id)
+        self.assertEqual(origin.kind, "materialized")
+        self.assertEqual(origin.instance_root_id, root_id)
+        self.assertEqual(origin.source_path, "scenes/room_segment.json")
+
+    def test_missing_entity_raises_key_error(self) -> None:
+        scene = Scene("plain")
+        with self.assertRaises(KeyError):
+            scene.entity_origin("does-not-exist")
+
+    def test_re_resolution_replaces_stale_provenance(self) -> None:
+        scene, _root_id = _owning_scene_with_instance()
+        resolve_scene_instances(scene, resolve_source=lambda path: _source_scene())
+        stale_wall = scene.find_entity_by_name("Wall")
+        assert stale_wall is not None
+        stale_id = stale_wall.entity_id
+
+        resolve_scene_instances(scene, resolve_source=lambda path: _source_scene())
+        fresh_wall = scene.find_entity_by_name("Wall")
+        assert fresh_wall is not None
+        self.assertNotEqual(stale_id, fresh_wall.entity_id)
+        self.assertEqual(scene.entity_origin(fresh_wall.entity_id).kind, "materialized")
+        with self.assertRaises(KeyError):
+            scene.entity_origin(stale_id)
 
 
 if __name__ == "__main__":

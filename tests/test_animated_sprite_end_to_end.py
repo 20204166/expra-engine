@@ -23,7 +23,7 @@ from expra_engine.runtime.animated_sprite_2d import (
 from expra_engine.runtime.behaviour import Behaviour
 from expra_engine.runtime.events import Update
 from expra_engine.runtime.render_extractor import extract_render_frame
-from expra_engine.ui.viewport import build_editor_render_target
+from expra_engine.ui.viewport_render_target import build_editor_render_target
 
 
 def _frames(prefix: str) -> SpriteFrames2D:

@@ -8,6 +8,7 @@ instance content), never a raw ``scene.to_dict()`` write.
 from __future__ import annotations
 
 import unittest
+from typing import Any
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -17,10 +18,8 @@ from expra_engine.core.engine import Engine, EngineRunState
 from expra_engine.core.project import Project
 from expra_engine.core.scene import Scene, SceneInstanceComponent
 from expra_engine.core.scene.document_codec import decode_protobuf
-from expra_engine.ui.editor_window import EditorWindow
-from tests.support.tk_display import display_available
+from tests.support.qt_editor import make_editor, pump
 
-DISPLAY_AVAILABLE = display_available()
 
 
 def _make_project(root: Path) -> Project:
@@ -40,13 +39,12 @@ def _make_room_segment(root: Path) -> None:
     project.save_document(room, "scenes/room_segment.scene.pb")
 
 
-@unittest.skipUnless(DISPLAY_AVAILABLE, "no display for real Tk editor tests")
 class MultiLevelWorkflowTests(unittest.TestCase):
-    def _window_with_project(self, root: Path) -> tuple[EditorWindow, Project]:
+    def _window_with_project(self, root: Path) -> tuple[Any, Project]:
         project = _make_project(root)
-        window = EditorWindow(Engine())
+        window = make_editor(Engine())
         window._project_workflow.open_loaded(project)
-        window._root.update()
+        pump(window)
         return window, project
 
     def test_open_scene_switches_edit_scene_and_last_save_path(self) -> None:
@@ -55,7 +53,7 @@ class MultiLevelWorkflowTests(unittest.TestCase):
             try:
                 self.assertEqual(window._engine.edit_scene.name, "Main")  # type: ignore[union-attr]
                 window._project_workflow.open_scene("scenes/level_two.scene.pb")
-                window._root.update()
+                pump(window)
                 self.assertEqual(window._engine.edit_scene.name, "Level Two")  # type: ignore[union-attr]
                 self.assertEqual(
                     window._last_save_path, project.document_file("scenes/level_two.scene.pb")
@@ -68,10 +66,11 @@ class MultiLevelWorkflowTests(unittest.TestCase):
             window, _project = self._window_with_project(Path(directory))
             try:
                 window._act_add_entity()  # dirties the command stack
-                window._root.update()
+                pump(window)
                 self.assertTrue(window._command_stack.can_undo)
-                with patch(
-                    "expra_engine.editor.project_workflow.messagebox.askyesnocancel",
+                with patch.object(
+                    window._project_workflow._dialogs,
+                    "ask_yes_no_cancel",
                     return_value=None,  # Cancel
                 ):
                     window._project_workflow.open_scene("scenes/level_two.scene.pb")
@@ -84,8 +83,9 @@ class MultiLevelWorkflowTests(unittest.TestCase):
             window, project = self._window_with_project(Path(directory))
             try:
                 new_path = project.scenes_dir / "branched.scene.pb"
-                with patch(
-                    "expra_engine.editor.project_workflow.filedialog.asksaveasfilename",
+                with patch.object(
+                    window._project_workflow._dialogs,
+                    "ask_save_file",
                     return_value=str(new_path),
                 ):
                     window._project_workflow.save_scene_as()
@@ -94,7 +94,7 @@ class MultiLevelWorkflowTests(unittest.TestCase):
                 self.assertEqual(window._last_save_path, new_path)
 
                 window._act_add_entity()
-                window._root.update()
+                pump(window)
                 window._act_save_scene()
                 saved = decode_protobuf(new_path.read_bytes())
                 self.assertEqual(len(saved["entities"]), len(window._engine.edit_scene.entities))  # type: ignore[union-attr]
@@ -113,9 +113,9 @@ class MultiLevelWorkflowTests(unittest.TestCase):
             root = Path(directory)
             project = _make_project(root)
             _make_room_segment(project.path)
-            window = EditorWindow(Engine())
+            window = make_editor(Engine())
             window._project_workflow.open_loaded(project)
-            window._root.update()
+            pump(window)
             try:
                 scene = window._engine.edit_scene
                 instance_root = scene.create_entity("Room Instance")  # type: ignore[union-attr]
@@ -150,9 +150,9 @@ class MultiLevelWorkflowTests(unittest.TestCase):
             root = Path(directory)
             project = _make_project(root)
             _make_room_segment(project.path)
-            window = EditorWindow(Engine())
+            window = make_editor(Engine())
             window._project_workflow.open_loaded(project)
-            window._root.update()
+            pump(window)
             try:
                 scene = window._engine.edit_scene
                 instance_root = scene.create_entity("Room Instance")  # type: ignore[union-attr]
@@ -166,7 +166,7 @@ class MultiLevelWorkflowTests(unittest.TestCase):
                 window._last_save_path = project.scene_file()
 
                 window._start_autosave()
-                window._root.after_cancel(window._autosave_after_id)  # don't actually reschedule
+                window._cancel_after(window._autosave_after_id)  # don't actually reschedule
                 window._act_save_scene_silent()
 
                 saved = decode_protobuf(project.document_file().read_bytes())
@@ -182,7 +182,7 @@ class MultiLevelWorkflowTests(unittest.TestCase):
             try:
                 original_scene_id = window._engine.edit_scene.scene_id  # type: ignore[union-attr]
                 window._project_workflow.duplicate_scene("main_copy")
-                window._root.update()
+                pump(window)
                 self.assertEqual(window._engine.edit_scene.name, "main_copy")  # type: ignore[union-attr]
                 self.assertNotEqual(window._engine.edit_scene.scene_id, original_scene_id)  # type: ignore[union-attr]
                 self.assertIn("scenes/main_copy.scene.pb", project.scene_paths())
@@ -194,8 +194,8 @@ class MultiLevelWorkflowTests(unittest.TestCase):
         with TemporaryDirectory() as directory:
             window, _project = self._window_with_project(Path(directory))
             try:
-                with patch(
-                    "expra_engine.editor.project_workflow.messagebox.showerror"
+                with patch.object(
+                    window._project_workflow._dialogs, "show_error"
                 ) as mock_error:
                     window._project_workflow.duplicate_scene("level_two")
                 mock_error.assert_called_once()
@@ -208,19 +208,19 @@ class MultiLevelWorkflowTests(unittest.TestCase):
             window, project = self._window_with_project(Path(directory))
             try:
                 window._project_workflow.open_scene("scenes/level_two.scene.pb")
-                window._root.update()
+                pump(window)
                 window._act_add_entity()  # unsaved edit on Level Two
-                window._root.update()
+                pump(window)
                 entity_count_before = len(window._engine.edit_scene.entities)  # type: ignore[union-attr]
 
                 window._project_workflow.run_project()
-                window._root.update()
+                pump(window)
                 self.assertIsNotNone(window._project_workflow._project_process_controller.process)
                 self.assertEqual(window._engine.run_state, EngineRunState.EDIT)
                 self.assertEqual(window._engine.edit_scene.name, "Level Two")  # type: ignore[union-attr]
 
                 window._act_stop()
-                window._root.update()
+                pump(window)
                 self.assertEqual(window._engine.run_state, EngineRunState.EDIT)
                 self.assertEqual(window._engine.edit_scene.name, "Level Two")  # type: ignore[union-attr]
                 self.assertEqual(
@@ -239,11 +239,11 @@ class MultiLevelWorkflowTests(unittest.TestCase):
             try:
                 before_scene_id = window._engine.edit_scene.scene_id  # type: ignore[union-attr]
                 window._project_workflow.run_project()
-                window._root.update()
+                pump(window)
                 self.assertIsNotNone(window._project_workflow._project_process_controller.process)
                 self.assertEqual(window._engine.run_state, EngineRunState.EDIT)
                 window._act_stop()
-                window._root.update()
+                pump(window)
                 self.assertIsNone(window._project_workflow._project_process_controller.process)
                 self.assertEqual(window._engine.edit_scene.scene_id, before_scene_id)  # type: ignore[union-attr]
             finally:

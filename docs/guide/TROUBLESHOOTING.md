@@ -30,8 +30,8 @@ Practical "do not do this" guidance, with the likely symptom and the fix.
 
 ## Scripting mistakes
 
-- **Importing editor/Tk modules into runtime scripts** — forbidden in exports
-  (the scan rejects `expra_engine.editor`/`ui`/`tkinter`).
+- **Importing editor/GUI modules into runtime scripts** — forbidden in exports
+  (the scan rejects `expra_engine.editor`/`ui` and GUI toolkit imports).
 - **Manually parsing `.pb`** — use the document model.
 - **Using `TextComponent` as game state** — store state in components/behaviour
   or `WorldSessionStateComponent`, not in a label's text.
@@ -57,8 +57,9 @@ Practical "do not do this" guidance, with the likely symptom and the fix.
 
 ## Editor mistakes
 
-- **Touching widgets from a worker thread** — deliver via `TkDeliveryQueue`.
-- **Calling `after`/`configure` from a background task** — main thread only.
+- **Touching widgets from a worker thread** — deliver via `QtDeliveryQueue`.
+- **Calling widget methods from a background task** — Qt widgets belong to the
+  GUI thread; deliver work through the Qt queue.
 
 ## Play vs Run Project confusion
 

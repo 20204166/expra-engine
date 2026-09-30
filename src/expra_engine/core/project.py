@@ -442,11 +442,16 @@ class Project:
             raise ProjectError(str(exc)) from exc
         if value is not None:
             if isinstance(document, World):
+                newly_registered = value not in self._world_paths
                 self.register_world_path(value)
             elif isinstance(document, Level):
+                newly_registered = value not in self._level_paths
                 self.register_level_path(value)
             else:
+                newly_registered = value not in self._scene_paths
                 self.register_scene_path(value)
+            if newly_registered:
+                self.save()
         return path
 
     def save_world(self, world: World, relative_path: str | None = None) -> Path:

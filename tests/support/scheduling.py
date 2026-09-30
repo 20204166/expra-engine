@@ -1,11 +1,10 @@
-"""Deterministic scheduling fakes for coordinator, timer, and concurrency tests.
+"""Deterministic scheduling fakes for coordinator and concurrency tests.
 
 Adapted from System Analyzer tests/support/scheduling.py.
 
 The deferred runner models the exact worker queue AppCoordinator consumes
-without real threads; the timer master models the Tk `after` protocol.
-Both are deliberately minimal — they record the scheduling contract and
-let tests step time explicitly.
+without real threads. It is deliberately minimal — it records the scheduling
+contract and lets tests step time explicitly.
 """
 
 from __future__ import annotations
@@ -102,40 +101,3 @@ class RecordingDelivery:
     @property
     def count(self) -> int:
         return len(self._callbacks)
-
-
-class TimerMaster:
-    """Recording fake for the Tk ``after``/``after_cancel`` timer protocol."""
-
-    def __init__(self) -> None:
-        self.scheduled: list[tuple[Any, ...]] = []
-        self.cancelled: list[str] = []
-        self.destroyed = False
-        self.next_timer_id = 0
-
-    def after(self, delay: int, callback: object, *args: object) -> str:
-        self.scheduled.append((delay, callback, *args))
-        self.next_timer_id += 1
-        return f"after#{self.next_timer_id}"
-
-    def after_cancel(self, identifier: str) -> None:
-        self.cancelled.append(identifier)
-
-    def destroy(self) -> None:
-        self.destroyed = True
-
-
-class FailingMaster(TimerMaster):
-    """Timer master whose ``after`` call raises on a dead event loop."""
-
-    def after(self, delay: int, callback: object, *args: object) -> str:
-        del delay, callback, args
-        raise RuntimeError("event loop is not running")
-
-
-class FailingCancelMaster(TimerMaster):
-    """Timer master whose ``after_cancel`` call raises on a dead event loop."""
-
-    def after_cancel(self, identifier: str) -> None:
-        del identifier
-        raise RuntimeError("event loop is not running")

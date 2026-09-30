@@ -2,7 +2,7 @@
 reusable-scene-instance semantics -- spec sections 23 and 25.
 
 Every mutation below goes through the same production code paths a human
-clicking the editor invokes (CommandStack pushes, ProjectWorkflow, real Tk
+clicking the editor invokes (CommandStack pushes, ProjectWorkflow, real Qt
 widgets) -- never a raw scene.add_entity/hand JSON edit. Runs against a
 temporary copy of the real Blacksite Relay project so this stays a safe,
 idempotent, re-runnable regression test rather than mutating the checked-in
@@ -31,10 +31,8 @@ from expra_engine.core.scene import (
 from expra_engine.editor.commands import TransformEntityCommand
 from expra_engine.filesystem import ResourceId
 from expra_engine.runtime.script_component import ScriptComponent
-from expra_engine.ui.editor_window import EditorWindow
-from tests.support.tk_display import display_available
+from tests.support.qt_editor import make_editor, pump
 
-DISPLAY_AVAILABLE = display_available()
 BLACKSITE_SRC = Path(__file__).parents[1] / "examples" / "blacksite_relay"
 LEVEL2 = "levels/level_02_deepcore.level.pb"
 
@@ -64,17 +62,16 @@ def _door_scene() -> Scene:
     return scene
 
 
-@unittest.skipUnless(DISPLAY_AVAILABLE, "no display for real Tk editor tests")
 class BlacksiteLevel2DogfoodTests(unittest.TestCase):
     def test_full_level2_authoring_sequence_through_the_real_editor(self) -> None:
         with TemporaryDirectory() as directory:
             project = _copy_blacksite(Path(directory) / "Blacksite Relay")
-            window = EditorWindow(Engine())
+            window = make_editor(Engine())
             try:
                 # 1. Open Level 2 (Open Scene, Phase F) -- not the project default.
                 window._project_workflow.open_loaded(project)
                 window._project_workflow.open_scene(LEVEL2)
-                window._root.update()
+                pump(window)
                 scene = window._engine.edit_scene
                 assert scene is not None
                 self.assertEqual(scene.name, "Blacksite Relay - Deep Core")
@@ -89,7 +86,7 @@ class BlacksiteLevel2DogfoodTests(unittest.TestCase):
                 # 3-4. Select "Barrier 1", move it via the real drag controller
                 # (Phase D's SpatialEditController) -- one drag, one undo entry.
                 window._on_hierarchy_select((barrier.entity_id,))
-                window._root.update()
+                pump(window)
                 self.assertEqual(window._selected_ids, (barrier.entity_id,))
                 before_history = len(window._command_stack.history)
                 barrier_transform = barrier.get_component(TransformComponent)
@@ -103,7 +100,7 @@ class BlacksiteLevel2DogfoodTests(unittest.TestCase):
                 controller.begin_drag_on_entity(barrier.entity_id, _drag_event(0.0, 0.0))
                 controller.continue_drag(_drag_event(30.0, 20.0))
                 controller.end_drag()
-                window._root.update()
+                pump(window)
                 after_x = barrier_transform.x
                 self.assertGreater(abs(expected_dx), 0.01)  # sanity: a real, non-trivial move
                 self.assertAlmostEqual(after_x, before_x + expected_dx, places=3)
@@ -114,12 +111,12 @@ class BlacksiteLevel2DogfoodTests(unittest.TestCase):
                 # via a real, existing enemy rather than inventing one from
                 # scratch (an equally legitimate reading of the spec item).
                 window._on_hierarchy_select((drone.entity_id,))
-                window._root.update()
+                pump(window)
                 from expra_engine.editor.interactions import duplicate_selection
 
                 enemy_count_before = len(scene.get_entities_by_tag("enemy"))
                 duplicate_selection(window)
-                window._root.update()
+                pump(window)
                 self.assertEqual(len(scene.get_entities_by_tag("enemy")), enemy_count_before + 1)
                 new_drone_id = window._selected_ids[0]
                 self.assertNotEqual(new_drone_id, drone.entity_id)
@@ -131,20 +128,21 @@ class BlacksiteLevel2DogfoodTests(unittest.TestCase):
                 from expra_engine.editor.interactions import drop_asset_on_viewport
 
                 canvas = window._viewport._canvas
-                canvas.update_idletasks()
+                pump(window)
                 asset_path = project.assets_dir / "kenney" / "floor_panel.png"
                 self.assertTrue(asset_path.is_file())
                 entry = AssetEntry(
                     asset_path, "floor_panel.png", False, project.asset_id(asset_path)
                 )
                 self.assertEqual(entry.kind, "Image")
-                drop_x = canvas.winfo_rootx() + 10
-                drop_y = canvas.winfo_rooty() + 10
+                origin_x, origin_y = canvas.global_origin()
+                drop_x = origin_x + 10
+                drop_y = origin_y + 10
                 sprite_count_before = len(
                     [e for e in scene.entities if e.get_component(TransformComponent) is not None]
                 )
                 drop_asset_on_viewport(window, entry, drop_x, drop_y)
-                window._root.update()
+                pump(window)
                 placed = scene.find_entity_by_name("floor_panel")
                 assert placed is not None
                 from expra_engine.runtime.visual_components import SpriteComponent
@@ -205,10 +203,10 @@ class BlacksiteLevel2DogfoodTests(unittest.TestCase):
 
                 # 12. Close and reopen; verify every change survived.
                 window._on_close()
-                window = EditorWindow(Engine())
+                window = make_editor(Engine())
                 window._project_workflow.open_loaded(project)
                 window._project_workflow.open_scene(LEVEL2)
-                window._root.update()
+                pump(window)
                 reopened = window._engine.edit_scene
                 assert reopened is not None
                 self.assertGreater(len(reopened.entities), original_entity_count)
@@ -238,13 +236,13 @@ class BlacksiteLevel2DogfoodTests(unittest.TestCase):
                 # scene is restored exactly on Stop (existing Engine
                 # isolation, not something this dogfood changes).
                 window._act_play()
-                window._root.update()
+                pump(window)
                 self.assertEqual(window._engine.run_state, EngineRunState.PLAY)
                 active_scene = window._engine.active_scene
                 assert active_scene is not None
                 self.assertIsNotNone(active_scene.find_entity_by_name("floor_panel"))
                 window._act_stop()
-                window._root.update()
+                pump(window)
                 self.assertEqual(window._engine.run_state, EngineRunState.EDIT)
                 edit_scene = window._engine.edit_scene
                 assert edit_scene is not None
@@ -262,7 +260,6 @@ class BlacksiteLevel2DogfoodTests(unittest.TestCase):
                 window._on_close()
 
 
-@unittest.skipUnless(DISPLAY_AVAILABLE, "no display for real Tk editor tests")
 class ReusableSceneInstanceDogfoodTests(unittest.TestCase):
     """Spec §25: create one reusable Scene, place it twice, prove source
     changes propagate to both while a per-instance override stays local."""

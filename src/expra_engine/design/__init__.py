@@ -1,6 +1,6 @@
 """Renderer-neutral design language primitives.
 
-The editor adapts these semantic values to Tk styles. Future game UI backends
+The editor adapts these semantic values to Qt styles. Future game UI backends
 can adapt the same concepts to a renderer without importing editor dependencies.
 """
 

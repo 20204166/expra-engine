@@ -1,20 +1,16 @@
 from __future__ import annotations
 
-import pytest
-
 from expra_engine.core.component import TransformComponent
 from expra_engine.core.engine import Engine
 from expra_engine.core.project import Project
 from expra_engine.runtime.lighting_2d import Light2DComponent
-from expra_engine.ui.editor_window import EditorWindow
-from tests.support.tk_display import display_available
+from tests.support.qt_editor import make_editor, pump
 
 
-@pytest.mark.skipif(not display_available(), reason="no display for real Tk editor tests")
 def test_view_menu_preview_lighting_toggle_only_changes_the_editor_frame(tmp_path) -> None:
     project = Project.create("Preview Lighting", tmp_path / "project")
     engine = Engine()
-    window = EditorWindow(engine)
+    window = make_editor(engine)
     try:
         window._project_workflow.open_loaded(Project.load(project.path))
         render_requests = []
@@ -36,19 +32,18 @@ def test_view_menu_preview_lighting_toggle_only_changes_the_editor_frame(tmp_pat
             return result
 
         window._viewport.render = record_viewport_render
-        menubar = window._root.nametowidget(window._root.cget("menu"))
-        view_menu = window._root.nametowidget(menubar.entrycget("View", "menu"))
+        preview_lighting = window._preview_lighting_action
         scene = window._engine.edit_scene
         assert scene is not None
         original_camera_settings = scene.camera.to_dict()
 
-        assert window._preview_lighting_var.get() is True
-        view_menu.invoke(0)
-        window._root.update()
-        assert window._preview_lighting_var.get() is False
-        for geometry in ("980x640", "1280x800", "1440x900"):
-            window._root.geometry(geometry)
-            window._root.update()
+        assert preview_lighting.isChecked() is True
+        preview_lighting.trigger()
+        pump()
+        assert preview_lighting.isChecked() is False
+        for width, height in ((980, 640), (1280, 800), (1440, 900)):
+            window.resize(width, height)
+            pump()
             window._viewport._on_resize()
             assert window._viewport._target.frame.lighting_enabled is False
         assert len(render_requests) == 1
@@ -57,9 +52,9 @@ def test_view_menu_preview_lighting_toggle_only_changes_the_editor_frame(tmp_pat
         assert window._viewport._target.frame.lighting_enabled is False
         assert scene.camera.to_dict() == original_camera_settings
 
-        view_menu.invoke(0)
-        window._root.update()
-        assert window._preview_lighting_var.get() is True
+        preview_lighting.trigger()
+        pump()
+        assert preview_lighting.isChecked() is True
         assert window._viewport._target.frame.lighting_enabled is True
         assert scene.camera.to_dict() == original_camera_settings
 

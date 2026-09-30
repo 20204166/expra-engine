@@ -35,9 +35,7 @@ from expra_engine.runtime.events import Update
 from expra_engine.runtime.physics_world import PhysicsWorld2D
 from expra_engine.runtime.pygame_resource_provider import PygameResourceProvider
 from expra_engine.ui.viewport_render_target import build_editor_render_target
-from tests.support.tk_display import display_available
-
-DISPLAY_AVAILABLE = display_available()
+from tests.support.qt_editor import make_editor
 
 
 def _frames() -> SpriteFrames2D:
@@ -354,12 +352,9 @@ class ResourcePipelineObservabilityTests(unittest.TestCase):
         self.assertEqual(metric.in_flight, 0)
 
 
-@unittest.skipUnless(DISPLAY_AVAILABLE, "no display for real Tk editor tests")
 class SharedWatcherWiringTests(unittest.TestCase):
     def test_editor_window_gives_engine_appcoordinator_and_viewport_the_same_watcher(self) -> None:
-        from expra_engine.ui.editor_window import EditorWindow
-
-        window = EditorWindow(Engine())
+        window = make_editor(Engine())
         try:
             self.assertIsInstance(window._observer, ObservabilityWatcher)
             self.assertIs(window._engine.observer, window._observer)

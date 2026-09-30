@@ -191,6 +191,33 @@ def test_resolved_normal_map_registers_for_dependency_closure(tmp_path) -> None:
     }
 
 
+def test_auto_pair_resolves_generated_png_for_non_png_albedo(tmp_path) -> None:
+    project = Project.create("Normal mapping", tmp_path / "normal-project")
+    (project.assets_dir / "wall.jpg").write_bytes(b"base image")
+    resolver = NormalMapResolver(project.resource_service())
+
+    missing = resolver.inspect("assets://wall.jpg", NormalMapMode.AUTO_PAIR)
+    assert missing.status == "missing"
+    assert missing.normal_texture_id == "assets://wall_normal.jpg"
+
+    (project.assets_dir / "wall_normal.png").write_bytes(b"generated normal")
+    resolved = resolver.inspect("assets://wall.jpg", NormalMapMode.AUTO_PAIR)
+    assert resolved.status == "resolved"
+    assert resolved.normal_texture_id == "assets://wall_normal.png"
+
+
+def test_auto_pair_prefers_same_extension_over_generated_png(tmp_path) -> None:
+    project = Project.create("Normal mapping", tmp_path / "normal-project")
+    (project.assets_dir / "wall.jpg").write_bytes(b"base image")
+    (project.assets_dir / "wall_normal.jpg").write_bytes(b"authored normal")
+    (project.assets_dir / "wall_normal.png").write_bytes(b"generated normal")
+    resolver = NormalMapResolver(project.resource_service())
+
+    resolved = resolver.inspect("assets://wall.jpg", NormalMapMode.AUTO_PAIR)
+    assert resolved.status == "resolved"
+    assert resolved.normal_texture_id == "assets://wall_normal.jpg"
+
+
 def test_auto_pair_candidate_cache_is_bounded_and_clears_on_project_change(tmp_path) -> None:
     project = Project.create("Normal mapping", tmp_path / "normal-project")
     resolver = NormalMapResolver(project.resource_service(), max_candidates=2)

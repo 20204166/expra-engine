@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import math
 
-from expra_engine.runtime.world_policy import WorldCameraContext
+from expra_engine.runtime.world_policy import (
+    LevelResidencyState,
+    WorldCameraContext,
+)
 
 __all__ = ("WorldCameraContextMixin",)
 
@@ -71,6 +74,20 @@ class WorldCameraContextMixin:
             ),
             recenter_generation=self._camera_recenter_generation,
         )
+
+    @property
+    def environment_entity_ids(self) -> frozenset[str]:
+        """Entities in the active camera-context Level that may supply ambient modulation."""
+        level_id = self.camera_context.camera_context_level_id
+        if level_id != self._environment_context_level_id:
+            self._environment_context_level_id = level_id
+            self._environment_entity_ids = frozenset(self._runtime_entity_ids.get(level_id, ()))
+        if (
+            level_id is None
+            or self._residency.state(level_id).state is not LevelResidencyState.ACTIVE
+        ):
+            return frozenset()
+        return self._environment_entity_ids
 
     def report_camera_view(
         self,

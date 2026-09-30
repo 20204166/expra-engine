@@ -7,7 +7,6 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from tkinter import messagebox
 from typing import Any
 
 from expra_engine.core.project import Project
@@ -29,6 +28,10 @@ class ProjectProcessController:
         self._script_path: Path | None = None
         self._document_entrypoint: str | None = None
 
+    @property
+    def _dialogs(self) -> Any:
+        return self._window._dialogs
+
     def start(self, project: Project, script: Path) -> None:
         if not self.prepare_start():
             return
@@ -47,7 +50,7 @@ class ProjectProcessController:
                 project_messages.project_launch_failed(str(script), project.entrypoint, str(exc)),
                 level="error",
             )
-            messagebox.showerror("Run Project", str(exc), parent=self._window._root)
+            self._dialogs.show_error("Run Project", str(exc))
             return
         self.process = process
         self._output_file = output_file
@@ -60,7 +63,7 @@ class ProjectProcessController:
                 detail = f"Could not monitor project process; stopping it also failed: {stop_error}"
             else:
                 detail = "Could not monitor project process; it was stopped."
-            messagebox.showerror("Run Project", detail, parent=self._window._root)
+            self._dialogs.show_error("Run Project", detail)
             return
         self._window._console.log(
             project_messages.project_started(
@@ -68,6 +71,7 @@ class ProjectProcessController:
                 project.entrypoint,
             )
         )
+        self._process_state_changed()
 
     def prepare_start(self) -> bool:
         """Return whether a new launch may proceed, reaping an exited child."""
@@ -192,6 +196,13 @@ class ProjectProcessController:
         if self.process is process:
             self.process = None
             self._cancel_poll()
+            self._process_state_changed()
+
+    def _process_state_changed(self) -> None:
+        """Let the window refresh actions (Stop) that depend on a child being alive."""
+        refresh = getattr(self._window, "_update_play_pause_state", None)
+        if callable(refresh):
+            refresh()
 
     @staticmethod
     def _process_exited(process: subprocess.Popen[bytes]) -> bool:

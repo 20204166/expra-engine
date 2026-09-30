@@ -1,7 +1,6 @@
 """Icon markers for non-visual scene entities (camera, player, generic).
 
-Extracted from viewport.py to keep it under the repository's 900-line hard
-limit. Pure Tk Canvas drawing over a retained ``MarkerEntry`` map the caller
+Pure canvas drawing over a retained ``MarkerEntry`` map the caller
 owns and passes in each frame; this module holds no state of its own.
 """
 

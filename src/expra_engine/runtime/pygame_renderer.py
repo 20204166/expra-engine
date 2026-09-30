@@ -13,7 +13,11 @@ from typing import Any, cast
 
 from expra_engine.observability import ObservabilityWatcher
 from expra_engine.runtime.canvas_effects import modulate_color
-from expra_engine.runtime.pygame_geometry import draw_rounded_rectangle, projected_rectangle_points
+from expra_engine.runtime.pygame_geometry import (
+    draw_rounded_rectangle,
+    projected_polygon_points,
+    projected_rectangle_points,
+)
 from expra_engine.runtime.pygame_lighting import PygameLightingPass
 from expra_engine.runtime.pygame_lighting_renderer import PygameLightingRenderMixin
 from expra_engine.runtime.pygame_normal_mapping import PygameNormalMapCache
@@ -65,9 +69,11 @@ class PygameRenderer(PygameLightingRenderMixin, LegacyPygameRenderMixin):
         lighting_pass: PygameLightingPass | None = None,
         normal_map_resolver: Any | None = None,
         normal_map_cache: PygameNormalMapCache | None = None,
+        pixel_art_mode: bool = False,
     ) -> None:
         self.pygame = pygame_module
         self.surface = surface
+        self.pixel_art_mode = bool(pixel_art_mode)
         self.screen_size = screen_size
         self.world_bounds = world_bounds
         self.arena_bounds = arena_bounds if arena_bounds is not None else (0, 0, *screen_size)
@@ -114,6 +120,7 @@ class PygameRenderer(PygameLightingRenderMixin, LegacyPygameRenderMixin):
                 and find_spec("numpy") is not None
                 and callable(getattr(getattr(pygame_module, "surfarray", None), "array3d", None))
                 and callable(getattr(getattr(pygame_module, "surfarray", None), "blit_array", None))
+                and callable(getattr(getattr(pygame_module, "surfarray", None), "pixels_alpha", None))
             ),
         )
         self._update_screen_capabilities()
@@ -388,8 +395,15 @@ class PygameRenderer(PygameLightingRenderMixin, LegacyPygameRenderMixin):
                         rendered_texture = flip(
                             rendered_texture, item.sprite_flip_h, item.sprite_flip_v
                         )
-                if transform_api is not None and hasattr(transform_api, "smoothscale"):
-                    rendered_texture = transform_api.smoothscale(rendered_texture, (width, height))
+                if transform_api is not None:
+                    if self.pixel_art_mode:
+                        _scale_fn = getattr(transform_api, "scale", None)
+                    else:
+                        _scale_fn = getattr(transform_api, "smoothscale", None) or getattr(
+                            transform_api, "scale", None
+                        )
+                    if callable(_scale_fn):
+                        rendered_texture = _scale_fn(rendered_texture, (width, height))
                 if angle and transform_api is not None:
                     rendered_texture = transform_api.rotate(rendered_texture, angle)
                 get_size = cast(
@@ -511,6 +525,38 @@ class PygameRenderer(PygameLightingRenderMixin, LegacyPygameRenderMixin):
                         1,
                         round(item.material.outline_width),
                     )
+            elif item.primitive.kind == "polygon":
+                polygon = getattr(draw, "polygon", None)
+                if not callable(polygon):
+                    raise RuntimeError("Pygame backend cannot draw polygons")
+                points = projected_polygon_points(item, transform, context)
+                polygon(surface, color, points)
+                if item.material.outline is not None and item.material.outline_width:
+                    polygon(
+                        surface,
+                        self._color(
+                            modulate_color(item.material.outline, modulation),
+                            item.material.opacity,
+                        ),
+                        points,
+                        round(item.material.outline_width),
+                    )
+            elif item.primitive.kind == "line":
+                line = getattr(draw, "line", None)
+                if not callable(line):
+                    raise RuntimeError("Pygame backend cannot draw lines")
+                points = projected_polygon_points(item, transform, context)
+                if len(points) != 2:
+                    raise RuntimeError("line primitive requires exactly two projected points")
+                thickness = round(
+                    abs(
+                        item.primitive.thickness
+                        * max(abs(transform.scale[0]), abs(transform.scale[1]))
+                        / context.camera.width
+                        * context.viewport.width
+                    )
+                )
+                line(surface, color, points[0], points[1], max(thickness, 1))
             else:
                 self._draw_failed = True
                 self._diagnostics.report(

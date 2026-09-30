@@ -1,4 +1,4 @@
-"""Export progress events — injected into GameExporter, no tkinter dependency."""
+"""Export progress events — injected into GameExporter, no GUI-toolkit dependency."""
 
 from __future__ import annotations
 

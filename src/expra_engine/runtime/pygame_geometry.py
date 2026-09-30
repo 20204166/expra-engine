@@ -9,7 +9,11 @@ from typing import Any, cast
 from expra_engine.runtime.canvas_effects import modulate_color
 from expra_engine.runtime.rendering import Color, RenderContext, RenderItem, Transform
 
-__all__ = ("draw_rounded_rectangle", "projected_rectangle_points")
+__all__ = (
+    "draw_rounded_rectangle",
+    "projected_polygon_points",
+    "projected_rectangle_points",
+)
 
 
 def projected_rectangle_points(
@@ -32,6 +36,32 @@ def projected_rectangle_points(
         world_point = (
             transform.position[0] + local_x * cos_angle - local_y * sin_angle,
             transform.position[1] + local_x * sin_angle + local_y * cos_angle,
+        )
+        projected = context.camera.project(world_point, context.viewport)
+        points.append((round(projected[0]), round(projected[1])))
+    return tuple(points)
+
+
+def projected_polygon_points(
+    item: RenderItem,
+    transform: Transform,
+    context: RenderContext,
+) -> tuple[tuple[int, int], ...]:
+    """Project an arbitrary polygon's local points into integer Pygame points.
+
+    Each point is an entity-local (x, y) offset composed through the entity
+    transform (position + rotation + scale) and the camera, matching the
+    ``projected_rectangle_points`` convention.
+    """
+    angle = math.radians(transform.rotation)
+    cos_angle, sin_angle = math.cos(angle), math.sin(angle)
+    points: list[tuple[int, int]] = []
+    for local_x, local_y in item.primitive.points:
+        scaled_x = local_x * transform.scale[0]
+        scaled_y = local_y * transform.scale[1]
+        world_point = (
+            transform.position[0] + scaled_x * cos_angle - scaled_y * sin_angle,
+            transform.position[1] + scaled_x * sin_angle + scaled_y * cos_angle,
         )
         projected = context.camera.project(world_point, context.viewport)
         points.append((round(projected[0]), round(projected[1])))
@@ -62,7 +92,12 @@ def draw_rounded_rectangle(
     pygame_module = renderer.pygame
     material = item.material
     width = round(
-        abs(item.primitive.size[0] * transform.scale[0] / context.camera.width * context.viewport.width)
+        abs(
+            item.primitive.size[0]
+            * transform.scale[0]
+            / context.camera.width
+            * context.viewport.width
+        )
     )
     height = round(
         abs(
@@ -87,7 +122,9 @@ def draw_rounded_rectangle(
     outline_color: tuple[int, ...] | None = None
     outline_width = 0
     if material.outline is not None and material.outline_width:
-        outline_color = renderer._color(modulate_color(material.outline, modulation), material.opacity)
+        outline_color = renderer._color(
+            modulate_color(material.outline, modulation), material.opacity
+        )
         outline_width = round(material.outline_width)
     angle = transform.rotation - math.degrees(context.camera.rotation)
     if angle:

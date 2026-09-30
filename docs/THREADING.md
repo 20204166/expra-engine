@@ -1,81 +1,61 @@
 # Threading Model
 
-## The Invariant
+## The invariant
 
-**Tk owns widgets. Only the main thread may call any Tk API.**
+**Qt widgets are owned by the Qt GUI thread.** Worker threads must not create,
+mutate, inspect, or destroy widgets. Shared editor state and engine/runtime
+objects keep their existing ownership; this document describes UI delivery,
+not a redesign of `AppCoordinator`.
 
-This is not a style guideline. Tkinter raises errors or silently corrupts state when widgets are touched from background threads. The coordinator architecture enforces this boundary.
+## Worker-to-UI delivery
 
-## How Work Crosses Threads
+The Qt editor injects `QtDeliveryQueue` into `AppCoordinator` as its `deliver`
+callable:
 
-```
-Main thread                     Worker thread
-    |                               |
-    | AppCoordinator.run(...)       |
-    |------------------------------>|
-    |                   task()      |
-    |                   result      |
-    |<------ deliver(callback) -----|
-    |                               |
-    | root.after_idle(callback)     |
-    |   -> callback runs here       |
-    |   -> widget.configure(...)    |
-    |   -> UICoordinator.flush()    |
+```text
+Qt GUI thread                         Worker thread
+--------------                        -------------
+AppCoordinator.run(...)  -----------> task()
+                                      result
+UICoordinator <- queued callback <--- deliver(callback)
+  -> panel update on Qt GUI thread
 ```
 
-The `deliver` function injected into `AppCoordinator` in `EditorWindow` is:
+Workers enqueue callbacks only. `QtDeliveryQueue` drains on the GUI thread via
+Qt timers, with bounded work per drain. It closes with its owning window,
+discards pending callbacks on shutdown, and performs timer operations on the
+timer's owning thread. Do not call widget methods directly from worker code.
 
-```python
-deliver = lambda cb: self.root.after_idle(cb)
-```
+## Guarantees and limits
 
-`after_idle` schedules `cb` to run on the Tk event loop — main thread only.
-
-## Guarantees
-
-| Guarantee | How enforced |
+| Guarantee | Owner |
 |---|---|
-| No widget call from worker | `deliver` wraps every cross-thread result; workers only call `deliver`, never `widget.*` |
-| Stale results discarded | Generation counters increment on each new request; old results check current gen before delivering |
-| Cancellation safe | `cancel_all()` increments gen; in-flight workers' delivered callbacks are no-ops |
-| Shutdown safe | `TimerDelivery.cancel_all()` drains pending timers before `root.destroy()` |
+| Worker results are applied on the GUI thread | `QtDeliveryQueue` |
+| Stale UI intents are rejected | `UICoordinator` |
+| Worker cancellation/coalescing lifecycle | `AppCoordinator` |
+| Timer callback cancellation and close handling | `QtTimerDelivery` |
+| Engine Play/Stop state isolation | `Engine` |
 
-## Sequence: Play button pressed
+The coordinator's threading model is intentionally unchanged by the Tk-removal
+cleanup. The Qt queue is the GUI delivery adapter; it does not own game/runtime
+timing.
 
-1. User clicks Play → ButtonCoordinator dispatches `"play"` → `engine.play()` (main thread)
-2. Engine deep-copies edit scene via JSON round-trip → stored as `runtime_scene`
-3. UICoordinator receives RenderIntent for toolbar and viewport
-4. UICoordinator.flush() updates toolbar buttons and viewport canvas — all on main thread
+## Play and runtime preview
 
-No background threads are involved in the basic play/stop cycle. Background threads are used for file I/O (project load/save) and any future asset operations.
+Play/Stop remains engine-owned. Qt timer delivery may schedule editor preview
+work, but `Engine.tick()` and game runtime timing are not moved into Qt. Runtime
+failures are handled by the existing editor workflow and lifecycle tests.
 
-## Sequence: Scene save (background)
+## Shutdown
 
-1. User triggers save → ButtonCoordinator dispatches `"save_scene"`
-2. `EditorWindow._do_save_scene()` calls `coordinator.run("scene:save", task_factory)`
-3. Worker thread executes `project.save()` (file I/O)
-4. Result delivered via `after_idle` → `ConsolePanel.log("Scene saved")`
-5. All widget updates happen on the main thread
+Close the editor through the window's normal close handler. The Qt delivery
+queue closes before its shell is destroyed so later worker completion cannot
+reach destroyed widgets. Timers and queued callbacks are cancelled or ignored
+according to their existing owners. Do not use `threading.Timer` to call into
+Qt widgets.
 
-## Anti-Patterns (Never Do)
+## Observability
 
-```python
-# WRONG — worker directly touching a widget
-def worker():
-    result = compute()
-    self.label.configure(text=result)  # crash or silent corruption
-
-# WRONG — threading.Timer calling into Tk
-t = threading.Timer(1.0, lambda: self.widget.config(...))  # WRONG
-
-# CORRECT
-coordinator.run("key", lambda: compute(), on_result=lambda r: deliver(lambda: label.config(text=r)))
-```
-
-## ComponentRefreshScheduler and Timers
-
-`ComponentRefreshScheduler.collect_due()` is called from `TimerDelivery` callbacks, which always run on the main thread via `root.after(delay, callback)`. The scheduler itself is not thread-safe and must only be used from the main thread.
-
-## ObservabilityWatcher
-
-`ObservabilityWatcher` uses `threading.RLock` internally and is safe to call from any thread. This is the only class in expra_engine designed for concurrent access.
+`ObservabilityWatcher` is thread-safe and remains the shared source for runtime,
+coordinator, and editor metrics. See the [architecture guide](guide/ARCHITECTURE.md)
+for ownership boundaries.

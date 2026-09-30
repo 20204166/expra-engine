@@ -1,4 +1,4 @@
-"""Tk-free wiring tests for :mod:`expra_engine.editor.export_dialog`."""
+"""GUI-free wiring tests for :mod:`expra_engine.editor.export_dialog_core`."""
 
 from __future__ import annotations
 
@@ -7,22 +7,36 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from expra_engine.editor.export_dialog import _ACTION_EXPORT, ExportDialog
+from expra_engine.editor.export_dialog_core import _ACTION_EXPORT, ExportDialogCore
 from expra_engine.export.plan import RuntimeProfile
 
 
-class ExportDialogActionTests(unittest.TestCase):
-    """Exercise ExportDialog callbacks without opening a real Tk window."""
+class _RecordingDialog(ExportDialogCore):
+    """The shared export logic with recording frontend hooks (no window)."""
 
-    def _make_dialog(self, tmp_path: Path) -> tuple[ExportDialog, MagicMock, MagicMock]:
+    def _append_log(self, text: str) -> None:
+        self.logged.append(text)
+
+    def _destroy_dialog(self) -> None:
+        self.destroyed = True
+
+    def _export_button_widget(self):
+        return self._export_btn
+
+
+class ExportDialogActionTests(unittest.TestCase):
+    """Exercise the shared export dialog callbacks without opening a real window."""
+
+    def _make_dialog(self, tmp_path: Path) -> tuple[_RecordingDialog, MagicMock, MagicMock]:
         app = MagicMock()
         buttons = MagicMock()
-        dialog = object.__new__(ExportDialog)
+        dialog = object.__new__(_RecordingDialog)
         dialog._project = tmp_path
         dialog._app = app
         dialog._buttons = buttons
         dialog._on_complete = None
-        dialog._log = MagicMock()
+        dialog.logged = []
+        dialog.destroyed = False
         dialog._target_var = MagicMock(get=lambda: "linux")
         dialog._name_var = MagicMock(get=lambda: "mygame")
         dialog._version_var = MagicMock(get=lambda: "1.0.0")
@@ -63,7 +77,7 @@ class ExportDialogActionTests(unittest.TestCase):
             project = Path(tmp)
             (project / "__main__.py").write_text("print('hello')\n", encoding="utf-8")
             dialog, _, _ = self._make_dialog(project)
-            with patch("expra_engine.editor.export_dialog.ExportPlan") as plan:
+            with patch("expra_engine.editor.export_dialog_core.ExportPlan") as plan:
                 dialog._start_export()
             self.assertEqual(plan.call_args.kwargs["runtime_profile"], RuntimeProfile.PYGAME)
 
@@ -77,17 +91,15 @@ class ExportDialogActionTests(unittest.TestCase):
             dialog._on_result("export_game", result)
 
             self.assertEqual(received, [result])
-            dialog._log.insert.assert_called_once_with("end", f"Done: {result}\n")
+            self.assertEqual(dialog.logged, [f"Done: {result}"])
 
     def test_close_cancels_export_and_destroys_dialog(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             dialog, app, _ = self._make_dialog(Path(tmp))
-            dialog.destroy = MagicMock()
-
             dialog._on_close()
 
             app.cancel.assert_called_once_with(_ACTION_EXPORT, "Cancelled by user")
-            dialog.destroy.assert_called_once_with()
+            self.assertTrue(dialog.destroyed)
 
     def test_log_line_appends_text(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -95,9 +107,7 @@ class ExportDialogActionTests(unittest.TestCase):
 
             dialog._log_line("hello")
 
-            dialog._log.config.assert_any_call(state="normal")
-            dialog._log.insert.assert_called_once_with("end", "hello\n")
-            dialog._log.config.assert_any_call(state="disabled")
+            self.assertEqual(dialog.logged, ["hello"])
 
     def test_invalid_plan_logs_error_without_dispatching(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -107,7 +117,8 @@ class ExportDialogActionTests(unittest.TestCase):
             dialog._start_export()
 
             app.run.assert_not_called()
-            dialog._log.insert.assert_called_once()
+            self.assertEqual(len(dialog.logged), 1)
+            self.assertTrue(dialog.logged[0].startswith("Error:"))
 
 
 if __name__ == "__main__":

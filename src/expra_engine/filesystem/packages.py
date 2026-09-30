@@ -49,7 +49,7 @@ class PackageManifest:
             or not identity
             or not isinstance(version, str)
             or not version
-            or not isinstance(format_version, int)
+            or type(format_version) is not int
             or format_version < 1
             or not isinstance(raw_resources, list)
             or not raw_resources
@@ -72,7 +72,7 @@ class PackageManifest:
                 not isinstance(path, str)
                 or not path
                 or path in paths
-                or not isinstance(size, int)
+                or type(size) is not int
                 or size < 0
                 or not isinstance(sha256, str)
                 or len(sha256) != 64

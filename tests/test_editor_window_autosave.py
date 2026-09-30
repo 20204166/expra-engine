@@ -5,22 +5,30 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from expra_engine.core.engine import Engine, EngineRunState
 from expra_engine.core.scene import Scene
 from expra_engine.editor.active_document import ActiveDocument
 from expra_engine.observability import ObservabilityWatcher
 from expra_engine.runtime.input import ActionId, InputMap, PhysicalInput
-from expra_engine.ui.editor_window import EditorWindow
-from tests.support.tk_display import display_available
+from expra_engine.editor.window_core import EditorWindowCore
+from tests.support.qt_editor import make_editor
 
-DISPLAY_AVAILABLE = display_available()
+
+class _CoreWindow(EditorWindowCore):
+    """Shared window logic with timer hooks routed to a recording ``_root`` double."""
+
+    def _after(self, delay_ms, callback):
+        return self._root.after(delay_ms, callback)
+
+    def _cancel_after(self, handle) -> None:
+        self._root.after_cancel(handle)
 
 
 class EditorWindowAutosaveTests(unittest.TestCase):
-    def _window(self, tmp_path: Path) -> EditorWindow:
-        window = object.__new__(EditorWindow)
+    def _window(self, tmp_path: Path) -> _CoreWindow:
+        window = object.__new__(_CoreWindow)
         window._root = MagicMock()
         window._is_closing = False
         window._active_document = ActiveDocument()
@@ -77,7 +85,7 @@ class EditorWindowAutosaveTests(unittest.TestCase):
             self.assertFalse(path.exists())
 
     def test_runtime_key_events_forward_to_playing_engine_input(self) -> None:
-        window = object.__new__(EditorWindow)
+        window = object.__new__(_CoreWindow)
         window._observer = None
         input_map = InputMap()
         input_map.bind(ActionId("left_up"), PhysicalInput("keyboard", "w"))
@@ -88,19 +96,19 @@ class EditorWindowAutosaveTests(unittest.TestCase):
             signal=signal,
         )
 
-        window._on_runtime_key_press(SimpleNamespace(keysym="W"))
-        window._on_runtime_key_press(SimpleNamespace(keysym="W"))
+        window._forward_runtime_key("press", "W")
+        window._forward_runtime_key("press", "W")
 
         self.assertTrue(input_map.is_held("left_up"))
         signal.assert_called_once()
 
-        window._on_runtime_key_release(SimpleNamespace(keysym="w"))
+        window._forward_runtime_key("release", "w")
 
         self.assertFalse(input_map.is_held("left_up"))
         self.assertEqual(signal.call_count, 2)
 
     def test_runtime_key_events_ignore_unconfigured_keys_and_edit_mode(self) -> None:
-        window = object.__new__(EditorWindow)
+        window = object.__new__(_CoreWindow)
         window._observer = None
         input_map = InputMap()
         input_map.bind(ActionId("custom_action"), PhysicalInput("keyboard", "space"))
@@ -111,19 +119,19 @@ class EditorWindowAutosaveTests(unittest.TestCase):
             signal=signal,
         )
 
-        window._on_runtime_key_press(SimpleNamespace(keysym="F1"))
+        window._forward_runtime_key("press", "F1")
 
         self.assertFalse(input_map.held_actions)
         signal.assert_not_called()
 
         window._engine.run_state = EngineRunState.EDIT
-        window._on_runtime_key_press(SimpleNamespace(keysym="space"))
+        window._forward_runtime_key("press", "space")
 
         self.assertFalse(input_map.is_held("custom_action"))
         signal.assert_not_called()
 
     def test_runtime_key_events_record_input_dispatch_observability(self) -> None:
-        window = object.__new__(EditorWindow)
+        window = object.__new__(_CoreWindow)
         observer = ObservabilityWatcher()
         window._observer = observer
         input_map = InputMap()
@@ -134,8 +142,8 @@ class EditorWindowAutosaveTests(unittest.TestCase):
             signal=MagicMock(),
         )
 
-        window._on_runtime_key_press(SimpleNamespace(keysym="W"))
-        window._on_runtime_key_press(SimpleNamespace(keysym="Q"))  # unbound key
+        window._forward_runtime_key("press", "W")
+        window._forward_runtime_key("press", "Q")  # unbound key
 
         snapshot = observer.snapshot()
         metric = next(m for m in snapshot.metrics if m.target == "runtime:input:dispatch")
@@ -147,20 +155,17 @@ class EditorWindowAutosaveTests(unittest.TestCase):
 
 class RecentProjectsMenuTests(unittest.TestCase):
     def test_populate_recent_projects_uses_disabled_placeholder_when_empty(self) -> None:
-        window = object.__new__(EditorWindow)
-        window._recent_menu = MagicMock()
-        window._preferences = SimpleNamespace(recent_projects=())
-
-        window._populate_recent_projects()
-
-        window._recent_menu.add_command.assert_called_once_with(label="(none)", state="disabled")
+        window = make_editor()
+        try:
+            actions = window._recent_menu.actions()
+            self.assertEqual([action.text() for action in actions], ["(none)"])
+            self.assertFalse(actions[0].isEnabled())
+        finally:
+            window._on_close()
 
 
 class EditorPreferencesIsolationTests(unittest.TestCase):
-    @unittest.skipUnless(DISPLAY_AVAILABLE, "no display for real Tk editor tests")
     def test_editor_window_uses_a_private_preferences_path(self) -> None:
-        import expra_engine.ui.editor_window as editor_window_module
-
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "preferences.json"
             recent_project = Path(directory) / "project"
@@ -169,8 +174,7 @@ class EditorPreferencesIsolationTests(unittest.TestCase):
                 json.dumps({"schema_version": 1, "recent_projects": [str(recent_project)]}),
                 encoding="utf-8",
             )
-            with patch.object(editor_window_module, "_PREFERENCES_PATH", path):
-                window = EditorWindow(Engine())
+            window = make_editor(preferences_path=path)
             try:
                 self.assertEqual(window._preferences.recent_projects, (str(recent_project),))
             finally:

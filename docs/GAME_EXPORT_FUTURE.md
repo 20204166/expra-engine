@@ -1,5 +1,9 @@
 # Game Export — Design and Status
 
+> **Historical design note.** This document predates the current export boundary
+> and Qt-only editor. Tk references below describe a former editor dependency;
+> exported games remain isolated from all editor UI toolkits.
+
 ## What Has Been Implemented
 
 `expra_engine.export` is now a real subsystem, separate from `_release.py` and

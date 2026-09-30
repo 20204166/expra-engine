@@ -1,6 +1,6 @@
 """GameExporter — pure export orchestrator.
 
-No tkinter, no ttkbootstrap. Cancellation via threading.Event.
+No GUI toolkit. Cancellation via threading.Event.
 Progress via injected Callable[[ExportProgressEvent], None].
 
 Atomic build contract:
@@ -272,6 +272,8 @@ _RUNTIME_CORE_MODULES = (
     "project.py",
     "persistence.py",
     "safe_expression.py",
+    "level_anchor.py",
+    "script_component.py",
     "camera.py",
     "scene/__init__.py",
     "scene/camera.py",

@@ -1,5 +1,9 @@
 # Expra Full-Application Observability & Performance Audit
 
+> **Historical performance audit.** Measurements and Tk frontend references
+> below describe the 2026-09-26 pre-removal implementation, not the current
+> Qt-only editor. Retain results as historical measurements.
+
 **Audit date:** 2026-09-26
 **Mode:** Measurement only; current working tree was treated as authoritative.
 

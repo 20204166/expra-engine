@@ -228,8 +228,10 @@ class TestGameExporter(unittest.TestCase):
         modules = (
             "expra_engine.core.component_schema",
             "expra_engine.core.engine",
+            "expra_engine.core.level_anchor",
             "expra_engine.core.project",
             "expra_engine.core.scene",
+            "expra_engine.core.script_component",
             "expra_engine.filesystem.ids",
             "expra_engine.runtime.behaviour",
             "expra_engine.runtime.rendering",

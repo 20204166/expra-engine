@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import unittest
-from collections.abc import Callable
-from typing import cast
 
 from expra_engine.coordinators.button_coordinator import ButtonCoordinator
 from expra_engine.editor.contributions import (
@@ -13,14 +11,12 @@ from expra_engine.editor.contributions import (
     EditorContext,
     EditorFeatureSpec,
     MenuContribution,
-    MenuFactory,
     ShortcutContribution,
     ShortcutRegistry,
     ToolbarContribution,
     ToolbarMenuItem,
 )
-from expra_engine.ui.styles import STYLE_NEUTRAL_BUTTON, STYLE_PLAY_BUTTON
-from expra_engine.ui.toolbar import toolbar_style_for_role
+from expra_engine.ui.styles import STYLE_NEUTRAL_BUTTON, STYLE_PLAY_BUTTON, toolbar_style_for_role
 
 
 class Feature:
@@ -65,7 +61,7 @@ class EditorContributionMetadataTests(unittest.TestCase):
     def test_surface_metadata_points_to_one_action(self) -> None:
         menu = MenuContribution("File", "Example", "editor.example", order=2)
         toolbar = ToolbarContribution("editor.example", "Example", style_role="neutral")
-        shortcut = ShortcutContribution("<Control-e>", "editor.example")
+        shortcut = ShortcutContribution("Ctrl+E", "editor.example")
 
         self.assertEqual(menu.action_id, toolbar.action_id)
         self.assertEqual(toolbar.action_id, shortcut.action_id)
@@ -103,6 +99,11 @@ class EditorContributionMetadataTests(unittest.TestCase):
         self.assertEqual(feature.menus, ())
         self.assertEqual(feature.toolbars, ())
         self.assertEqual(feature.shortcuts, ())
+
+    def test_context_does_not_expose_a_tk_root(self) -> None:
+        context = EditorContext(engine=None, actions=None, ui=None)
+
+        self.assertFalse(hasattr(context, "root"))
 
 
 class ContributionRegistryTests(unittest.TestCase):
@@ -148,12 +149,12 @@ class ContributionRegistryTests(unittest.TestCase):
     def test_feature_shortcut_conflict_does_not_register_actions(self) -> None:
         actions = ButtonCoordinator()
         shortcuts = ShortcutRegistry()
-        shortcuts.register(ShortcutContribution("<Control-z>", "undo"))
+        shortcuts.register(ShortcutContribution("Ctrl+Z", "undo"))
         registry = ContributionRegistry(actions, shortcuts=shortcuts)
         feature = Feature(
             "example",
             (EditorActionSpec("editor.example", lambda: None),),
-            (ShortcutContribution("<Control-z>", "editor.example"),),
+            (ShortcutContribution("Ctrl+Z", "editor.example"),),
         )
 
         with self.assertRaises(ValueError):
@@ -168,8 +169,8 @@ class ContributionRegistryTests(unittest.TestCase):
             "example",
             (EditorActionSpec("editor.example", lambda: None),),
             (
-                ShortcutContribution("<Control-KeyPress-e>", "editor.example"),
-                ShortcutContribution("<Control-e>", "editor.example"),
+                ShortcutContribution("Ctrl+E", "editor.example"),
+                ShortcutContribution("ctrl+e", "editor.example"),
             ),
         )
 
@@ -245,35 +246,15 @@ class ContributionRegistryTests(unittest.TestCase):
         self.assertEqual(second.stopped, 1)
 
 
-class MenuFactoryTests(unittest.TestCase):
-    def test_build_routes_menu_command_through_actions(self) -> None:
-        class Menu:
-            def __init__(self) -> None:
-                self.commands: list[dict[str, object]] = []
-
-            def add_command(self, **kwargs: object) -> None:
-                self.commands.append(kwargs)
-
-            def add_separator(self) -> None:
-                self.commands.append({"separator": True})
-
-        actions = ButtonCoordinator()
-        calls: list[str] = []
-        actions.register("example", lambda: calls.append("called"))
-        menu = Menu()
-        MenuFactory({"File": menu}).build(
-            (MenuContribution("File", "Example", "example", accelerator="Ctrl+E"),),
-            actions,
-        )
-
-        command = cast(Callable[[], bool], menu.commands[0]["command"])
-        self.assertTrue(callable(command))
-        command()
-        self.assertEqual(calls, ["called"])
-        self.assertEqual(menu.commands[0]["accelerator"], "Ctrl+E")
-
-
 class ToolbarStyleTests(unittest.TestCase):
+    def test_shortcuts_normalize_qt_key_sequence_case(self) -> None:
+        shortcuts = ShortcutRegistry()
+        shortcuts.register(ShortcutContribution("ctrl+shift+s", "save_as"))
+
+        self.assertEqual(shortcuts.registered_sequences(), ("Ctrl+Shift+S",))
+        with self.assertRaises(ValueError):
+            shortcuts.register(ShortcutContribution("Ctrl+Shift+S", "other"))
+
     def test_semantic_style_roles_resolve_to_existing_styles(self) -> None:
         self.assertEqual(toolbar_style_for_role("neutral"), STYLE_NEUTRAL_BUTTON)
         self.assertEqual(toolbar_style_for_role("play"), STYLE_PLAY_BUTTON)
@@ -282,59 +263,52 @@ class ToolbarStyleTests(unittest.TestCase):
 
     def test_shortcuts_normalize_and_reject_duplicates(self) -> None:
         shortcuts = ShortcutRegistry()
-        shortcuts.register(ShortcutContribution(" <Control-KeyPress-z> ", "undo"))
+        shortcuts.register(ShortcutContribution(" ctrl+z ", "undo"))
 
-        self.assertEqual(shortcuts.registered_sequences(), ("<Control-z>",))
+        self.assertEqual(shortcuts.registered_sequences(), ("Ctrl+Z",))
         with self.assertRaises(ValueError):
-            shortcuts.register(ShortcutContribution("<Control-z>", "redo"))
+            shortcuts.register(ShortcutContribution("Ctrl+Z", "redo"))
 
-    def test_shortcut_aliases_normalize_to_one_sequence(self) -> None:
-        aliases = ("<Control-Key-e>", "<Control KeyPress e>")
+    def test_modifier_case_normalizes_to_one_qt_sequence(self) -> None:
+        shortcuts = ShortcutRegistry()
+        shortcuts.register(ShortcutContribution("ctrl+shift+s", "first"))
 
-        for alias in aliases:
-            with self.subTest(alias=alias):
-                shortcuts = ShortcutRegistry()
-                shortcuts.register(ShortcutContribution(alias, "first"))
+        with self.assertRaises(ValueError):
+            shortcuts.register(ShortcutContribution("Ctrl+Shift+S", "second"))
 
-                with self.assertRaises(ValueError):
-                    shortcuts.register(ShortcutContribution("<Control-e>", "second"))
-
-                self.assertEqual(shortcuts.registered_sequences(), ("<Control-e>",))
+        self.assertEqual(shortcuts.registered_sequences(), ("Ctrl+Shift+S",))
 
     def test_printable_shortcut_aliases_normalize_to_one_sequence(self) -> None:
         shortcuts = ShortcutRegistry()
         shortcuts.register(ShortcutContribution("e", "first"))
 
         with self.assertRaises(ValueError):
-            shortcuts.register(ShortcutContribution("<KeyPress-e>", "second"))
+            shortcuts.register(ShortcutContribution("E", "second"))
 
-        self.assertEqual(shortcuts.registered_sequences(), ("<e>",))
+        self.assertEqual(shortcuts.registered_sequences(), ("E",))
 
     def test_shortcut_normalization_preserves_punctuation_and_sequences(self) -> None:
         for sequence in ("+", ">", "[", "-"):
             with self.subTest(sequence=sequence):
                 self.assertEqual(ShortcutRegistry.normalize(sequence), sequence)
 
-        self.assertEqual(ShortcutRegistry.normalize("<KeyPress>"), "<KeyPress>")
-        self.assertEqual(ShortcutRegistry.normalize("<Key>"), "<KeyPress>")
-        self.assertEqual(ShortcutRegistry.normalize("<Control-KeyPress>"), "<Control-KeyPress>")
+        self.assertEqual(ShortcutRegistry.normalize("Ctrl+Shift+F5"), "Ctrl+Shift+F5")
         self.assertEqual(
-            ShortcutRegistry.normalize("<Control-z> <Control-x>"),
-            "<Control-z> <Control-x>",
+            ShortcutRegistry.normalize("ctrl+k, ctrl+c"),
+            "Ctrl+K, Ctrl+C",
         )
-        self.assertEqual(
-            ShortcutRegistry.normalize("<Control-z><Control-x>"),
-            "<Control-z> <Control-x>",
-        )
+        self.assertEqual(ShortcutRegistry.normalize("Ctrl++"), "Ctrl++")
+        with self.assertRaises(ValueError):
+            ShortcutRegistry.normalize("<Control-z>")
 
     def test_shortcut_dispatch_respects_disabled_action(self) -> None:
         actions = ButtonCoordinator()
         calls: list[str] = []
         actions.register("undo", lambda: calls.append("undo"), enabled=False)
         shortcuts = ShortcutRegistry()
-        shortcuts.register(ShortcutContribution("<Control-z>", "undo"))
+        shortcuts.register(ShortcutContribution("Ctrl+Z", "undo"))
 
-        self.assertFalse(shortcuts.dispatch("<Control-z>", actions))
+        self.assertFalse(shortcuts.dispatch("ctrl+z", actions))
         self.assertEqual(calls, [])
 
 

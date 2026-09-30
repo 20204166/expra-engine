@@ -1,4 +1,4 @@
-"""Shared structural reconciliation for retained Treeview rows."""
+"""Shared structural reconciliation for retained tree rows."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from typing import Any
 
 @dataclass(frozen=True)
 class TreeRow:
-    """Domain-neutral content and parent snapshot for one Treeview row."""
+    """Domain-neutral content and parent snapshot for one retained tree row."""
 
     parent: str
     text: str
@@ -18,7 +18,7 @@ class TreeRow:
     tags: tuple[str, ...] = ()
 
 
-def reconcile_treeview(
+def reconcile_tree_rows(
     tree: Any,
     previous: Mapping[str, TreeRow],
     desired: Sequence[tuple[str, TreeRow]],

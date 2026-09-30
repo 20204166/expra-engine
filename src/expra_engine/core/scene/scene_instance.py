@@ -17,7 +17,7 @@ to this module) makes an independent copy with no source link.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -126,14 +126,12 @@ def resolve_scene_instances(
     ``scene``: each instance root's previously-materialized descendants are
     removed before re-materializing, so nothing duplicates.
     """
-    from expra_engine.runtime.script_component import ScriptComponent
+    from expra_engine.core.script_component import ScriptComponent
 
     for entity in tuple(scene.entities):
         component = entity.get_component(SceneInstanceComponent)
         if component is None:
             continue
-
-        scene._clear_instance_subtree(entity.entity_id)
 
         if component.source_path in chain:
             raise SceneInstanceCycleError(entity.name, component.source_path, chain)
@@ -152,11 +150,29 @@ def resolve_scene_instances(
                 ValueError("SceneInstanceComponent sources must be Scene documents, not Levels"),
             )
 
+        if component.overrides:
+            _resolve_override_targets(
+                source_scene.entities,
+                component.overrides,
+                ScriptComponent,
+                instance_name=entity.name,
+                source_path=component.source_path,
+            )
+
+        # Keep the previous resolved subtree intact until the source and all
+        # authored overrides have been validated successfully.
+        scene._clear_instance_subtree(entity.entity_id)
         cloned = _materialize_source_scene(scene, source_scene, entity.entity_id)
         scene._set_instance_children(entity.entity_id, {clone.entity_id for clone in cloned})
 
         if component.overrides:
-            _apply_overrides(cloned, component.overrides, ScriptComponent)
+            _apply_overrides(
+                cloned,
+                component.overrides,
+                ScriptComponent,
+                instance_name=entity.name,
+                source_path=component.source_path,
+            )
 
 
 def _materialize_source_scene(
@@ -175,18 +191,50 @@ def _materialize_source_scene(
     return cloned_entities
 
 
-def _apply_overrides(
-    cloned: list[Entity], overrides: dict[str, dict[str, Any]], script_component_cls: type
-) -> None:
-    """Apply exposed-value overrides to the first matching materialized entity by name."""
+def _resolve_override_targets(
+    entities: Iterable[Entity],
+    overrides: dict[str, dict[str, Any]],
+    script_component_cls: type,
+    *,
+    instance_name: str,
+    source_path: str,
+) -> list[tuple[Any, dict[str, Any]]]:
+    """Resolve overrides by the established first-entity-with-this-name rule."""
     by_name: dict[str, Entity] = {}
-    for entity in cloned:
+    for entity in entities:
         by_name.setdefault(entity.name, entity)
+    resolved: list[tuple[Any, dict[str, Any]]] = []
     for entity_name, values in overrides.items():
         target = by_name.get(entity_name)
         if target is None:
-            continue
+            raise ValueError(
+                f"scene instance {instance_name!r} override target {entity_name!r} "
+                f"not found in source {source_path!r}"
+            )
         script = target.get_component(script_component_cls)
         if script is None:
-            continue
+            raise ValueError(
+                f"scene instance {instance_name!r} override target {entity_name!r} "
+                f"does not have a ScriptComponent in source {source_path!r}"
+            )
+        resolved.append((script, values))
+    return resolved
+
+
+def _apply_overrides(
+    cloned: list[Entity],
+    overrides: dict[str, dict[str, Any]],
+    script_component_cls: type,
+    *,
+    instance_name: str,
+    source_path: str,
+) -> None:
+    """Apply validated exposed-value overrides to matching materialized entities."""
+    for script, values in _resolve_override_targets(
+        cloned,
+        overrides,
+        script_component_cls,
+        instance_name=instance_name,
+        source_path=source_path,
+    ):
         script.exposed_values.update(values)

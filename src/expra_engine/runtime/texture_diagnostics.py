@@ -58,7 +58,7 @@ def diagnose_texture(
     *,
     context: RenderContext,
     pygame_module: Any,
-    image_master: Any | None = None,
+    editor_image_factory: Any | None = None,
 ) -> TextureDiagnosticReport:
     """Probe one static sprite asset through the existing render pipeline."""
     if not isinstance(project, Project):
@@ -151,7 +151,7 @@ def diagnose_texture(
         handle.mount,
         physical_path,
         len(data),
-        image_master,
+        editor_image_factory,
     )
 
 
@@ -166,7 +166,7 @@ def _probe_backend(
     mount: str,
     physical_path: str | None,
     byte_size: int,
-    image_master: Any | None,
+    editor_image_factory: Any | None,
 ) -> TextureDiagnosticReport:
     font_initializer = getattr(getattr(pygame_module, "font", None), "init", None)
     if callable(font_initializer):
@@ -316,7 +316,7 @@ def _probe_backend(
         texture_size,
         texture_type,
         output_bounds,
-        image_master,
+        editor_image_factory,
     )
 
 
@@ -335,12 +335,12 @@ def _editor_or_success(
     texture_size: tuple[int, int],
     texture_type: str,
     output_bounds: tuple[int, int, int, int],
-    image_master: Any | None,
+    editor_image_factory: Any | None,
 ) -> TextureDiagnosticReport:
     editor_image_size: tuple[int, int] | None = None
-    if image_master is not None:
+    if editor_image_factory is not None:
         try:
-            image = _render_editor_frame_to_tk_image(
+            image = _render_editor_frame_to_pixel_image(
                 RenderFrame(items),
                 context,
                 width=context.viewport.width,
@@ -348,7 +348,7 @@ def _editor_or_success(
                 resource_service=resources,
                 resource_provider=provider,
                 pygame_module=pygame_module,
-                image_master=image_master,
+                image_factory=editor_image_factory,
             )
         except Exception as exc:  # noqa: BLE001 - presentation failures become report data
             image = None
@@ -446,10 +446,10 @@ def _type_name(value: Any) -> str:
     return type(value).__name__
 
 
-def _render_editor_frame_to_tk_image(*args: Any, **kwargs: Any) -> Any:
+def _render_editor_frame_to_pixel_image(*args: Any, **kwargs: Any) -> Any:
     """Load the editor-only bridge without adding it to runtime exports."""
     module = importlib.import_module("expra_engine.ui.editor_pixel_renderer")
-    return module.render_editor_frame_to_tk_image(*args, **kwargs)
+    return module.render_editor_frame_to_pixel_image(*args, **kwargs)
 
 
 def _failed_report(

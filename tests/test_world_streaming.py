@@ -561,6 +561,82 @@ def test_world_persistent_actor_survives_level_unload_and_source_reload() -> Non
     system.close()
 
 
+def test_level_deactivation_transfers_runtime_generated_descendants_with_owner() -> None:
+    _Manager, State, _CapacityError, System = _residency_types()
+    executor = ManualExecutor(max_workers=1)
+
+    def load_level(descriptor):
+        level = Level(descriptor.instance_id)
+        if descriptor.instance_id == "town":
+            level.create_entity("Isometric Test Floor", entity_id="floor")
+        return level
+
+    system = System(
+        None,
+        _streaming_world(),
+        loader=load_level,
+        executor_factory=lambda workers: executor,
+    )
+    system.start(object())
+    executor.complete()
+    system.update()
+    assert system.state("town").state is State.ACTIVE
+
+    floor = system.runtime_scene.find_entity_by_name("Isometric Test Floor")
+    assert floor is not None
+    generated = system.runtime_scene.create_entity("Floor Tile", parent_id=floor.entity_id)
+    generated.add_component(TransformComponent())
+
+    assert system.deactivate_level("town")
+
+    dormant_level = system._runtime_levels["town"]
+    assert dormant_level.find_entity(floor.entity_id) is floor
+    assert dormant_level.find_entity(generated.entity_id) is generated
+    assert system.runtime_scene.find_entity(floor.entity_id) is None
+    assert system.state("town").state is State.DORMANT
+
+    assert system.activate_level("town")
+    assert system.runtime_scene.find_entity(generated.entity_id) is generated
+    system.close()
+
+
+def test_failed_level_deactivation_keeps_residency_active() -> None:
+    _Manager, State, _CapacityError, System = _residency_types()
+    executor = ManualExecutor(max_workers=1)
+
+    def load_level(descriptor):
+        level = Level(descriptor.instance_id)
+        if descriptor.instance_id == "town":
+            level.create_entity("Floor", entity_id="floor")
+        return level
+
+    system = System(
+        None,
+        _streaming_world(),
+        loader=load_level,
+        executor_factory=lambda workers: executor,
+    )
+    system.start(object())
+    executor.complete()
+    system.update()
+    assert system.state("town").state is State.ACTIVE
+
+    floor = system.runtime_scene.find_entity_by_name("Floor")
+    assert floor is not None
+    # Force the canonical transfer validator to reject before it moves anything.
+    system._runtime_levels["town"].create_entity(
+        "Duplicate floor ID", entity_id=floor.entity_id
+    )
+
+    with pytest.raises(ValueError, match="already contains Entity IDs"):
+        system.deactivate_level("town")
+
+    assert system.state("town").state is State.ACTIVE
+    assert system.runtime_scene.find_entity(floor.entity_id) is floor
+    system._runtime_levels["town"].remove_entity(floor.entity_id)
+    system.close()
+
+
 def test_cross_owner_persistent_actor_parenting_is_rejected_during_materialization() -> None:
     from expra_engine.runtime.level_anchor import WorldPersistentActorComponent
     from expra_engine.runtime.world_materialize import _materialize_world_level
@@ -1375,6 +1451,70 @@ def test_failed_seamless_destination_keeps_source_and_blocks_at_declared_exit() 
     system.update()
     assert system.state("forest").state is State.ACTIVE
     assert system.current_level("party") == "forest"
+    system.close()
+
+
+def test_transition_pose_failure_does_not_move_persistent_actor_before_commit() -> None:
+    from dataclasses import replace
+    from unittest.mock import patch
+
+    from expra_engine.core.world import TransitionMode
+    from expra_engine.runtime.level_anchor import (
+        LevelAnchorComponent,
+        StreamingAnchorComponent,
+        WorldPersistentActorComponent,
+    )
+    from expra_engine.runtime.world_policy import PendingWorldTransition
+
+    _Manager, _State, _CapacityError, System = _residency_types()
+    executor = ManualExecutor(max_workers=2)
+    town = Level("Town")
+    actor = town.create_entity("Courier", entity_id="courier")
+    actor.add_component(TransformComponent(x=30.0))
+    actor.add_component(WorldPersistentActorComponent("courier"))
+    actor.add_component(StreamingAnchorComponent("party"))
+    gate = town.create_entity("East Gate")
+    gate.add_component(TransformComponent(x=100.0))
+    gate.add_component(LevelAnchorComponent("east", kind="exit"))
+    forest = Level("Forest")
+    entry = forest.create_entity("West Entry")
+    entry.add_component(TransformComponent(x=10.0))
+    entry.add_component(LevelAnchorComponent("west", kind="entrance"))
+    world = _seamless_world()
+    world = replace(
+        world,
+        connections=(replace(world.connections[0], transition=TransitionMode.INSTANT),),
+    )
+    system = System(
+        None,
+        world,
+        loader=lambda descriptor: town if descriptor.instance_id == "town" else forest,
+        executor_factory=lambda workers: executor,
+    )
+    system.start(object())
+    executor.complete(0)
+    system.update()
+    runtime_actor = next(
+        entity
+        for entity in system.runtime_scene.entities
+        if entity.get_component(WorldPersistentActorComponent) is not None
+    )
+    system.request_load("forest")
+    executor.complete(1)
+    system.update()
+    pending = PendingWorldTransition(
+        "party", world.connections[0], (99.0, 0.0), "courier", runtime_actor.entity_id
+    )
+
+    with (
+        patch.object(system, "_source_anchor_position", return_value=(110.0, 0.0)),
+        patch.object(system.runtime_scene, "world_transform", side_effect=RuntimeError("bad pose")),
+        pytest.raises(RuntimeError, match="bad pose"),
+    ):
+        system._commit_world_transition(pending, runtime_actor)
+
+    assert runtime_actor.get_component(TransformComponent).x == 30.0
+    assert system.current_level("party") == "town"
     system.close()
 
 

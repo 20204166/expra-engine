@@ -1,7 +1,7 @@
 """Environment/workspace identity gathering for ``workspace_doctor``.
 
 This module never ``import expra_engine`` itself. All Expra-side identity
-checks (module file/version, pygame, Tk) run as a subprocess under the
+checks (module file/version, pygame, PySide6) run as a subprocess under the
 *configured* Expra interpreter, so this MCP server keeps working even when
 Expra's own environment is broken (design point 6).
 """
@@ -23,7 +23,7 @@ from .models import (
     PythonIdentity,
     ReferenceStatus,
     ServerInfo,
-    TkIdentity,
+    QtIdentity,
     ToolStatus,
     WorkspaceDoctorResult,
 )
@@ -46,12 +46,12 @@ except Exception as exc:
     result["pygame_installed"] = False
     result["pygame_error"] = f"{type(exc).__name__}: {exc}"
 try:
-    import tkinter
-    result["tk_available"] = True
-    result["tk_version"] = str(tkinter.TkVersion)
+    import PySide6
+    result["qt_available"] = True
+    result["pyside6_version"] = PySide6.__version__
 except Exception as exc:
-    result["tk_available"] = False
-    result["tk_error"] = f"{type(exc).__name__}: {exc}"
+    result["qt_available"] = False
+    result["qt_error"] = f"{type(exc).__name__}: {exc}"
 print(json.dumps(result))
 """
 
@@ -76,17 +76,17 @@ async def _python_identity(role: str, executable: str, resolved_via: str) -> Pyt
     return PythonIdentity(role=role, executable=executable, version=version_text, resolved_via=resolved_via)
 
 
-async def _expra_probe(executable: str, expra_root: Path) -> tuple[ExpraIdentity, PygameIdentity, TkIdentity]:
+async def _expra_probe(executable: str, expra_root: Path) -> tuple[ExpraIdentity, PygameIdentity, QtIdentity]:
     env = dict(os.environ)
     env["PYTHONPATH"] = os.pathsep.join(filter(None, [str(expra_root / "src"), env.get("PYTHONPATH")]))
 
     result = await command_runner.run_command([executable, "-c", _EXPRA_PROBE_SCRIPT], timeout_seconds=20, env=env)
 
-    def _failure(error: str) -> tuple[ExpraIdentity, PygameIdentity, TkIdentity]:
+    def _failure(error: str) -> tuple[ExpraIdentity, PygameIdentity, QtIdentity]:
         return (
             ExpraIdentity(root=str(expra_root), import_error=error),
             PygameIdentity(installed=False, error=error),
-            TkIdentity(available=False, error=error),
+            QtIdentity(available=False, error=error),
         )
 
     if not result.ok:
@@ -116,14 +116,14 @@ async def _expra_probe(executable: str, expra_root: Path) -> tuple[ExpraIdentity
         module_file=data.get("pygame_file"),
         error=data.get("pygame_error"),
     )
-    tk_identity = TkIdentity(
-        available=data.get("tk_available", False),
-        tcl_tk_version=data.get("tk_version"),
+    qt_identity = QtIdentity(
+        available=data.get("qt_available", False),
+        pyside6_version=data.get("pyside6_version"),
         display=os.environ.get("DISPLAY"),
         wayland_display=os.environ.get("WAYLAND_DISPLAY"),
-        error=data.get("tk_error"),
+        error=data.get("qt_error"),
     )
-    return expra, pygame_identity, tk_identity
+    return expra, pygame_identity, qt_identity
 
 
 async def _system_tool_statuses() -> list[ToolStatus]:
@@ -184,7 +184,7 @@ async def gather_workspace_doctor(cfg: ExpraMcpConfig, *, server_name: str, serv
 
     mcp_python = await _python_identity("mcp_server", sys.executable, "self")
     expra_python = await _python_identity("expra", expra_executable, resolved_via)
-    expra_identity, pygame_identity, tk_identity = await _expra_probe(expra_executable, cfg.workspace.expra_root)
+    expra_identity, pygame_identity, qt_identity = await _expra_probe(expra_executable, cfg.workspace.expra_root)
 
     tool_statuses = await _system_tool_statuses()
     tool_statuses += await _configured_python_tool_statuses(expra_executable)
@@ -208,8 +208,8 @@ async def gather_workspace_doctor(cfg: ExpraMcpConfig, *, server_name: str, serv
         )
     if not pygame_identity.installed:
         reasons.append("pygame is not installed in the configured Expra interpreter")
-    if not tk_identity.available:
-        reasons.append("Tk is not available in the configured Expra interpreter -- editor_session will be unavailable")
+    if not qt_identity.available:
+        reasons.append("PySide6 is not available in the configured Expra interpreter -- editor_session will be unavailable")
     if default_project_status is not None and not default_project_status.exists:
         reasons.append(f"configured default_project does not exist: {default_project_status.path}")
     missing_refs = [r.id for r in reference_statuses if not r.exists]
@@ -239,7 +239,7 @@ async def gather_workspace_doctor(cfg: ExpraMcpConfig, *, server_name: str, serv
         expra_python=expra_python,
         expra=expra_identity,
         pygame=pygame_identity,
-        tk=tk_identity,
+        qt=qt_identity,
         tools=tool_statuses,
         default_project=default_project_status,
         references=reference_statuses,

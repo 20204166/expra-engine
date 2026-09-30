@@ -16,7 +16,7 @@ from __future__ import annotations
 import math
 import unittest
 
-from expra_engine.ui.viewport import VIEWPORT_BASE_PPU, ViewportCamera
+from expra_engine.ui.viewport_camera import VIEWPORT_BASE_PPU, ViewportCamera
 
 # Local copies matching viewport.py constants — used for assertion bounds only.
 _EXPECTED_MIN_ZOOM = 0.05

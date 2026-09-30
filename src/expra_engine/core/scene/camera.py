@@ -79,7 +79,7 @@ class Camera2D:
         *,
         position: Vec2 = (0.0, 0.0),
         target_width: float = 10.0,
-        viewport: tuple[int, int] = (800, 600),
+        viewport: tuple[int | float, int | float] = (800, 600),
     ) -> None:
         if target_width <= 0:
             raise ValueError(f"target_width must be positive, got {target_width!r}")
@@ -90,7 +90,7 @@ class Camera2D:
         pos = self._coerce_vec2(position)
         self._position: Vec2 = pos
         self._target_position: Vec2 = pos
-        self._viewport: tuple[int, int] = (vw, vh)
+        self._viewport: tuple[int | float, int | float] = (vw, vh)
         self._pixel_ratio = 0.0
         self._width = 0.0
         self._height = 0.0

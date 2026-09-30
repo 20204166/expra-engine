@@ -60,6 +60,24 @@ def _clone_entity_tree(
 
 
 @dataclass(frozen=True, slots=True)
+class SceneEntityOrigin:
+    """Authored provenance of one scene entity (never serialized).
+
+    ``kind`` is one of:
+
+    - ``"authored"`` — an ordinary authored entity (persisted by compact saves).
+    - ``"instance_root"`` — an authored entity carrying a Scene Instance whose
+      own transform/overrides are persisted; its materialized children are not.
+    - ``"materialized"`` — a descendant regenerated from a Scene Instance source,
+      omitted from compact saves.
+    """
+
+    kind: str
+    instance_root_id: str | None = None
+    source_path: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class WorldTransform2D:
     """Canonical parent-composed World-space 2D pose for a Scene Entity."""
 
@@ -103,6 +121,10 @@ class Scene:
         # runtime bookkeeping (never serialized): lets Project.save_scene omit
         # resolve-from-source content and lets the editor mark it read-only-ish.
         self._instance_children: dict[str, set[str]] = {}
+        # Materialized descendant entity_id -> owning instance-root entity_id
+        # (runtime-only reverse index, never serialized). Lets entity_origin()
+        # answer provenance in O(1) without scanning every instance root.
+        self._instance_roots: dict[str, str] = {}
         # Lazy parent_id -> children derived index (never serialized). Measured
         # (Phase H): children_of()'s naive O(n) scan dominates walk_hierarchy()
         # (76% of its cost at 1000 entities, cProfile-confirmed) and made
@@ -232,7 +254,10 @@ class Scene:
             target_index[entity.entity_id] = entity
             if target._children_index is not None:
                 target._children_index.setdefault(entity.parent_id, []).append(entity)
-        for root_id in moved_instance_roots:
+        for root_id, children in moved_instance_roots.items():
+            for child_id in children:
+                self._instance_roots.pop(child_id, None)
+                target._instance_roots[child_id] = root_id
             del self._instance_children[root_id]
         target._instance_children.update(moved_instance_roots)
         self._entity_index = None
@@ -242,8 +267,13 @@ class Scene:
     def _forget_instance_bookkeeping(self, removed_ids: set[str]) -> None:
         """Drop any scene-instance tracking that referenced a removed entity."""
         for root_id in removed_ids:
-            self._instance_children.pop(root_id, None)
+            children = self._instance_children.pop(root_id, None)
+            if children is not None:
+                for child_id in children:
+                    self._instance_roots.pop(child_id, None)
         for children in self._instance_children.values():
+            for child_id in children & removed_ids:
+                self._instance_roots.pop(child_id, None)
             children -= removed_ids
 
     def clone_entity(self, entity_id: str, *, recursive: bool = True) -> Entity | None:
@@ -376,11 +406,43 @@ class Scene:
 
     def is_instance_materialized(self, entity_id: str) -> bool:
         """Return True if ``entity_id`` was materialized by scene-instance resolution."""
-        return any(entity_id in children for children in self._instance_children.values())
+        return entity_id in self._instance_roots
+
+    def entity_origin(self, entity_id: str) -> SceneEntityOrigin:
+        """Return the authored provenance of ``entity_id``.
+
+        Distinguishes ordinary authored entities, authored Scene Instance roots
+        (whose transform and overrides are persisted), and materialized
+        descendants (omitted from compact saves and regenerated from their
+        source on load).
+        """
+        if self.find_entity(entity_id) is None:
+            raise KeyError(f"entity not found: {entity_id!r}")
+        root_id = self._instance_roots.get(entity_id)
+        if root_id is not None:
+            root = self.find_entity(root_id)
+            source_path: str | None = None
+            if root is not None:
+                from expra_engine.core.scene.scene_instance import SceneInstanceComponent
+
+                component = root.get_component(SceneInstanceComponent)
+                source_path = component.source_path if component is not None else None
+            return SceneEntityOrigin("materialized", root_id, source_path)
+        from expra_engine.core.scene.scene_instance import SceneInstanceComponent
+
+        if self.find_entity(entity_id).get_component(SceneInstanceComponent) is not None:
+            return SceneEntityOrigin("instance_root", None, None)
+        return SceneEntityOrigin("authored", None, None)
 
     def _set_instance_children(self, root_id: str, entity_ids: set[str]) -> None:
         """Record which entity ids were materialized under instance root ``root_id``."""
+        previous = self._instance_children.get(root_id)
+        if previous is not None:
+            for child_id in previous:
+                self._instance_roots.pop(child_id, None)
         self._instance_children[root_id] = set(entity_ids)
+        for child_id in entity_ids:
+            self._instance_roots[child_id] = root_id
 
     def _clear_instance_subtree(self, root_id: str) -> None:
         """Remove every current descendant of ``root_id`` before re-resolving it.

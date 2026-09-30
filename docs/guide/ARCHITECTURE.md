@@ -5,27 +5,27 @@ presentation into layers with strict ownership boundaries.
 
 ```
 ┌───────────────────────────────────────────────────────────────┐
-│  Editor Layer  (Tk / ttkbootstrap)                            │
-│  EditorWindow · panels · TkDeliveryQueue · preferences        │
+│  Editor Layer  (PySide6 / Qt)                                 │
+│  Qt EditorWindow · panels · QtDeliveryQueue · preferences    │
 ├───────────────────────────────────────────────────────────────┤
-│  Coordinator Layer  (pure Python, no Tk)                      │
+│  Coordinator Layer  (toolkit-independent Python)              │
 │  AppCoordinator · ButtonCoordinator · UICoordinator           │
 │  ComponentRefreshScheduler · PendingTransition                │
 ├───────────────────────────────────────────────────────────────┤
-│  Runtime Layer  (pure Python, no Tk)                          │
+│  Runtime Layer  (headless Python)                              │
 │  EventQueue · RuntimeClock · BehaviourSystem · world streaming│
 │  physics · renderer protocol · Pygame adapter                 │
 ├───────────────────────────────────────────────────────────────┤
-│  Engine Core  (pure Python, no Tk)                            │
+│  Engine Core  (headless Python)                                │
 │  Engine · Project · World · Level · Scene · Entity · Component│
 │  Camera2D · document codec · filesystem                       │
 └───────────────────────────────────────────────────────────────┘
 ```
 
-The hard rule: **`core/` and `coordinators/` never import `tkinter` or
-`ttkbootstrap`.** `runtime/` is headless too. Only `editor/` and `ui/` touch Tk.
-This keeps the engine importable in headless contexts (tests, export runtime,
-MCP static runner).
+The hard rule: **`core/`, `coordinators/`, `runtime/`, `filesystem/`, and
+`export/` do not import GUI toolkits.** The Qt editor owns widget presentation;
+shared editor logic remains separate from the shell. This keeps the engine
+importable in headless contexts (tests, exported runtime, MCP static runner).
 
 ## Ownership matrix
 
@@ -54,33 +54,33 @@ MCP static runner).
 | Background work scheduling | `AppCoordinator` | `coordinators/app_coordinator.py` |
 | Action dispatch + enable/disable | `ButtonCoordinator` | `coordinators/button_coordinator.py` |
 | UI update batching | `UICoordinator` | `coordinators/ui_coordinator.py` |
-| Editor app lifecycle | `EditorApplication` | `editor/app.py` |
+| Qt editor startup | `run_qt_editor` | `editor/qt/app.py` |
 | Project open/create/save flow | `ProjectWorkflow` | `editor/project_workflow.py` |
 | World authoring | `WorldAuthoringWorkflow` | `editor/world_authoring.py` |
-| Tk root + layout | `EditorWindow` | `ui/editor_window.py` |
-| Hierarchy / Inspector / Viewport / Console | panels | `ui/` |
+| Editor shell + shared behavior | `EditorWindow` / `EditorWindowCore` | `editor/qt/main_window.py`, `editor/window_core.py` |
+| Hierarchy / Inspector / Viewport / Console | Qt panels + shared cores | `editor/qt/`, `editor/*_core.py` |
 | Export pipeline | `GameExporter` | `export/exporter.py` |
 | Runtime metrics | `ObservabilityWatcher` | `observability.py` |
 
 ## Threading model
 
-**Tk owns widgets. Only the main thread may call any Tk API.** Background work
-never touches widgets. Results cross from worker threads through
-`AppCoordinator` → `TkDeliveryQueue` → `UICoordinator` onto the Tk main thread.
+**Qt widgets are GUI-thread-owned.** Background work never touches widgets.
+Results cross from worker threads through `AppCoordinator` → `QtDeliveryQueue`
+→ `UICoordinator` and are applied on the Qt GUI thread.
 
 ```
-Worker thread                      Tk main thread
-──────────────                     ──────────────
+Worker thread                      Qt GUI thread
+──────────────                     ─────────────
 AppCoordinator._run_worker()
   → on_result
-    → deliver(callback)            TkDeliveryQueue._drain()
+    → deliver(callback)            QtDeliveryQueue._drain()
       → queue.put(callback)  ──►     → callback()
                                        → UICoordinator.request()
                                          → panel.render()
-                                           → widget.configure(...)
+                                            → widget.set...(…)
 ```
 
-`TkDeliveryQueue.__call__` is the only worker → UI entry point. See
+`QtDeliveryQueue.__call__` is the worker → UI entry point. See
 [THREADING.md](../THREADING.md) for the full model.
 
 ## Coordinators
@@ -120,9 +120,9 @@ When a World is configured, Play instead uses
 
 The wheel ships `expra_engine/` with `core/`, `coordinators/`, `runtime/`,
 `editor/`, `ui/`, `filesystem/`, `messages/`, `schema/`, `ui_model/`, `design/`,
-`export/`. The export runtime stages only the headless subset — editor, Tk,
-coordinators, and delivery-queue modules are excluded and are forbidden imports
-in a shipped game.
+`export/`. The export runtime stages only the headless subset. Editor modules,
+Qt, coordinators, and delivery-queue modules are excluded and forbidden in a
+shipped game.
 
 ## Observability
 

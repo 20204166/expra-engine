@@ -38,11 +38,11 @@ class WindowGeometry:
         if self.width <= 0 or self.height <= 0:
             raise ValueError("window dimensions must be positive")
 
-    def to_tk_geometry(self) -> str:
+    def to_geometry_string(self) -> str:
         return f"{self.width}x{self.height}+{self.x}+{self.y}"
 
     @classmethod
-    def from_tk_geometry(cls, geometry: str) -> WindowGeometry | None:
+    def from_geometry_string(cls, geometry: str) -> WindowGeometry | None:
         match = re.fullmatch(r"(\d+)x(\d+)\+(-?\d+)\+(-?\d+)", geometry)
         if match is None:
             return None

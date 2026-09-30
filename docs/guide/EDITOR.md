@@ -1,6 +1,6 @@
 # Editor
 
-The editor is a Tk application (`EditorWindow`) for authoring documents and
+The editor is a PySide6 Qt application (`EditorWindow`) for authoring documents and
 previewing gameplay. It is not the game runtime.
 
 ## Launch
@@ -23,7 +23,7 @@ python -m expra_engine
 ```
 
 Panels: `HierarchyPanel`, `ViewportPanel`, `InspectorPanel`, `ConsolePanel`,
-`AssetBrowserPanel`. The middle panes are user-resizable (`ttkbootstrap.PanedWindow`).
+`AssetBrowserPanel`. The middle panes are user-resizable with a Qt splitter.
 
 ## Document modes
 
@@ -52,7 +52,7 @@ active document (`ActiveDocument`). `ProjectWorkflow` owns open/create/save/dupl
 The viewport renders a **pixel layer** through the same `PygameRenderer` as the
 runtime (via `EditorPixelRenderer`), plus editor-only overlays: grid/axes,
 selection outlines, collider outlines, camera frame, entity markers, light
-gizmos. If pixel rendering fails, it falls back to Tk canvas geometry. Screen
+gizmos. If pixel rendering fails, it falls back to Qt viewport geometry. Screen
 effects (BackBufferCopy/ScreenTexture) are reported as unsupported and not drawn
 in the preview.
 
@@ -63,9 +63,9 @@ in the preview.
 
 ## Threading
 
-All Tk mutation happens on the main thread. Background work (asset scan, save,
-export dialog) runs through `AppCoordinator` and delivers via
-`TkDeliveryQueue`. See [THREADING.md](../THREADING.md).
+All Qt widget mutation happens on the GUI thread. Background work (asset scan,
+save, export preparation) runs through `AppCoordinator` and delivers via
+`QtDeliveryQueue`. See [THREADING.md](../THREADING.md).
 
 ## Preferences
 

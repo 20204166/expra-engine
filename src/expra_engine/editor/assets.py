@@ -2,7 +2,7 @@
 
 Filesystem enumeration is deliberately injected.  A caller can run
 ``scan_directory`` in ``AppCoordinator`` and deliver its result through
-``TkDeliveryQueue`` without this module owning either lifecycle.
+``QtDeliveryQueue`` without this module owning either lifecycle.
 
 Asset Browser ignore policy
 ---------------------------
@@ -278,7 +278,7 @@ def scan_directory(
 ) -> AssetScanResult:
     """Enumerate and normalize one directory using an injected worker callable.
 
-    The function performs no scheduling and does not touch Tk.  The injected
+    The function performs no scheduling and does not touch a GUI toolkit.  The injected
     callable is expected to run off the UI thread when used by the editor.
     """
 

@@ -155,6 +155,18 @@ class TestProjectCreateAndSave(unittest.TestCase):
             with self.assertRaisesRegex(ProjectError, "extension"):
                 project.save_document(scene, "levels/wrong.level.pb")
 
+    def test_pb_document_save_persists_new_registration_to_project_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Project.create("PB Project", Path(tmp) / "project")
+            scene = Scene("Door", scene_id="door-1")
+            path = "scenes/door.scene.pb"
+
+            project.save_document(scene, path)
+
+            reloaded = Project.load(project.path)
+            self.assertIn(path, reloaded.scene_paths())
+            self.assertEqual(reloaded.load_document(path).scene_id, "door-1")
+
     def test_pb_document_save_accepts_case_insensitive_typed_extension(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project = Project.create("PB Project", Path(tmp) / "project")

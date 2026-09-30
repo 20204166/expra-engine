@@ -1,17 +1,17 @@
 """World authoring viewport represents descriptors without loading Levels."""
 
-import tkinter as tk
-
 from expra_engine.core.world import LevelDescriptor, World, WorldConnection
-from expra_engine.ui.viewport import ViewportPanel
+from tests.support.qt_app import ensure_qt_app, pump_qt
 
 
 def test_world_viewport_draws_level_bounds_origin_initial_and_connections() -> None:
-    root = tk.Tk()
-    root.withdraw()
+    from expra_engine.editor.qt.viewport import ViewportPanel
+
+    ensure_qt_app()
+    viewport = ViewportPanel()
+    viewport.resize(800, 600)
+    viewport.show()
     try:
-        viewport = ViewportPanel(root)
-        viewport.pack(fill="both", expand=True)
         world = World(
             "Main",
             world_id="main",
@@ -29,7 +29,7 @@ def test_world_viewport_draws_level_bounds_origin_initial_and_connections() -> N
         )
 
         viewport.render_world(world)
-        root.update()
+        pump_qt(20)
 
         assert viewport._canvas.find_withtag("world:level:town")
         assert viewport._canvas.find_withtag("world:level:forest")
@@ -38,8 +38,8 @@ def test_world_viewport_draws_level_bounds_origin_initial_and_connections() -> N
         retained_rows = tuple(viewport._canvas.find_withtag("world:level:town"))
 
         viewport.render_world(world, "level:town")
-        root.update()
+        pump_qt(20)
 
         assert tuple(viewport._canvas.find_withtag("world:level:town")) == retained_rows
     finally:
-        root.destroy()
+        viewport.close()

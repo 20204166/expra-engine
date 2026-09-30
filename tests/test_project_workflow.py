@@ -95,6 +95,8 @@ class TestProjectWorkflow(unittest.TestCase):
                 _preferences=EditorPreferences(),
                 _selected_ids=(),
                 _root=MagicMock(),
+                _set_window_title=MagicMock(),
+                _populate_recent_projects=MagicMock(),
                 _console=MagicMock(),
                 _update_project_actions=MagicMock(),
                 _present_all=MagicMock(),
@@ -166,6 +168,8 @@ class TestProjectWorkflow(unittest.TestCase):
                 _last_save_path=active_document.path,
                 _selected_ids=(),
                 _root=MagicMock(),
+                _set_window_title=MagicMock(),
+                _populate_recent_projects=MagicMock(),
                 _console=MagicMock(),
                 _present_all=MagicMock(),
             )
@@ -204,6 +208,8 @@ class TestProjectWorkflow(unittest.TestCase):
                 _command_stack=active_document.command_stack,
                 _last_save_path=active_document.path,
                 _root=MagicMock(),
+                _set_window_title=MagicMock(),
+                _populate_recent_projects=MagicMock(),
                 _console=MagicMock(),
                 _present_all=MagicMock(),
             )
@@ -230,6 +236,8 @@ class TestProjectWorkflow(unittest.TestCase):
                 _last_save_path=None,
                 _selected_ids=(),
                 _root=MagicMock(),
+                _set_window_title=MagicMock(),
+                _populate_recent_projects=MagicMock(),
                 _console=MagicMock(),
                 _present_all=MagicMock(),
             )
@@ -257,6 +265,8 @@ class TestProjectWorkflow(unittest.TestCase):
                 _last_save_path=None,
                 _selected_ids=(),
                 _root=MagicMock(),
+                _set_window_title=MagicMock(),
+                _populate_recent_projects=MagicMock(),
                 _console=MagicMock(),
                 _present_all=MagicMock(),
             )
@@ -289,6 +299,8 @@ class TestProjectWorkflow(unittest.TestCase):
                 _observer=None,
                 _console=MagicMock(),
                 _root=MagicMock(),
+                _set_window_title=MagicMock(),
+                _populate_recent_projects=MagicMock(),
                 _present_all=MagicMock(),
                 _update_undo_redo_state=MagicMock(),
             )
@@ -337,6 +349,8 @@ class TestProjectWorkflow(unittest.TestCase):
                 _last_save_path=active_document.path,
                 _console=MagicMock(),
                 _root=MagicMock(),
+                _set_window_title=MagicMock(),
+                _populate_recent_projects=MagicMock(),
                 _update_undo_redo_state=MagicMock(),
                 _present_all=MagicMock(),
             )
@@ -390,6 +404,8 @@ class TestProjectWorkflow(unittest.TestCase):
                 _observer=None,
                 _console=MagicMock(),
                 _root=MagicMock(),
+                _set_window_title=MagicMock(),
+                _populate_recent_projects=MagicMock(),
                 _update_undo_redo_state=MagicMock(),
                 _present_all=MagicMock(),
             )
@@ -430,6 +446,8 @@ class TestProjectWorkflow(unittest.TestCase):
                 _command_stack=active_document.command_stack,
                 _last_save_path=active_document.path,
                 _root=MagicMock(),
+                _set_window_title=MagicMock(),
+                _populate_recent_projects=MagicMock(),
                 _update_undo_redo_state=MagicMock(),
                 _present_all=MagicMock(),
             )
@@ -473,6 +491,8 @@ class TestProjectWorkflow(unittest.TestCase):
                 _command_stack=active_document.command_stack,
                 _last_save_path=None,
                 _root=MagicMock(),
+                _set_window_title=MagicMock(),
+                _populate_recent_projects=MagicMock(),
                 _update_undo_redo_state=MagicMock(),
                 _present_all=MagicMock(),
             )
@@ -495,6 +515,8 @@ class TestProjectWorkflow(unittest.TestCase):
                 _engine=engine,
                 _console=MagicMock(),
                 _root=MagicMock(),
+                _set_window_title=MagicMock(),
+                _populate_recent_projects=MagicMock(),
                 _timer=RecordingTimer(),
             )
             workflow = ProjectWorkflow(window)
@@ -522,6 +544,8 @@ class TestProjectWorkflow(unittest.TestCase):
                 _engine=SimpleNamespace(project=project),
                 _console=MagicMock(),
                 _root=MagicMock(),
+                _set_window_title=MagicMock(),
+                _populate_recent_projects=MagicMock(),
                 _timer=RecordingTimer(),
             )
             workflow = ProjectWorkflow(window)
@@ -544,6 +568,8 @@ class TestProjectWorkflow(unittest.TestCase):
                 _engine=SimpleNamespace(project=project),
                 _console=MagicMock(),
                 _root=MagicMock(),
+                _set_window_title=MagicMock(),
+                _populate_recent_projects=MagicMock(),
                 _timer=RecordingTimer(),
             )
             workflow = ProjectWorkflow(window)
@@ -563,22 +589,22 @@ class TestProjectWorkflow(unittest.TestCase):
             outside = root / "outside.py"
             outside.write_text("pass\n", encoding="utf-8")
             project.script_entry_point = "../outside.py"
+            dialogs = MagicMock()
             window = SimpleNamespace(
                 _engine=SimpleNamespace(project=project),
                 _console=MagicMock(),
                 _root=MagicMock(),
+                _set_window_title=MagicMock(),
+                _populate_recent_projects=MagicMock(),
                 _timer=RecordingTimer(),
             )
-            workflow = ProjectWorkflow(window)
+            workflow = ProjectWorkflow(window, dialog_provider=dialogs)
 
-            with (
-                patch("expra_engine.editor.project_process.subprocess.Popen") as launch,
-                patch("expra_engine.editor.project_workflow.messagebox.showerror") as error,
-            ):
+            with patch("expra_engine.editor.project_process.subprocess.Popen") as launch:
                 workflow.run_project()
 
             launch.assert_not_called()
-            error.assert_called_once()
+            dialogs.show_error.assert_called_once()
             self.assertIsNone(workflow._project_process_controller.process)
 
     def test_script_symlink_cannot_escape_project_root(self) -> None:
@@ -590,22 +616,22 @@ class TestProjectWorkflow(unittest.TestCase):
             link = project.path / "linked.py"
             link.symlink_to(outside)
             project.script_entry_point = "linked.py"
+            dialogs = MagicMock()
             window = SimpleNamespace(
                 _engine=SimpleNamespace(project=project),
                 _console=MagicMock(),
                 _root=MagicMock(),
+                _set_window_title=MagicMock(),
+                _populate_recent_projects=MagicMock(),
                 _timer=RecordingTimer(),
             )
-            workflow = ProjectWorkflow(window)
+            workflow = ProjectWorkflow(window, dialog_provider=dialogs)
 
-            with (
-                patch("expra_engine.editor.project_process.subprocess.Popen") as launch,
-                patch("expra_engine.editor.project_workflow.messagebox.showerror") as error,
-            ):
+            with patch("expra_engine.editor.project_process.subprocess.Popen") as launch:
                 workflow.run_project()
 
             launch.assert_not_called()
-            error.assert_called_once()
+            dialogs.show_error.assert_called_once()
             self.assertIsNone(workflow._project_process_controller.process)
 
     def test_child_that_exits_early_is_reaped_and_reported_by_poll(self) -> None:
@@ -617,6 +643,8 @@ class TestProjectWorkflow(unittest.TestCase):
                 _engine=SimpleNamespace(project=project),
                 _console=MagicMock(),
                 _root=MagicMock(),
+                _set_window_title=MagicMock(),
+                _populate_recent_projects=MagicMock(),
                 _timer=timer,
             )
             workflow = ProjectWorkflow(window)
@@ -654,6 +682,8 @@ class TestProjectWorkflow(unittest.TestCase):
                 _engine=SimpleNamespace(project=project),
                 _console=MagicMock(),
                 _root=MagicMock(),
+                _set_window_title=MagicMock(),
+                _populate_recent_projects=MagicMock(),
                 _timer=timer,
             )
             workflow = ProjectWorkflow(window)
@@ -687,6 +717,8 @@ class TestProjectWorkflow(unittest.TestCase):
                 _engine=SimpleNamespace(project=project),
                 _console=MagicMock(),
                 _root=MagicMock(),
+                _set_window_title=MagicMock(),
+                _populate_recent_projects=MagicMock(),
                 _timer=timer,
             )
             workflow = ProjectWorkflow(window)
@@ -705,31 +737,33 @@ class TestProjectWorkflow(unittest.TestCase):
     def test_monitor_schedule_failure_stops_the_new_child(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project = Project.create("Runtime", Path(tmp) / "runtime")
+            (project.path / "__main__.py").write_text("pass\n", encoding="utf-8")
             process = MagicMock()
             process.poll.return_value = None
             timer = RecordingTimer()
             timer.fail_schedule = True
+            dialogs = MagicMock()
             window = SimpleNamespace(
                 _engine=SimpleNamespace(project=project),
                 _console=MagicMock(),
                 _root=MagicMock(),
+                _set_window_title=MagicMock(),
+                _populate_recent_projects=MagicMock(),
                 _timer=timer,
+                _dialogs=dialogs,
             )
-            workflow = ProjectWorkflow(window)
+            workflow = ProjectWorkflow(window, dialog_provider=dialogs)
 
-            with (
-                patch(
-                    "expra_engine.editor.project_process.subprocess.Popen",
-                    return_value=process,
-                ),
-                patch("expra_engine.editor.project_workflow.messagebox.showerror") as error,
+            with patch(
+                "expra_engine.editor.project_process.subprocess.Popen",
+                return_value=process,
             ):
                 workflow.run_project()
 
             process.terminate.assert_called_once_with()
             process.wait.assert_called_once_with(timeout=2)
             self.assertIsNone(workflow._project_process_controller.process)
-            error.assert_called_once()
+            dialogs.show_error.assert_called_once()
 
     def test_failed_candidate_load_keeps_current_child_running(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -741,6 +775,8 @@ class TestProjectWorkflow(unittest.TestCase):
                 _engine=SimpleNamespace(project=current),
                 _console=MagicMock(),
                 _root=MagicMock(),
+                _set_window_title=MagicMock(),
+                _populate_recent_projects=MagicMock(),
                 _timer=timer,
                 _observer=None,
             )
@@ -787,26 +823,22 @@ class TestProjectWorkflow(unittest.TestCase):
             previous_target = project.document_file()
             active_document = ActiveDocument()
             active_document.open(project.load_scene(), previous_target)
+            dialogs = MagicMock()
+            dialogs.ask_save_file.return_value = str(root / "outside.scene.pb")
             window = SimpleNamespace(
                 _engine=SimpleNamespace(project=project, edit_scene=project.load_scene()),
                 _active_document=active_document,
                 _last_save_path=previous_target,
                 _console=MagicMock(),
                 _root=MagicMock(),
+                _set_window_title=MagicMock(),
+                _populate_recent_projects=MagicMock(),
             )
-            workflow = ProjectWorkflow(window)
-
-            with (
-                patch(
-                    "expra_engine.editor.project_workflow.filedialog.asksaveasfilename",
-                    return_value=str(root / "outside.scene.pb"),
-                ),
-                patch("expra_engine.editor.project_workflow.messagebox.showerror") as error,
-            ):
-                workflow.save_scene_as()
+            workflow = ProjectWorkflow(window, dialog_provider=dialogs)
+            workflow.save_scene_as()
 
             self.assertEqual(window._last_save_path, previous_target)
-            error.assert_called_once()
+            dialogs.show_error.assert_called_once()
 
     def test_save_as_write_failure_preserves_previous_target(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -820,21 +852,18 @@ class TestProjectWorkflow(unittest.TestCase):
                 _last_save_path=previous_target,
                 _console=MagicMock(),
                 _root=MagicMock(),
+                _set_window_title=MagicMock(),
+                _populate_recent_projects=MagicMock(),
             )
-            workflow = ProjectWorkflow(window)
+            dialogs = MagicMock()
+            dialogs.ask_save_file.return_value = str(project.scenes_dir / "copy.scene.pb")
+            workflow = ProjectWorkflow(window, dialog_provider=dialogs)
 
-            with (
-                patch(
-                    "expra_engine.editor.project_workflow.filedialog.asksaveasfilename",
-                    return_value=str(project.scenes_dir / "copy.scene.pb"),
-                ),
-                patch.object(project, "save_document", side_effect=OSError("disk full")),
-                patch("expra_engine.editor.project_workflow.messagebox.showerror") as error,
-            ):
+            with patch.object(project, "save_document", side_effect=OSError("disk full")):
                 workflow.save_scene_as()
 
             self.assertEqual(window._last_save_path, previous_target)
-            error.assert_called_once()
+            dialogs.show_error.assert_called_once()
 
     def test_launch_failure_keeps_editor_state_unchanged(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -842,21 +871,22 @@ class TestProjectWorkflow(unittest.TestCase):
             scene = project.load_scene()
             previous_target = project.document_file()
             engine = SimpleNamespace(project=project, edit_scene=scene)
+            dialogs = MagicMock()
             window = SimpleNamespace(
                 _engine=engine,
                 _last_save_path=previous_target,
                 _console=MagicMock(),
                 _root=MagicMock(),
+                _set_window_title=MagicMock(),
+                _populate_recent_projects=MagicMock(),
                 _timer=RecordingTimer(),
+                _dialogs=dialogs,
             )
-            workflow = ProjectWorkflow(window)
+            workflow = ProjectWorkflow(window, dialog_provider=dialogs)
 
-            with (
-                patch(
-                    "expra_engine.editor.project_process.subprocess.Popen",
-                    side_effect=OSError("process limit reached"),
-                ),
-                patch("expra_engine.editor.project_workflow.messagebox.showerror") as error,
+            with patch(
+                "expra_engine.editor.project_process.subprocess.Popen",
+                side_effect=OSError("process limit reached"),
             ):
                 workflow.run_project()
 
@@ -864,7 +894,7 @@ class TestProjectWorkflow(unittest.TestCase):
             self.assertIs(engine.edit_scene, scene)
             self.assertEqual(window._last_save_path, previous_target)
             self.assertIsNone(workflow._project_process_controller.process)
-            error.assert_called_once()
+            dialogs.show_error.assert_called_once()
 
     def test_stop_project_terminates_a_running_child_process(self) -> None:
         window = SimpleNamespace(_engine=SimpleNamespace(project=None))
@@ -934,6 +964,8 @@ class TestProjectWorkflow(unittest.TestCase):
                 _engine=SimpleNamespace(project=project),
                 _console=MagicMock(),
                 _root=MagicMock(),
+                _set_window_title=MagicMock(),
+                _populate_recent_projects=MagicMock(),
                 _timer=timer,
             )
             workflow = ProjectWorkflow(window)

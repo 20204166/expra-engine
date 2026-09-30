@@ -561,7 +561,6 @@ class WorldTraversalMixin:
                 world_messages.destination_level_activation_failed(connection.destination_level_id)
             )
         if connection.transition is not TransitionMode.SEAMLESS:
-            _set_root_world_position(actor, destination_anchor)
             destination_entity = self._active_anchor_entity(
                 connection.destination_level_id, connection.destination_anchor_id
             )
@@ -571,10 +570,17 @@ class WorldTraversalMixin:
                 else None
             )
             transform = actor.get_component(TransformComponent)
+            destination_rotation = None
             if transform is not None and destination_marker is not None:
-                transform.rotation = self.runtime_scene.world_transform(
+                destination_rotation = self.runtime_scene.world_transform(
                     destination_entity.entity_id
                 ).rotation
+            # Resolve every fallible destination-pose lookup before mutating the
+            # persistent actor. A broken destination hierarchy must not strand
+            # the actor at the destination while the transition reports failure.
+            _set_root_world_position(actor, destination_anchor)
+            if transform is not None and destination_rotation is not None:
+                transform.rotation = destination_rotation
             self._camera_context_level_id = connection.destination_level_id
             self._camera_recenter_generation += 1
         self._persistent_actor_levels[persistent_id] = connection.destination_level_id

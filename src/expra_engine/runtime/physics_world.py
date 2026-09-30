@@ -7,7 +7,6 @@ from dataclasses import dataclass
 
 from expra_engine.core.entity import Entity
 from expra_engine.core.scene import Scene, WorldTransform2D
-from expra_engine.core.component import TransformComponent
 from expra_engine.observability import ObservabilityWatcher
 from expra_engine.runtime.area import AreaComponent, SpaceOverride
 from expra_engine.runtime.collider import ColliderComponent
@@ -41,7 +40,9 @@ class PhysicsWorld2D:
 
     def _colliders(self, *, include_area_volumes: bool = False) -> tuple[_Collider, ...]:
         result: list[_Collider] = []
-        for index, entity in enumerate(self.scene.entities):
+        scene_entities = self.scene.entities
+        scene_entity_ids = {entity.entity_id for entity in scene_entities}
+        for index, entity in enumerate(scene_entities):
             self._entity_order.setdefault(entity.entity_id, index)
             if not entity.enabled:
                 continue
@@ -74,6 +75,14 @@ class PhysicsWorld2D:
                     pose,
                 )
             )
+        retained_ids = scene_entity_ids | {
+            entity_id for pair in self._trigger_pairs for entity_id in pair
+        }
+        self._entity_order = {
+            entity_id: order
+            for entity_id, order in self._entity_order.items()
+            if entity_id in retained_ids
+        }
         return tuple(result)
 
     @staticmethod

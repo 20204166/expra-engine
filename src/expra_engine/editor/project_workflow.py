@@ -6,7 +6,6 @@ import json
 import uuid
 from dataclasses import replace
 from pathlib import Path, PureWindowsPath
-from tkinter import filedialog, messagebox, simpledialog
 from typing import Any
 
 from expra_engine.core.document_kind import DocumentKind
@@ -14,6 +13,7 @@ from expra_engine.core.project import Project, ProjectError
 from expra_engine.core.scene import Level, Scene
 from expra_engine.core.scene.document_codec import canonical_pb_path
 from expra_engine.core.world import World, WorldConnection
+from expra_engine.editor.dialog_provider import DialogProvider
 from expra_engine.editor.project_paths import resolved_project_relative_path
 from expra_engine.editor.project_process import ProjectProcessController
 from expra_engine.editor.world_authoring import WorldAuthoringWorkflow
@@ -25,53 +25,56 @@ from expra_engine.runtime.script_registry import ScriptRegistry
 class ProjectWorkflow:
     """Keep project dialogs and switching policy outside the editor shell."""
 
-    def __init__(self, window: Any) -> None:
+    def __init__(self, window: Any, *, dialog_provider: DialogProvider | None = None) -> None:
         self.window = window
+        self._dialog_provider = dialog_provider
         self._pending_restore: tuple[Any, Path | None] | None = None
         self._project_process_controller = ProjectProcessController(window)
         self.world_authoring = WorldAuthoringWorkflow(window)
 
+    @property
+    def _dialogs(self) -> DialogProvider:
+        """The explicit provider, else the window's own."""
+        return self._dialog_provider or self.window._dialogs
+
     def new_project(self) -> None:
-        window = self.window
         if not self._confirm_switch():
             return
-        name = simpledialog.askstring("New Project", "Project name:", parent=window._root)
-        location = filedialog.askdirectory(title="Choose project location") if name else ""
+        name = self._dialogs.ask_string("New Project", "Project name:")
+        location = self._dialogs.ask_open_dir("Choose project location") if name else ""
         if not name or not location:
             return
         try:
             project = Project.create(name, Path(location) / name)
             self.open_loaded(project)
         except (OSError, ProjectError) as exc:
-            messagebox.showerror("New Project", str(exc), parent=window._root)
+            self._dialogs.show_error("New Project", str(exc))
 
     def open_project(self) -> None:
-        window = self.window
         if not self._confirm_switch():
             return
-        selected = filedialog.askdirectory(title="Open Expra Project")
+        selected = self._dialogs.ask_open_dir("Open Expra Project")
         if not selected:
             return
         try:
             project = Project.load(Path(selected))
             self.open_loaded(project)
         except (OSError, ProjectError) as exc:
-            messagebox.showerror("Open Project", str(exc), parent=window._root)
+            self._dialogs.show_error("Open Project", str(exc))
 
     def open_project_manifest(self) -> None:
-        window = self.window
         if not self._confirm_switch():
             return
-        selected = filedialog.askopenfilename(
-            title="Open Expra Project Manifest",
+        selected = self._dialogs.ask_open_file(
+            "Open Expra Project Manifest",
             filetypes=[("Expra project", "project.json"), ("JSON files", "*.json")],
         )
-        if not selected:
+        if not selected or isinstance(selected, list):
             return
         try:
             self.open_loaded(Project.load(Path(selected)))
         except (OSError, ProjectError) as exc:
-            messagebox.showerror("Open Project", str(exc), parent=window._root)
+            self._dialogs.show_error("Open Project", str(exc))
 
     def open_recent(self, path: str) -> None:
         if not self._confirm_switch():
@@ -88,11 +91,12 @@ class ProjectWorkflow:
         project = window._engine.project
         if project is None:
             return
-        for filename in filedialog.askopenfilenames(title="Import Assets"):
+        selected = self._dialogs.ask_open_file("Import Assets", multiple=True)
+        for filename in (selected if isinstance(selected, list) else [selected] if selected else []):
             try:
                 resource = project.import_asset(Path(filename))
             except (OSError, ProjectError) as exc:
-                messagebox.showerror("Import Asset", str(exc), parent=window._root)
+                self._dialogs.show_error("Import Asset", str(exc))
                 continue
             window._console.log(f"[Editor] Imported asset: {resource}")
         window._assets.refresh()
@@ -119,11 +123,10 @@ class ProjectWorkflow:
         project = window._engine.project
         if project is None:
             return
-        action = simpledialog.askstring("Input Settings", "Action name:", parent=window._root)
-        physical = simpledialog.askstring(
+        action = self._dialogs.ask_string("Input Settings", "Action name:")
+        physical = self._dialogs.ask_string(
             "Input Settings",
             "Physical binding (for example keyboard:left):",
-            parent=window._root,
         )
         if not action or not physical:
             return
@@ -134,7 +137,7 @@ class ProjectWorkflow:
             project_engine = window._engine
             project_engine.input_map.bind(ActionId(action.strip()), PhysicalInput(device, control))
         except (OSError, ProjectError) as exc:
-            messagebox.showerror("Input Settings", str(exc), parent=window._root)
+            self._dialogs.show_error("Input Settings", str(exc))
             return
         window._console.log(f"[Editor] Input binding updated: {action}")
 
@@ -157,7 +160,7 @@ class ProjectWorkflow:
         window._actions.set_enabled("delete_entity", False)
         window._actions.set_enabled("duplicate_selection", False)
         window._update_project_actions()
-        window._root.title("Expra Editor")
+        window._set_window_title("Expra Editor")
         window._present_all()
 
     def _confirm_switch(self) -> bool:
@@ -167,10 +170,9 @@ class ProjectWorkflow:
             return True
         if not window._active_document.is_dirty:
             return True
-        decision = messagebox.askyesnocancel(
+        decision = self._dialogs.ask_yes_no_cancel(
             "Unsaved Changes",
             "The current project has unsaved changes. Save before continuing?",
-            parent=window._root,
         )
         if decision is None:
             return False
@@ -211,9 +213,10 @@ class ProjectWorkflow:
             window._preferences,
             recent_projects=tuple(dict.fromkeys(recent))[:10],
         )
+        window._populate_recent_projects()
         window._selected_ids = ()
         window._last_save_path = project.document_file()
-        window._root.title(self.window_title())
+        window._set_window_title(self.window_title())
         window._update_project_actions()
         window._console.log(f"[Editor] Opened project: {project.name}")
         window._present_all()
@@ -258,8 +261,8 @@ class ProjectWorkflow:
         if project is None:
             return
         if relative_path is None:
-            selected = filedialog.askopenfilename(
-                title="Open Document",
+            result = self._dialogs.ask_open_file(
+                "Open Document",
                 initialdir=str(project.path),
                 filetypes=[
                     ("Scene documents", "*.scene.pb"),
@@ -268,6 +271,7 @@ class ProjectWorkflow:
                     ("Legacy JSON", "*.json"),
                 ],
             )
+            selected = result if isinstance(result, str) else ""
             if not selected:
                 return
             try:
@@ -275,8 +279,8 @@ class ProjectWorkflow:
                     project.path, Path(selected)
                 ).as_posix()
             except ValueError:
-                messagebox.showerror(
-                    "Open Document", "Document must be inside the project.", parent=window._root
+                self._dialogs.show_error(
+                    "Open Document", "Document must be inside the project."
                 )
                 return
         if not self._confirm_switch():
@@ -284,7 +288,7 @@ class ProjectWorkflow:
         try:
             document = project.load_document(relative_path, observer=window._observer)
         except ProjectError as exc:
-            messagebox.showerror("Open Document", str(exc), parent=window._root)
+            self._dialogs.show_error("Open Document", str(exc))
             return
         if isinstance(document, World):
             window._engine.set_scene(None)
@@ -296,13 +300,13 @@ class ProjectWorkflow:
         elif isinstance(document, Scene):
             window._engine.set_scene(document)
         else:
-            messagebox.showerror("Open Document", "Unsupported document kind.", parent=window._root)
+            self._dialogs.show_error("Open Document", "Unsupported document kind.")
             return
         document_path = project.document_file(relative_path)
         window._active_document.open(document, document_path)
         window._last_save_path = document_path
         window._selected_ids = ()
-        window._root.title(self.window_title())
+        window._set_window_title(self.window_title())
         window._console.log(f"[Editor] Opened document: {relative_path}")
         window._present_all()
 
@@ -329,27 +333,22 @@ class ProjectWorkflow:
                 else DocumentKind(kind)
             )
         except (TypeError, ValueError):
-            messagebox.showerror(
-                "New Document", "Choose Scene, Level, or World.", parent=window._root
-            )
+            self._dialogs.show_error("New Document", "Choose Scene, Level, or World.")
             return
         if document_kind not in {DocumentKind.SCENE, DocumentKind.LEVEL, DocumentKind.WORLD}:
-            messagebox.showerror(
-                "New Document", "Choose Scene, Level, or World.", parent=window._root
-            )
+            self._dialogs.show_error("New Document", "Choose Scene, Level, or World.")
             return
         if project is None and document_kind is not DocumentKind.SCENE:
-            messagebox.showwarning(
+            self._dialogs.show_warning(
                 "New Document",
                 "Open a project before creating a Level or World.",
-                parent=window._root,
             )
             return
         if not self._confirm_switch():
             return
         if name is None:
-            name = simpledialog.askstring(
-                "New Document", f"{document_kind.value.title()} name:", parent=window._root
+            name = self._dialogs.ask_string(
+                "New Document", f"{document_kind.value.title()} name:"
             )
         if not name or not name.strip():
             return
@@ -376,7 +375,7 @@ class ProjectWorkflow:
                     raise ProjectError(f"Document already exists: {relative_path}")
                 project.save_document(document, relative_path)
             except (OSError, ProjectError, ValueError) as error:
-                messagebox.showerror("New Document", str(error), parent=window._root)
+                self._dialogs.show_error("New Document", str(error))
                 return
         if isinstance(document, World):
             window._engine.set_scene(None)
@@ -391,7 +390,7 @@ class ProjectWorkflow:
         window._active_document.open(document, document_path)
         window._last_save_path = document_path
         window._selected_ids = ()
-        window._root.title(self.window_title())
+        window._set_window_title(self.window_title())
         window._console.log(
             f"[Editor] Created {document_kind.value.title()}: "
             f"{relative_path if project is not None else normalized_name}"
@@ -436,7 +435,7 @@ class ProjectWorkflow:
         window = self.window
         document = window._active_document.document
         if document is None:
-            messagebox.showwarning("Save As", "No document to save.", parent=window._root)
+            self._dialogs.show_warning("Save As", "No document to save.")
             return
         project = window._engine.project
         is_world = isinstance(document, World)
@@ -457,28 +456,27 @@ class ProjectWorkflow:
             else None
         )
         document_label = "World" if is_world else "Level" if is_level else "Scene"
-        path = filedialog.asksaveasfilename(
-            title=f"Save {document_label} As",
+        path = self._dialogs.ask_save_file(
+            f"Save {document_label} As",
             defaultextension=extension,
             filetypes=[(file_type, f"*{extension}")]
             + ([] if is_world else [("Legacy JSON", "*.json")]),
-            initialdir=str(initial_dir) if initial_dir is not None else None,
+            initialdir=str(initial_dir) if initial_dir is not None else "",
         )
         if not path:
             return
         target = Path(path)
         if project is None:
             if is_world:
-                messagebox.showerror(
+                self._dialogs.show_error(
                     "Save World As",
                     "World documents must be saved inside a project.",
-                    parent=window._root,
                 )
                 return
             try:
                 target.write_text(json.dumps(document.to_dict(), indent=2), encoding="utf-8")
             except OSError as exc:
-                messagebox.showerror("Save Scene As", str(exc), parent=window._root)
+                self._dialogs.show_error("Save Scene As", str(exc))
                 return
             window._last_save_path = target
             window._active_document.mark_saved(target)
@@ -488,51 +486,24 @@ class ProjectWorkflow:
             relative = resolved_project_relative_path(project.path, target).as_posix()
             project.save_document(document, relative)
         except (OSError, ProjectError, ValueError) as exc:
-            messagebox.showerror("Save Scene As", str(exc), parent=window._root)
+            self._dialogs.show_error("Save Scene As", str(exc))
             return
         window._last_save_path = project.document_file(relative)
         window._active_document.mark_saved(window._last_save_path)
-        window._root.title(self.window_title())
+        window._set_window_title(self.window_title())
         window._console.log(f"[Editor] Scene saved as: {relative}")
 
     def save_scene(self) -> None:
         """Compatibility wrapper for the active typed-document Save action."""
         self.save_active_document()
 
-    def save_active_document(self) -> None:
-        window = self.window
-        document = window._active_document.document
-        if document is None:
-            messagebox.showwarning("Save Document", "No document to save.")
-            return
-        project = window._engine.project
-        if project is not None and window._last_save_path is not None:
-            relative = resolved_project_relative_path(project.path, window._last_save_path)
-            if relative.suffix.casefold() == ".json":
-                mapping = project.migrate_to_protobuf()
-                relative = Path(mapping.get(relative.as_posix(), relative.as_posix()))
-                window._last_save_path = project.document_file(relative.as_posix())
-                window._console.log("[Editor] Migrated legacy JSON documents to canonical PB")
-            project.save_document(document, relative.as_posix())
-            window._active_document.mark_saved(window._last_save_path)
-            window._console.log(f"[Editor] Scene saved: {window._last_save_path}")
-            return
-        path = filedialog.asksaveasfilename(
-            title="Save Scene",
-            defaultextension=".json",
-            filetypes=[("Scene files", "*.json")],
-        )
-        if path:
-            window._last_save_path = Path(path)
-            self.save_scene_silent()
-            window._console.log(f"[Editor] Scene saved: {path}")
+    def _save_active_document_to_current_path(self) -> None:
+        """Persist the active document to its current path, raising on failure.
 
-    def save_scene_silent(self) -> None:
-        """Compatibility wrapper for typed-document autosave/save prompts."""
-        self.save_active_document_silent()
-
-    def save_active_document_silent(self) -> None:
-        """Save to the last selected path without opening a dialog."""
+        This is the single owner of the save operation shared by manual Save and
+        recurring autosave. Callers keep their own dialog/silent error mapping and
+        the document is only marked clean after a successful canonical write.
+        """
         window = self.window
         document = window._active_document.document
         if window._last_save_path is None or document is None:
@@ -557,6 +528,47 @@ class ProjectWorkflow:
         project.save_document(document, relative)
         window._active_document.mark_saved(window._last_save_path)
 
+    def save_active_document(self) -> None:
+        window = self.window
+        document = window._active_document.document
+        if document is None:
+            self._dialogs.show_warning("Save Document", "No document to save.")
+            return
+        project = window._engine.project
+        if project is not None and window._last_save_path is not None:
+            try:
+                self._save_active_document_to_current_path()
+            except (OSError, ProjectError, ValueError) as exc:
+                self._dialogs.show_error("Save Document", str(exc))
+                return
+            window._console.log(f"[Editor] Scene saved: {window._last_save_path}")
+            return
+        path = self._dialogs.ask_save_file(
+            "Save Scene",
+            defaultextension=".json",
+            filetypes=[("Scene files", "*.json")],
+        )
+        if path:
+            window._last_save_path = Path(path)
+            try:
+                self._save_active_document_to_current_path()
+            except (OSError, ProjectError, ValueError) as exc:
+                self._dialogs.show_error("Save Document", str(exc))
+                return
+            window._console.log(f"[Editor] Scene saved: {path}")
+
+    def save_scene_silent(self) -> None:
+        """Compatibility wrapper for typed-document autosave/save prompts."""
+        self.save_active_document_silent()
+
+    def save_active_document_silent(self) -> None:
+        """Save to the last selected path without opening a dialog.
+
+        Raises on failure so silent callers (e.g. autosave) can distinguish a
+        failed write from a successful clean-state transition.
+        """
+        self._save_active_document_to_current_path()
+
     def duplicate_scene(self, name: str | None = None) -> None:
         """Compatibility wrapper for typed active-document duplication."""
         self.duplicate_document(name)
@@ -569,7 +581,7 @@ class ProjectWorkflow:
         if project is None or document is None:
             return
         if name is None:
-            name = simpledialog.askstring("Duplicate Document", "New name:", parent=window._root)
+            name = self._dialogs.ask_string("Duplicate Document", "New name:")
         if not name:
             return
         if isinstance(document, World):
@@ -579,8 +591,8 @@ class ProjectWorkflow:
         else:
             relative = f"scenes/{canonical_pb_path(Path(name).name, DocumentKind.SCENE)}"
         if project.document_file(relative).exists():
-            messagebox.showerror(
-                "Duplicate Document", f"Document already exists: {relative}", parent=window._root
+            self._dialogs.show_error(
+                "Duplicate Document", f"Document already exists: {relative}"
             )
             return
         data = document.to_dict()
@@ -607,7 +619,7 @@ class ProjectWorkflow:
         window._active_document.open(duplicate, document_path)
         window._last_save_path = document_path
         window._selected_ids = ()
-        window._root.title(self.window_title())
+        window._set_window_title(self.window_title())
         window._console.log(f"[Editor] Duplicated scene as: {relative}")
         window._present_all()
 
@@ -628,7 +640,7 @@ class ProjectWorkflow:
                 ),
                 level="error",
             )
-            messagebox.showerror("Run Project", str(exc), parent=window._root)
+            self._dialogs.show_error("Run Project", str(exc))
             return
         if not script.is_file():
             error = project_messages.project_script_entrypoint_missing(project.script_entry_point)
@@ -638,11 +650,7 @@ class ProjectWorkflow:
                 ),
                 level="error",
             )
-            messagebox.showerror(
-                "Run Project",
-                error,
-                parent=window._root,
-            )
+            self._dialogs.show_error("Run Project", error)
             return
         self._project_process_controller.start(project, script)
 
@@ -684,6 +692,6 @@ class ProjectWorkflow:
         window = self.window
         window._engine.set_scene(scene)
         window._last_save_path = last_save_path
-        window._root.title(self.window_title())
+        window._set_window_title(self.window_title())
         window._console.log("[Editor] Restored previous scene after Run Project")
         window._present_all()

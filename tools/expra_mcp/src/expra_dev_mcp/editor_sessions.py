@@ -1,8 +1,8 @@
-"""EditorSessionManager: spawns and drives the long-lived Tk editor worker
+"""EditorSessionManager: spawns and drives the long-lived Qt editor worker
 subprocess (_editor_worker.py), one per session. Mutations to a given
 session are serialized through an asyncio.Lock (spec: "one editor session
-must serialize mutations to its own worker"). Never runs Tk in this
-process -- every Tk call happens inside the worker's own main thread.
+must serialize mutations to its own worker"). Never runs Qt in this
+process -- every Qt call happens inside the worker's own main thread.
 
 Headless fallback manages ``Xvfb`` directly rather than shelling out to
 ``xvfb-run``: that wrapper script runs the wrapped command as

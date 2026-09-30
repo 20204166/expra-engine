@@ -36,14 +36,20 @@ class PhysicalInput:
     modifiers: frozenset[str] = frozenset()
 
     def __post_init__(self) -> None:
-        if not self.device or not self.control:
+        device = self.device.strip().lower()
+        control = self.control.strip().lower()
+        if not device or not control:
             raise ValueError("physical input device and control cannot be empty")
-        object.__setattr__(self, "device", self.device.lower())
-        object.__setattr__(self, "control", self.control.lower())
+        object.__setattr__(self, "device", device)
+        object.__setattr__(self, "control", control)
         object.__setattr__(
             self,
             "modifiers",
-            frozenset(modifier.lower() for modifier in self.modifiers),
+            frozenset(
+                modifier
+                for modifier in (item.strip().lower() for item in self.modifiers)
+                if modifier
+            ),
         )
 
 
@@ -70,6 +76,8 @@ class InputMap:
     def __init__(self) -> None:
         self._bindings: dict[PhysicalInput, Binding] = {}
         self._held: set[Binding] = set()
+        self._axis_bindings: dict[PhysicalInput, tuple[ActionId, float]] = {}
+        self._axes: dict[str, float] = {}
 
     def bind(self, action: ActionId, physical: PhysicalInput) -> Binding:
         """Add a binding, rejecting a physical-control collision."""
@@ -89,9 +97,11 @@ class InputMap:
         return True
 
     def clear(self) -> None:
-        """Remove all project bindings and held state."""
+        """Remove all project bindings and transient input state."""
         self._bindings.clear()
         self._held.clear()
+        self._axis_bindings.clear()
+        self._axes.clear()
 
     def press(self, physical: PhysicalInput) -> tuple[ActionEvent, ...]:
         """Resolve a physical press into one semantic action event."""
@@ -119,6 +129,66 @@ class InputMap:
         value = action.value if isinstance(action, ActionId) else action
         return any(item.value == value for item in self.held_actions)
 
+    def bind_axis(
+        self, action: ActionId | str, physical: PhysicalInput, *, deadzone: float = 0.1
+    ) -> tuple[ActionId, float]:
+        """Bind a physical analog axis to an action with a deadzone.
+
+        ``deadzone`` must be finite and in ``[0, 1)``. Rebinding the same
+        physical axis to a different action (or a different deadzone) is
+        rejected; an exact duplicate is a no-op.
+        """
+        action_id = action if isinstance(action, ActionId) else ActionId(action)
+        deadzone_value = float(deadzone)
+        if not _isfinite(deadzone_value) or not 0.0 <= deadzone_value < 1.0:
+            raise ValueError("deadzone must be finite and in [0, 1)")
+        binding = (action_id, deadzone_value)
+        existing = self._axis_bindings.get(physical)
+        if existing is not None and existing != binding:
+            raise ValueError(f"physical axis already bound: {physical!r}")
+        self._axis_bindings[physical] = binding
+        return binding
+
+    def unbind_axis(self, physical: PhysicalInput) -> bool:
+        """Remove an axis binding, returning ``False`` when it was absent."""
+        return self._axis_bindings.pop(physical, None) is not None
+
+    def set_axis(self, physical: PhysicalInput, value: float) -> None:
+        """Update an action's analog value from a bound physical axis.
+
+        Non-numeric or non-finite values are safely ignored, and out-of-range
+        values are clamped to ``[-1, 1]`` so a driver reporting a value slightly
+        outside that range cannot crash gameplay. The deadzone is applied
+        through :class:`GamepadAxis`.
+        """
+        bound = self._axis_bindings.get(physical)
+        if bound is None:
+            return
+        action_id, deadzone = bound
+        try:
+            raw = float(value)
+        except (TypeError, ValueError):
+            return
+        if not _isfinite(raw):
+            return
+        raw = max(-1.0, min(1.0, raw))
+        self._axes[action_id.value] = GamepadAxis(raw, deadzone).apply_deadzone()
+
+    def axis_value(self, action: ActionId | str) -> float:
+        """Return the current analog value for *action* (0.0 when none)."""
+        value = action.value if isinstance(action, ActionId) else action
+        return self._axes.get(value, 0.0)
+
+    def reset_held(self) -> None:
+        """Clear all transient input state without emitting release events.
+
+        Used at runtime teardown (e.g. ``Engine.stop()``) so a control held
+        across a play/stop boundary cannot leak a stale "held" action or axis
+        value into the next play session.
+        """
+        self._held.clear()
+        self._axes.clear()
+
     def focus_lost(self) -> tuple[ActionEvent, ...]:
         """Release every held binding in deterministic order."""
         held = sorted(
@@ -131,6 +201,7 @@ class InputMap:
             ),
         )
         self._held.clear()
+        self._axes.clear()
         return tuple(ActionEvent(binding.action, "released", binding.physical) for binding in held)
 
 
@@ -145,10 +216,8 @@ class GamepadAxis:
 
     ``deadzone`` must be in [0, 1).  A deadzone of 0.0 never suppresses.
 
-    Declared-but-unwired: this is the public gamepad-axis contract, but no
-    backend consumes it yet. ``PygameRuntime._poll_events`` translates only
-    keyboard and mouse; no ``JOYAXISMOTION``/``JOYBUTTON``/``JOYHAT`` events are
-    processed, so ``GamepadAxis`` never receives a raw hardware value today.
+    Consumed by ``PygameRuntime`` via ``InputMap.set_axis()``, which clamps the
+    raw ``JOYAXISMOTION`` value to ``[-1, 1]`` before applying the deadzone.
     """
 
     value: float

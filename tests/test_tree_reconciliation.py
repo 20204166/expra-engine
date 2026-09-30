@@ -1,4 +1,4 @@
-"""Behavior tests for the shared Treeview reconciliation helper."""
+"""Behavior tests for shared retained-tree row reconciliation."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 
-class TreeviewDouble:
+class TreeAdapterDouble:
     """Small retained-tree model that records structural/content mutations."""
 
     def __init__(self) -> None:
@@ -100,20 +100,20 @@ class TreeviewDouble:
 def _load_api() -> tuple[type[Any], Callable[..., dict[str, Any]]]:
     try:
         module = import_module("expra_engine.ui.tree_reconciliation")
-        return module.TreeRow, module.reconcile_treeview
+        return module.TreeRow, module.reconcile_tree_rows
     except (ImportError, AttributeError):
         pytest.fail("shared tree reconciler is not implemented", pytrace=False)
 
 
 def test_reconciler_inserts_ordered_nested_rows() -> None:
-    TreeRow, reconcile_treeview = _load_api()
-    tree = TreeviewDouble()
+    TreeRow, reconcile_tree_rows = _load_api()
+    tree = TreeAdapterDouble()
     desired = (
         ("parent", TreeRow(parent="", text="Parent")),
         ("child", TreeRow(parent="parent", text="Child")),
     )
 
-    result = reconcile_treeview(tree, {}, desired)
+    result = reconcile_tree_rows(tree, {}, desired)
 
     assert list(result) == ["parent", "child"]
     assert result == dict(desired)
@@ -123,12 +123,12 @@ def test_reconciler_inserts_ordered_nested_rows() -> None:
     assert tree.get_children_calls == 1
 
 
-def test_reconciler_initial_empty_population_skips_per_row_tk_existence_checks() -> None:
-    TreeRow, reconcile_treeview = _load_api()
-    tree = TreeviewDouble()
+def test_reconciler_initial_empty_population_skips_per_row_existence_checks() -> None:
+    TreeRow, reconcile_tree_rows = _load_api()
+    tree = TreeAdapterDouble()
     desired = tuple((f"row-{index}", TreeRow(parent="", text=str(index))) for index in range(5000))
 
-    result = reconcile_treeview(tree, {}, desired)
+    result = reconcile_tree_rows(tree, {}, desired)
 
     assert len(result) == 5000
     assert len(tree.rows) == 5000
@@ -138,12 +138,12 @@ def test_reconciler_initial_empty_population_skips_per_row_tk_existence_checks()
 
 
 def test_reconciler_with_untracked_existing_rows_still_detects_them() -> None:
-    TreeRow, reconcile_treeview = _load_api()
-    tree = TreeviewDouble()
+    TreeRow, reconcile_tree_rows = _load_api()
+    tree = TreeAdapterDouble()
     tree.insert("", "end", iid="existing", text="old")
     tree.clear_calls()
 
-    result = reconcile_treeview(
+    result = reconcile_tree_rows(
         tree,
         {},
         (("existing", TreeRow(parent="", text="new")),),
@@ -156,8 +156,8 @@ def test_reconciler_with_untracked_existing_rows_still_detects_them() -> None:
 
 
 def test_reconciler_updates_only_changed_row_content() -> None:
-    TreeRow, reconcile_treeview = _load_api()
-    tree = TreeviewDouble()
+    TreeRow, reconcile_tree_rows = _load_api()
+    tree = TreeAdapterDouble()
     previous = {
         "asset": TreeRow(
             parent="",
@@ -187,7 +187,7 @@ def test_reconciler_updates_only_changed_row_content() -> None:
         ),
     )
 
-    result = reconcile_treeview(tree, previous, desired)
+    result = reconcile_tree_rows(tree, previous, desired)
 
     assert result == dict(desired)
     assert tree.item("asset") == {
@@ -200,8 +200,8 @@ def test_reconciler_updates_only_changed_row_content() -> None:
 
 
 def test_reconciler_deletes_stale_subtree_and_reinserts_surviving_descendant() -> None:
-    TreeRow, reconcile_treeview = _load_api()
-    tree = TreeviewDouble()
+    TreeRow, reconcile_tree_rows = _load_api()
+    tree = TreeAdapterDouble()
     previous = {
         "root": TreeRow(parent="", text="Root"),
         "removed": TreeRow(parent="root", text="Removed"),
@@ -216,7 +216,7 @@ def test_reconciler_deletes_stale_subtree_and_reinserts_surviving_descendant() -
         ("survivor", TreeRow(parent="", text="Survivor")),
     )
 
-    result = reconcile_treeview(tree, previous, desired)
+    result = reconcile_tree_rows(tree, previous, desired)
 
     assert list(result) == ["root", "survivor"]
     assert not tree.exists("removed")
@@ -227,8 +227,8 @@ def test_reconciler_deletes_stale_subtree_and_reinserts_surviving_descendant() -
 
 
 def test_reconciler_preserves_expanded_state_of_reinserted_descendant() -> None:
-    TreeRow, reconcile_treeview = _load_api()
-    tree = TreeviewDouble()
+    TreeRow, reconcile_tree_rows = _load_api()
+    tree = TreeAdapterDouble()
     previous = {
         "removed": TreeRow(parent="", text="Removed"),
         "survivor": TreeRow(parent="removed", text="Survivor"),
@@ -244,22 +244,22 @@ def test_reconciler_preserves_expanded_state_of_reinserted_descendant() -> None:
         ("grandchild", TreeRow(parent="survivor", text="Grandchild")),
     )
 
-    reconcile_treeview(tree, previous, desired)
+    reconcile_tree_rows(tree, previous, desired)
 
     assert tree.item("survivor", "open") is True
     assert tree.calls == {"insert": 2, "delete": 1, "item": 1, "move": 0}
 
 
 def test_reconciler_minimizes_sibling_reordering_moves() -> None:
-    TreeRow, reconcile_treeview = _load_api()
-    tree = TreeviewDouble()
+    TreeRow, reconcile_tree_rows = _load_api()
+    tree = TreeAdapterDouble()
     previous = {iid: TreeRow(parent="", text=iid) for iid in ("a", "b", "c", "d")}
     for iid in previous:
         tree.insert("", "end", iid=iid, text=iid)
     tree.clear_calls()
     desired = tuple((iid, previous[iid]) for iid in ("b", "c", "d", "a"))
 
-    reconcile_treeview(tree, previous, desired)
+    reconcile_tree_rows(tree, previous, desired)
 
     assert tree.children[""] == ["b", "c", "d", "a"]
     assert tree.calls == {"insert": 0, "delete": 0, "item": 0, "move": 1}
@@ -267,8 +267,8 @@ def test_reconciler_minimizes_sibling_reordering_moves() -> None:
 
 
 def test_reconciler_moves_row_when_its_parent_changes() -> None:
-    TreeRow, reconcile_treeview = _load_api()
-    tree = TreeviewDouble()
+    TreeRow, reconcile_tree_rows = _load_api()
+    tree = TreeAdapterDouble()
     previous = {
         "left": TreeRow(parent="", text="Left"),
         "right": TreeRow(parent="", text="Right"),
@@ -284,7 +284,7 @@ def test_reconciler_moves_row_when_its_parent_changes() -> None:
         ("child", TreeRow(parent="right", text="Child")),
     )
 
-    reconcile_treeview(tree, previous, desired)
+    reconcile_tree_rows(tree, previous, desired)
 
     assert tree.children["left"] == []
     assert tree.children["right"] == ["child"]
@@ -293,8 +293,8 @@ def test_reconciler_moves_row_when_its_parent_changes() -> None:
 
 
 def test_unchanged_reconciliation_performs_no_tree_mutations() -> None:
-    TreeRow, reconcile_treeview = _load_api()
-    tree = TreeviewDouble()
+    TreeRow, reconcile_tree_rows = _load_api()
+    tree = TreeAdapterDouble()
     previous = {
         "parent": TreeRow(parent="", text="Parent"),
         "child": TreeRow(parent="parent", text="Child", values=("value",), tags=("tag",)),
@@ -311,7 +311,7 @@ def test_unchanged_reconciliation_performs_no_tree_mutations() -> None:
     tree.clear_calls()
     desired: Sequence[tuple[str, Any]] = tuple(previous.items())
 
-    result = reconcile_treeview(tree, previous, desired)
+    result = reconcile_tree_rows(tree, previous, desired)
 
     assert result == previous
     assert tree.calls == {"insert": 0, "delete": 0, "item": 0, "move": 0}

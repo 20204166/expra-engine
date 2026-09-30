@@ -1,4 +1,4 @@
-"""Caller-driven callable-chain scheduling with no threads or Tk."""
+"""Caller-driven callable-chain scheduling with no threads or GUI toolkit."""
 
 from __future__ import annotations
 

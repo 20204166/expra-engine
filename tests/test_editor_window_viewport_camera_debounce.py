@@ -1,9 +1,9 @@
 """Regression tests for the viewport-camera preferences-write debounce.
 
-Section 11 of the Tk smoothness pass: _save_viewport_camera used to call
-PreferencesStore.save() (an atomic write + fsync, measured ~4-8ms) on every
-single pan-motion/wheel-zoom event -- a sustained drag could fire dozens of
-synchronous disk writes per second on the Tk main thread. It now updates the
+_save_viewport_camera used to call PreferencesStore.save() (an atomic write +
+fsync, measured ~4-8ms) on every single pan-motion/wheel-zoom event -- a
+sustained drag could fire dozens of synchronous disk writes per second on the
+GUI main thread. It now updates the
 in-memory value immediately but debounces the actual write, and _on_close
 flushes any write still pending so the final camera state is never lost.
 """
@@ -15,11 +15,21 @@ from pathlib import Path
 from unittest.mock import MagicMock, call
 
 from expra_engine.editor.preferences import EditorPreferences
-from expra_engine.ui.editor_window import EditorWindow
+from expra_engine.editor.window_core import EditorWindowCore
 
 
-def _window() -> EditorWindow:
-    window = object.__new__(EditorWindow)
+class _CoreWindow(EditorWindowCore):
+    """Shared window logic; shell hooks are test doubles."""
+
+    def _persist_window_geometry(self) -> None:
+        return
+
+    def _destroy_shell(self) -> None:
+        return
+
+
+def _window() -> _CoreWindow:
+    window = object.__new__(_CoreWindow)
     window._preferences = EditorPreferences()
     window._preferences_store = MagicMock()
     window._preferences_path = Path("/fake/preferences.json")
@@ -71,14 +81,11 @@ class ViewportCameraDebounceTests(unittest.TestCase):
 
 
 class ViewportCameraCloseFlushTests(unittest.TestCase):
-    def _closing_window(self) -> EditorWindow:
+    def _closing_window(self) -> _CoreWindow:
         window = _window()
         window._runtime_preview = MagicMock()
         window._is_closing = False
         window._autosave_after_id = None
-        window._sash_after_id = None
-        window._root = MagicMock()
-        window._root.geometry.return_value = ""  # -> WindowGeometry parses to None
         window._contributions = MagicMock()
         window._delivery_queue = MagicMock()
         window._coordinator = MagicMock()

@@ -39,6 +39,10 @@ echo "Preparing Expra build inputs and version..."
     --package-dir "$here" \
     --bump "$bump"
 
+# setuptools leaves removed modules in build/lib; never let an older build tree
+# reintroduce deleted editor frontends into a fresh wheel.
+rm -rf "$here/build"
+
 echo "Building Expra wheel..."
 "$py" -m build --wheel --outdir "$here/dist" "$here"
 

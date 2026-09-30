@@ -35,6 +35,18 @@ class PropertyEdgeBehaviour(Behaviour):
 
 
 class ScriptingFoundationTests(unittest.TestCase):
+    def test_script_component_has_core_data_owner_and_runtime_compatibility_alias(self) -> None:
+        from expra_engine.core.script_component import (
+            ScriptComponent as CoreScriptComponent,
+        )
+        from expra_engine.core.script_component import (
+            UnresolvedScriptComponent as CoreUnresolvedScriptComponent,
+        )
+        from expra_engine.runtime.script_component import UnresolvedScriptComponent
+
+        self.assertIs(ScriptComponent, CoreScriptComponent)
+        self.assertIs(UnresolvedScriptComponent, CoreUnresolvedScriptComponent)
+
     def test_exposed_values_validate_without_partial_mutation(self) -> None:
         player = PlayerBehaviour()
         player.speed = 240.0

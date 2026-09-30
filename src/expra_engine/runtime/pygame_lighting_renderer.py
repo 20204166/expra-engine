@@ -268,7 +268,16 @@ class PygameLightingRenderMixin:
                 diffuse=diffuse,
                 toon_steps=toon_steps,
             )
+            pixels_alpha = self.pygame.surfarray.pixels_alpha
+            alpha_view = pixels_alpha(source)
+            source_alpha = alpha_view.copy()
+            del alpha_view
             self.pygame.surfarray.blit_array(source, shaded)
+            alpha_view = pixels_alpha(source)
+            try:
+                alpha_view[:, :] = source_alpha
+            finally:
+                del alpha_view
             observer = self._observer
             if observer is not None:
                 observer.increment("render:normal-map", "mapped_visuals", 1)

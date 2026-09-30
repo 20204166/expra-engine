@@ -7,9 +7,12 @@ import pytest
 from expra_engine.core.component import component_from_dict, registered_component_types
 from expra_engine.core.component_schema import component_type_spec
 from expra_engine.core.scene import Level
+from expra_engine.runtime.level_anchor import LevelAnchorComponent as RuntimeLevelAnchorComponent
 
 
 def test_level_anchor_is_a_registered_editable_component() -> None:
+    from expra_engine.core.level_anchor import LevelAnchorComponent
+
     data = {
         "type": "level_anchor",
         "enabled": True,
@@ -23,6 +26,7 @@ def test_level_anchor_is_a_registered_editable_component() -> None:
     registered = dict(registered_component_types())
 
     assert type(component).__name__ == "LevelAnchorComponent"
+    assert type(component) is LevelAnchorComponent is RuntimeLevelAnchorComponent
     assert component.to_dict() == data
     assert registered["level_anchor"] is type(component)
     assert {field.name for field in component_type_spec("level_anchor").fields} >= {

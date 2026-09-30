@@ -7,24 +7,33 @@ BUTTON COORDINATOR OWNS ACTIONS.
 
 Flow:
     UI control -> action request -> ButtonCoordinator
-        -> engine/application mutation -> state -> UICoordinator -> Tk presentation
+        -> engine/application mutation -> state -> UICoordinator -> Qt presentation
 """
 
 from __future__ import annotations
 
-import tkinter as tk
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Protocol
 
 from expra_engine.observability import ObservabilityWatcher
+
+
+class ActionWidget(Protocol):
+    """Toolkit-neutral adapter for one action-bearing presentation control."""
+
+    def bind_action(self, callback: Callable[[], object]) -> None: ...
+
+    def set_enabled(self, enabled: bool) -> None: ...
+
+    def is_valid(self) -> bool: ...
 
 
 @dataclass(slots=True)
 class _ActionRecord:
     callback: Callable[[], None]
     enabled: bool
-    widgets: list[Any] = field(default_factory=list)
+    widgets: list[ActionWidget] = field(default_factory=list)
 
 
 class ButtonCoordinator:
@@ -70,21 +79,17 @@ class ButtonCoordinator:
     def command(self, action_id: str) -> Callable[[], bool]:
         return lambda: self.dispatch(action_id)
 
-    def bind(self, widget: Any, action_id: str) -> None:
+    def bind(self, widget: ActionWidget, action_id: str) -> None:
         record = self._actions[action_id]
-        if not self._widget_exists(widget):
+        if not self._widget_is_valid(widget):
             return
         if widget not in record.widgets:
             record.widgets.append(widget)
-        config = self._widget_config(widget)
-        if config is not None:
-            try:
-                config(command=self.command(action_id))
-            except TypeError:
-                pass
-            except (RuntimeError, tk.TclError):
-                record.widgets = [item for item in record.widgets if item is not widget]
-                return
+        try:
+            widget.bind_action(self.command(action_id))
+        except RuntimeError:
+            record.widgets = [item for item in record.widgets if item is not widget]
+            return
         if not self._apply_state(widget, record.enabled):
             record.widgets = [item for item in record.widgets if item is not widget]
 
@@ -130,34 +135,18 @@ class ButtonCoordinator:
                 del self._actions[action_id]
 
     @staticmethod
-    def _widget_config(widget: Any) -> Any:
-        config = getattr(widget, "config", None)
-        if config is None:
-            config = getattr(widget, "configure", None)
-        return config
-
-    @staticmethod
-    def _apply_state(widget: Any, enabled: bool) -> bool:
-        if not ButtonCoordinator._widget_exists(widget):
+    def _apply_state(widget: ActionWidget, enabled: bool) -> bool:
+        if not ButtonCoordinator._widget_is_valid(widget):
             return False
-        state = "normal" if enabled else "disabled"
-        config = ButtonCoordinator._widget_config(widget)
-        if config is None:
-            return True
         try:
-            config(state=state)
-        except TypeError:
-            return True
-        except (RuntimeError, tk.TclError):
+            widget.set_enabled(enabled)
+        except RuntimeError:
             return False
         return True
 
     @staticmethod
-    def _widget_exists(widget: Any) -> bool:
-        exists = getattr(widget, "winfo_exists", None)
-        if exists is None:
-            return True
+    def _widget_is_valid(widget: ActionWidget) -> bool:
         try:
-            return bool(exists())
-        except (RuntimeError, tk.TclError):
+            return bool(widget.is_valid())
+        except RuntimeError:
             return False

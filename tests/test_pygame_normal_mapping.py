@@ -202,3 +202,59 @@ def test_normal_shading_flat_surface_uses_light_height_and_toon_quantizes_ndotl(
     )
 
     assert shaded[0, 0, 0] == 128
+
+
+def test_auto_paired_normal_map_preserves_transparent_sprite_pixels(tmp_path) -> None:
+    import pygame
+
+    from expra_engine.core.project import Project
+    from expra_engine.core.scene import Scene
+    from expra_engine.runtime.canvas_effects import CanvasModulateComponent
+    from expra_engine.runtime.material_component import MaterialComponent
+    from expra_engine.runtime.normal_mapping import NormalMapResolver
+    from expra_engine.runtime.pygame_resource_provider import PygameResourceProvider
+    from expra_engine.runtime.render_extractor import extract_render_frame
+    from expra_engine.runtime.rendering import (
+        OrthographicCamera,
+        RenderContext,
+        Viewport,
+    )
+    from expra_engine.runtime.visual_components import SpriteComponent
+
+    project = Project.create("Alpha normal map", tmp_path / "project")
+    asset_dir = project.assets_dir / "oga"
+    asset_dir.mkdir(parents=True)
+    albedo = pygame.Surface((8, 8), pygame.SRCALPHA, 32)
+    albedo.fill((162, 162, 162, 0))
+    for y in range(2, 6):
+        for x in range(2, 6):
+            albedo.set_at((x, y), (240, 40, 20, 255))
+    normal = pygame.Surface((8, 8), pygame.SRCALPHA, 32)
+    normal.fill((128, 128, 255, 255))
+    pygame.image.save(albedo, asset_dir / "sprite.png")
+    pygame.image.save(normal, asset_dir / "sprite_normal.png")
+
+    scene = Scene("Alpha")
+    scene.create_entity("modulation").add_component(
+        CanvasModulateComponent((0.68, 0.73, 0.8, 1.0))
+    )
+    entity = scene.create_entity("sprite")
+    entity.add_component(SpriteComponent("assets://oga/sprite.png", width=4, height=4))
+    entity.add_component(MaterialComponent(normal_map_mode="auto_pair"))
+    resources = project.resource_service()
+    surface = pygame.Surface((64, 64))
+    clear = (15, 20, 25)
+    renderer = PygameRenderer(
+        pygame,
+        surface,
+        clear_color=clear,
+        resource_provider=PygameResourceProvider(pygame, resources),
+        normal_map_resolver=NormalMapResolver(resources),
+        pixel_art_mode=True,
+    )
+    renderer.start(
+        RenderContext(Viewport(0, 0, 64, 64), OrthographicCamera(width=4, height=4))
+    )
+    renderer.render(extract_render_frame(scene))
+
+    assert surface.get_at((8, 8))[:3] == clear

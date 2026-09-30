@@ -48,6 +48,7 @@ from expra_engine.runtime.world_policy import (
     WorldStreamingPolicy,
     WorldStreamingSnapshot,
 )
+from expra_engine.runtime.world_queries import WorldStreamingQueriesMixin
 from expra_engine.runtime.world_state import (
     WorldSessionPersistenceMixin,
     WorldSessionState,
@@ -81,6 +82,7 @@ class WorldStreamingSystem(
     WorldCameraContextMixin,
     WorldSessionPersistenceMixin,
     WorldTraversalMixin,
+    WorldStreamingQueriesMixin,
     RuntimeSystem,
 ):
     """Bounded asynchronous Level preparation with owner-thread publication.
@@ -460,27 +462,107 @@ class WorldStreamingSystem(
             self._validate_startup_anchor()
         return True
 
+    def _level_transfer_entity_ids(self, level_id: str) -> tuple[str, ...]:
+        """Return the active Level's current hierarchy, including runtime children.
+
+        ``_runtime_entity_ids`` is captured when a Level activates. Behaviours
+        may create additional child entities later (for example generated floor
+        tiles), so close that set over the current Scene hierarchy before
+        transferring the Level back to its dormant owner. World-persistent actor
+        trees and entities owned by another active Level remain separate owners.
+        """
+        seed_ids = set(self._runtime_entity_ids.get(level_id, ()))
+        if not seed_ids:
+            return ()
+
+        persistent_ids = {
+            entity_id
+            for entity_ids in self._persistent_actor_entity_ids.values()
+            for entity_id in entity_ids
+        }
+        persistent_roots = tuple(self._persistent_actor_roots.values())
+        persistent_pending = list(persistent_roots)
+        persistent_ids.update(persistent_roots)
+        while persistent_pending:
+            parent_id = persistent_pending.pop()
+            for child in self.runtime_scene.children_of(parent_id):
+                if child.entity_id not in persistent_ids:
+                    persistent_ids.add(child.entity_id)
+                    persistent_pending.append(child.entity_id)
+
+        other_level_ids = {
+            entity_id
+            for other_level_id, entity_ids in self._runtime_entity_ids.items()
+            if other_level_id != level_id
+            for entity_id in entity_ids
+        }
+        owned: set[str] = set()
+        pending: list[str] = []
+        for entity_id in seed_ids:
+            if entity_id in persistent_ids:
+                raise ValueError(
+                    f"Level {level_id!r} transfer includes a World-persistent actor entity"
+                )
+            if self.runtime_scene.find_entity(entity_id) is not None:
+                owned.add(entity_id)
+                pending.append(entity_id)
+
+        while pending:
+            parent_id = pending.pop()
+            for child in self.runtime_scene.children_of(parent_id):
+                child_id = child.entity_id
+                if child_id in persistent_ids:
+                    raise ValueError(
+                        f"Level {level_id!r} hierarchy contains a World-persistent actor"
+                    )
+                if child_id in other_level_ids and child_id not in owned:
+                    raise ValueError(
+                        f"Level {level_id!r} hierarchy contains an entity owned by another Level"
+                    )
+                if child_id not in owned:
+                    owned.add(child_id)
+                    pending.append(child_id)
+
+        return tuple(
+            entity.entity_id
+            for entity in self.runtime_scene.entities
+            if entity.entity_id in owned
+        )
+
     def deactivate_level(self, level_id: str) -> bool:
         self._assert_owner()
         runtime_level = self._runtime_levels.get(level_id)
         if runtime_level is None:
             return False
-        entity_ids = tuple(
-            entity_id
-            for entity_id in self._runtime_entity_ids.get(level_id, ())
-            if self.runtime_scene.find_entity(entity_id) is not None
-        )
+        if self._residency.state(level_id).state is not LevelResidencyState.ACTIVE:
+            return False
+        entity_ids = self._level_transfer_entity_ids(level_id)
         if self._engine is not None:
             notify = getattr(self._engine, "notify_world_level_deactivated", None)
             if callable(notify):
                 notify(level_id, entity_ids)
+        # Deactivation callbacks may remove/add owned runtime descendants. Rebuild
+        # the closure after callbacks so transfer sees the actual current tree.
+        entity_ids = self._level_transfer_entity_ids(level_id)
         if not self._residency.deactivate(level_id):
             return False
         _obs = self._observer
         _dt = _obs.begin("world:level:deactivate") if _obs is not None else None
         try:
             self.runtime_scene.transfer_entities_to(runtime_level, entity_ids)
-        finally:
+        except Exception:
+            if _obs is not None and _dt is not None:
+                _obs.finish(_dt, outcome="failure")  # type: ignore[arg-type]
+            # Transfer validates the complete graph before mutating either owner.
+            # Restore residency and runtime subscriptions if that validation fails.
+            self._residency.activate(level_id)
+            if self._engine is not None:
+                notify = getattr(self._engine, "notify_world_level_activated", None)
+                if callable(notify):
+                    with contextlib.suppress(Exception):
+                        notify(level_id, entity_ids)
+            raise
+        else:
             if _obs is not None and _dt is not None:
                 _obs.finish(_dt)  # type: ignore[arg-type]
         self._runtime_entity_ids.pop(level_id, None)
@@ -649,84 +731,6 @@ class WorldStreamingSystem(
         self._startup_diagnostic = None
         if previous_diagnostic is not None and self._last_transition_error == previous_diagnostic:
             self._last_transition_error = None
-
-    def state(self, level_id: str) -> LevelResidencySnapshot:
-        return self._residency.state(level_id)
-
-    def loaded_levels(self) -> tuple[str, ...]:
-        return tuple(
-            item.level_id
-            for item in self._residency.snapshots()
-            if item.state
-            in {
-                LevelResidencyState.LOADED,
-                LevelResidencyState.ACTIVE,
-                LevelResidencyState.DORMANT,
-            }
-        )
-
-    def active_levels(self) -> tuple[str, ...]:
-        return tuple(
-            item.level_id
-            for item in self._residency.snapshots()
-            if item.state is LevelResidencyState.ACTIVE
-        )
-
-    @property
-    def environment_entity_ids(self) -> frozenset[str]:
-        """Entities in the active camera-context Level that may supply ambient modulation."""
-        level_id = self.camera_context.camera_context_level_id
-        if level_id != self._environment_context_level_id:
-            self._environment_context_level_id = level_id
-            self._environment_entity_ids = frozenset(self._runtime_entity_ids.get(level_id, ()))
-        if (
-            level_id is None
-            or self._residency.state(level_id).state is not LevelResidencyState.ACTIVE
-        ):
-            return frozenset()
-        return self._environment_entity_ids
-
-    def snapshot(self) -> WorldStreamingSnapshot:
-        anchors = self.streaming_anchors() if self._started else ()
-        return WorldStreamingSnapshot(
-            world_id=self.world.world_id,
-            levels=self._residency.snapshots(),
-            pending_level_ids=tuple(sorted(self._pending)),
-            in_flight_level_ids=tuple(sorted(self._futures)),
-            stale_results_discarded=self._stale_results_discarded,
-            max_concurrent_loads=self.world.streaming.max_concurrent_loads,
-            max_resident_levels=self.world.streaming.max_loaded_levels,
-            primary_levels=tuple(sorted((anchor.anchor_id, anchor.level_id) for anchor in anchors)),
-            residency_reasons=self._last_decision.reasons,
-            last_transition=self._last_transition,
-            last_transition_error=self._last_transition_error,
-            connection_preloads=self._last_decision.preload_level_ids,
-            camera=self.camera_context,
-            pending_transitions=tuple(
-                self._pending_transitions[key] for key in sorted(self._pending_transitions)
-            ),
-            session_state_counts=tuple(
-                (level_id, len(values))
-                for level_id, values in sorted(self._session_state.levels.items())
-            ),
-            last_session_error=self._last_session_error,
-            transition=self.transition,
-        )
-
-    @property
-    def startup_level_id(self) -> str | None:
-        """The Level selected for this fresh or restored World session."""
-        return self._startup_level_id
-
-    @property
-    def startup_error(self) -> str | None:
-        """A failure that prevented the selected startup Level from activating."""
-        return self._startup_error
-
-    @property
-    def startup_diagnostic(self) -> str | None:
-        """A non-fatal startup configuration issue, if the Level can still render."""
-        return self._startup_diagnostic
 
     def stop(self) -> None:
         if not self._started:

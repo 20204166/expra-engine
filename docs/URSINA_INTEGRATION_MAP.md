@@ -1,5 +1,9 @@
 # Ursina to Expra Integration Map
 
+> **Historical integration audit.** This document records an earlier engine
+> architecture snapshot. The editor is now Qt-only; Tk references below are
+> historical and are not supported frontend guidance.
+
 ## Audit Scope
 
 This is a source audit of the supplied, unmodified Ursina tree at

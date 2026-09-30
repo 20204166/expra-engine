@@ -1,11 +1,15 @@
 # Future Game UI Layer
 
+> **Historical design note.** This proposal predates the Qt-only editor cleanup;
+> mentions of Tk describe the former editor frontend, not a supported option.
+
 ## Boundary
 
-The editor UI and a shipped game's UI are separate systems. The editor may use
-`tkinter`, `ttk`, and `ttkbootstrap`; game code and exported games must not
-depend on any of them. `expra_engine.design` is the shared, renderer-neutral
-design vocabulary. It contains semantic values only and has no GUI imports.
+The Qt editor UI and a shipped game's UI are separate systems. Game code and
+exported games must not depend on editor UI toolkits. `expra_engine.design` is
+the shared, renderer-neutral design vocabulary. It contains semantic values
+only and has no GUI imports. Earlier Tk-based editor notes in this document are
+historical.
 
 The current editor adapter is `expra_engine.ui.styles`. It translates the
 shared vocabulary into ttk styles and may add editor-only widget details.

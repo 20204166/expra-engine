@@ -71,6 +71,9 @@ class _FakePygame:
     MOUSEMOTION = 5
     MOUSEBUTTONDOWN = 6
     MOUSEBUTTONUP = 7
+    JOYBUTTONDOWN = 8
+    JOYBUTTONUP = 9
+    JOYAXISMOTION = 10
 
     def __init__(self, frames: list[list[Any]]) -> None:
         self.event = SimpleNamespace(get=lambda: frames.pop(0))
@@ -301,6 +304,38 @@ class TestPygameRuntime(unittest.TestCase):
             [event.physical for event in engine.signals],
             [PhysicalInput("mouse", "button-1"), PhysicalInput("mouse", "button-1")],
         )
+
+    def test_unhandled_gamepad_buttons_and_axes_flow_through_input_map(self) -> None:
+        pygame = _FakePygame(
+            [
+                [
+                    SimpleNamespace(type=_FakePygame.JOYBUTTONDOWN, button=0),
+                    SimpleNamespace(type=_FakePygame.JOYAXISMOTION, axis=0, value=0.5),
+                    SimpleNamespace(type=_FakePygame.JOYBUTTONUP, button=0),
+                ],
+                [SimpleNamespace(type=_FakePygame.QUIT)],
+            ]
+        )
+        pygame.key = SimpleNamespace(name=lambda _key: "")
+        engine = _FakeEngine()
+        engine.input_map = InputMap()
+        engine.input_map.bind(ActionId("attack"), PhysicalInput("gamepad", "button-0"))
+        engine.input_map.bind_axis(ActionId("move_x"), PhysicalInput("gamepad", "axis-0"), deadzone=0.0)
+        runtime = PygameRuntime(
+            engine,
+            pygame_module=pygame,
+            clock=_FakeClock([16, 16]),
+            surface_factory=pygame.display.set_mode,
+        )
+
+        runtime.run()
+
+        self.assertEqual([event.phase for event in engine.signals], ["pressed", "released"])
+        self.assertEqual(
+            [event.physical for event in engine.signals],
+            [PhysicalInput("gamepad", "button-0"), PhysicalInput("gamepad", "button-0")],
+        )
+        self.assertAlmostEqual(engine.input_map.axis_value("move_x"), 0.5)
 
     def test_runtime_stops_when_engine_returns_to_edit(self) -> None:
         pygame = _FakePygame([[], []])

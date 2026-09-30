@@ -23,8 +23,23 @@ from expra_engine.editor.commands import (
     ReparentEntityCommand,
     SetComponentPropertyCommand,
 )
+from expra_engine.editor.mutation_policy import MutationVerdict, decide_entity_mutation
 from expra_engine.editor.project_paths import project_relative_path
 from expra_engine.runtime.visual_components import SpriteComponent
+
+
+def _linked_mutation_rejected(window: Any, entity_id: str, operation: str) -> bool:
+    """Log and return True when an edit targets linked scene-instance content."""
+    scene = window._engine.edit_scene
+    if scene is None:
+        return False
+    decision = decide_entity_mutation(scene, entity_id, operation)
+    if decision.verdict is MutationVerdict.REJECT_LINKED:
+        window._console.log(
+            f"[Editor] {decision.reason or 'Linked content is read-only'}", level="warning"
+        )
+        return True
+    return False
 
 
 def apply_component_change(
@@ -38,6 +53,8 @@ def apply_component_change(
     except KeyError:
         return
     if scene is None:
+        return
+    if _linked_mutation_rejected(window, entity_id, "set_component_property"):
         return
     window._command_stack.push(
         SetComponentPropertyCommand(scene, entity_id, spec.cls, field, value)
@@ -59,6 +76,8 @@ def remove_component(window: Any, entity_id: str, component_name: str) -> None:
     component = entity.get_component(spec.cls) if entity else None
     if component is None:
         return
+    if _linked_mutation_rejected(window, entity_id, "remove_component"):
+        return
     window._command_stack.push(RemoveComponentCommand(scene, entity_id, component))
     window._present_all()
 
@@ -72,12 +91,20 @@ def delete_selection(window: Any) -> None:
         return
     commands: list[Command] = []
     names: list[str] = []
+    skipped: list[str] = []
     for entity_id in window._selected_ids:
         entity = scene.find_entity(entity_id)
         if entity is None:
             continue
+        if decide_entity_mutation(scene, entity_id, "delete").verdict is MutationVerdict.REJECT_LINKED:
+            skipped.append(entity.name)
+            continue
         commands.append(DeleteEntityCommand(scene, entity))
         names.append(entity.name)
+    if skipped:
+        window._console.log(
+            f"[Editor] Skipped linked content: {', '.join(skipped)}", level="warning"
+        )
     if not commands:
         return
     window._command_stack.push(CompositeCommand(commands, f"Delete {len(commands)} entities"))
@@ -96,12 +123,25 @@ def duplicate_selection(window: Any) -> None:
         return
     commands: list[Command] = []
     new_ids: list[str] = []
+    skipped: list[str] = []
     for entity_id in window._selected_ids:
+        if (
+            decide_entity_mutation(scene, entity_id, "duplicate").verdict
+            is MutationVerdict.REJECT_LINKED
+        ):
+            entity = scene.find_entity(entity_id)
+            if entity is not None:
+                skipped.append(entity.name)
+            continue
         clone = scene.clone_entity(entity_id, recursive=True)
         if clone is None:
             continue
         commands.append(CreateEntityCommand(scene, clone))
         new_ids.append(clone.entity_id)
+    if skipped:
+        window._console.log(
+            f"[Editor] Skipped linked content: {', '.join(skipped)}", level="warning"
+        )
     if not commands:
         return
     description = (
@@ -123,10 +163,28 @@ def reparent_selection_to(window: Any, dragged_ids: tuple[str, ...], target_id: 
     scene = window._engine.edit_scene
     if scene is None:
         return
+    if target_id is not None:
+        try:
+            target_origin = scene.entity_origin(target_id)
+        except KeyError:
+            target_origin = None
+        if target_origin is None or target_origin.kind != "authored":
+            window._console.log(
+                "[Editor] Reparent target must be ordinary authored content", level="warning"
+            )
+            return
     commands: list[Command] = []
     for entity_id in dragged_ids:
         entity = scene.find_entity(entity_id)
         if entity is None or entity.parent_id == target_id:
+            continue
+        if (
+            decide_entity_mutation(scene, entity_id, "reparent").verdict
+            is MutationVerdict.REJECT_LINKED
+        ):
+            window._console.log(
+                f"[Editor] Skipped linked content: {entity.name}", level="warning"
+            )
             continue
         old_parent_id = entity.parent_id
         try:
@@ -167,9 +225,10 @@ def drop_asset_on_viewport(window: Any, entry: Any, x_root: int, y_root: int) ->
     if scene is None:
         return
     canvas = window._viewport._canvas
-    canvas_x0, canvas_y0 = canvas.winfo_rootx(), canvas.winfo_rooty()
-    canvas_x1 = canvas_x0 + canvas.winfo_width()
-    canvas_y1 = canvas_y0 + canvas.winfo_height()
+    canvas_x0, canvas_y0 = canvas.global_origin()
+    canvas_width, canvas_height = canvas.viewport_size()
+    canvas_x1 = canvas_x0 + canvas_width
+    canvas_y1 = canvas_y0 + canvas_height
     if not (canvas_x0 <= x_root <= canvas_x1 and canvas_y0 <= y_root <= canvas_y1):
         return
     canvas_x = x_root - canvas_x0

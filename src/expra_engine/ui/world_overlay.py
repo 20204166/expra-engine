@@ -71,7 +71,7 @@ class WorldOverlayMixin:
                 (sy + dy) / 2 - 10,
                 text=label,
                 fill=self._colors["ink_2"],
-                font=("TkDefaultFont", 8),
+                font=("default-font", 8),
                 tags=("world", tag, f"world:{tag}"),
             )
             self._track_world_item(tag, label_item, "connection-label")
@@ -128,7 +128,7 @@ class WorldOverlayMixin:
             text=title,
             anchor="sw",
             fill=color,
-            font=("TkDefaultFont", 9, "bold"),
+            font=("default-font", 9, "bold"),
             tags=("world", f"world:{tag}"),
         )
         self._track_world_item(tag, label_item, "level-label")

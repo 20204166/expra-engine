@@ -1,29 +1,9 @@
-"""Design tokens and ttk style registration for the editor UI.
+"""Editor colour roles and accent themes, derived from the renderer-neutral design tokens.
 
 Adapted from System Analyzer maintenance/ui/styles.py.
-
-Removed SA-specific layout names (dashboard_description_wrap, etc.).
-Design tokens (colours, fonts, spacing, control) preserved.
-``configure_app_styles`` registers all ttk styles used by the editor.
 """
 
-from typing import Any
-
-from expra_engine.design.tokens import SEMANTIC_COLORS, SPACING_SCALE, TYPOGRAPHY_SCALE
-
-Font = tuple[Any, ...]
-_TK_FONT_STYLE: dict[str, tuple[str, ...]] = {
-    "regular": (),
-    "bold": ("bold",),
-    "italic": ("normal", "italic"),
-    "bold italic": ("bold", "italic"),
-}
-
-
-def _font_from_token(name: str, *, family: str = "Helvetica") -> Font:
-    token = TYPOGRAPHY_SCALE[name]
-    style = _TK_FONT_STYLE[str(token["weight"])]
-    return (family, token["size"], *style)
+from expra_engine.design.tokens import SEMANTIC_COLORS
 
 COLOR_ROLES: dict[str, str] = {
     **SEMANTIC_COLORS,
@@ -63,62 +43,10 @@ COLORS: dict[str, str] = {
     "player_active": "#FFD09A",
 }
 
-SPACING: dict[str, int] = {
-    "page_x": SPACING_SCALE["lg"],
-    "page_y": SPACING_SCALE["md"],
-    "section_gap": SPACING_SCALE["md"],
-    "row_gap": SPACING_SCALE["sm"],
-    "control_gap": 10,
-    "card_pad_x": SPACING_SCALE["md"],
-    "card_pad_y": 10,
-    "dialog_pad_x": 20,
-    "dialog_pad_y": 18,
-    "button_gap": 6,
-    "panel_gap": SPACING_SCALE["xs"],
-    "toolbar_pad_x": SPACING_SCALE["md"],
-    "toolbar_pad_y": 6,
-    "scrollbar_gutter": 6,
-}
-
-CONTROL: dict[str, int] = {
-    "button_pad_x": 10,
-    "button_pad_y": 6,
-    "primary_button_pad_x": 14,
-    "primary_button_pad_y": 8,
-    "spinbox_pad": 4,
-    "card_border_width": 1,
-}
-
-FONTS: dict[str, Font] = {
-    "ui": ("Helvetica",),
-    "title": _font_from_token("title"),
-    "section": _font_from_token("section"),
-    "body": _font_from_token("body"),
-    "button": ("Helvetica", TYPOGRAPHY_SCALE["body"]["size"], "bold"),
-    "danger_button": ("Helvetica", TYPOGRAPHY_SCALE["body"]["size"], "bold"),
-    "status": ("Helvetica", TYPOGRAPHY_SCALE["label"]["size"], "bold"),
-    "mono": _font_from_token("mono", family="Courier"),
-    "panel_header": ("Helvetica", 11, "bold"),
-    "detail_row": _font_from_token("body"),
-    "toolbar_label": _font_from_token("label"),
-}
-
-STYLE_APP_FRAME = "App.TFrame"
-STYLE_PANEL_FRAME = "Panel.TFrame"
-STYLE_TITLE = "Title.TLabel"
-STYLE_SECTION = "Section.TLabel"
-STYLE_DESCRIPTION = "Description.TLabel"
-STYLE_PRIMARY_BUTTON = "Primary.TButton"
+# Toolbar roles the editor's toolbars resolve to a style name.
 STYLE_NEUTRAL_BUTTON = "Neutral.TButton"
-STYLE_DANGER_BUTTON = "Danger.TButton"
-STYLE_STATUS_READY = "Ready.Status.TLabel"
-STYLE_STATUS_BUSY = "Busy.Status.TLabel"
 STYLE_PLAY_BUTTON = "Play.TButton"
 STYLE_STOP_BUTTON = "Stop.TButton"
-STYLE_ENTRY = "Editor.TEntry"
-STYLE_TREEVIEW = "Editor.Treeview"
-STYLE_CHECKBUTTON = "Editor.TCheckbutton"
-STYLE_SEPARATOR = "Editor.TSeparator"
 
 DEFAULT_APPEARANCE = "cyan"
 
@@ -189,145 +117,16 @@ def accent_theme_colors(
     return colors
 
 
-def configure_app_styles(
-    style: Any,
-    colors: dict[str, str] | None = None,
-    fonts: dict[str, Font] | None = None,
-) -> None:
-    """Register every ttk style used by the editor."""
+_STYLE_BY_ROLE = {
+    "neutral": STYLE_NEUTRAL_BUTTON,
+    "play": STYLE_PLAY_BUTTON,
+    "stop": STYLE_STOP_BUTTON,
+}
 
-    c = COLORS if colors is None else colors
-    f = FONTS if fonts is None else fonts
 
-    style.configure(STYLE_APP_FRAME, background=c["background"])
-    style.configure(STYLE_PANEL_FRAME, background=c["panel_bg"])
-    style.configure(STYLE_TITLE, background=c["background"], foreground=c["text"], font=f["title"])
-    style.configure(
-        STYLE_SECTION, background=c["panel_bg"], foreground=c["text"], font=f["section"]
-    )
-    style.configure(
-        STYLE_DESCRIPTION, background=c["background"], foreground=c["secondary"], font=f["body"]
-    )
-    style.configure(
-        STYLE_PRIMARY_BUTTON,
-        background=c["accent"],
-        foreground=c["accent_ink"],
-        font=f["button"],
-        padding=(CONTROL["primary_button_pad_x"], CONTROL["primary_button_pad_y"]),
-        borderwidth=0,
-        focusthickness=2,
-        focuscolor=c["accent"],
-    )
-    style.map(
-        STYLE_PRIMARY_BUTTON,
-        background=[("active", c["accent_active"]), ("disabled", c["primary_disabled"])],
-        foreground=[("disabled", c["primary_disabled_text"])],
-    )
-    style.configure(
-        STYLE_DANGER_BUTTON,
-        background=c["danger"],
-        foreground=c["accent_ink"],
-        font=f["danger_button"],
-        padding=(CONTROL["button_pad_x"], CONTROL["button_pad_y"]),
-        borderwidth=0,
-        focusthickness=2,
-        focuscolor=c["danger"],
-    )
-    style.map(
-        STYLE_DANGER_BUTTON,
-        background=[("active", c["danger_active"]), ("disabled", c["disabled"])],
-    )
-    style.configure(
-        STYLE_NEUTRAL_BUTTON,
-        background=c["button_bg"],
-        foreground=c["text"],
-        font=f["danger_button"],
-        padding=(CONTROL["button_pad_x"], CONTROL["button_pad_y"]),
-        borderwidth=0,
-        focusthickness=2,
-        focuscolor=c["accent"],
-    )
-    style.map(
-        STYLE_NEUTRAL_BUTTON,
-        background=[("active", c["button_bg_active"]), ("disabled", c["disabled"])],
-        foreground=[("disabled", c["muted_text"])],
-    )
-    style.configure(
-        STYLE_STATUS_READY,
-        background=c["background"],
-        foreground=c["success"],
-        font=f["status"],
-    )
-    style.configure(
-        STYLE_STATUS_BUSY,
-        background=c["background"],
-        foreground=c["warning"],
-        font=f["status"],
-    )
-    style.configure(
-        STYLE_PLAY_BUTTON,
-        background=c["success"],
-        foreground=c["accent_ink"],
-        font=f["button"],
-        padding=(CONTROL["button_pad_x"], CONTROL["button_pad_y"]),
-        borderwidth=0,
-        focusthickness=2,
-        focuscolor=c["success"],
-    )
-    style.configure(
-        STYLE_STOP_BUTTON,
-        background=c["danger"],
-        foreground=c["accent_ink"],
-        font=f["button"],
-        padding=(CONTROL["button_pad_x"], CONTROL["button_pad_y"]),
-        borderwidth=0,
-        focusthickness=2,
-        focuscolor=c["danger"],
-    )
-    style.map(
-        STYLE_STOP_BUTTON,
-        background=[("active", c["danger_active"]), ("disabled", c["disabled"])],
-        foreground=[("disabled", c["ink_3"])],
-    )
-    style.configure(
-        STYLE_ENTRY,
-        fieldbackground=c["surface"],
-        foreground=c["ink"],
-        bordercolor=c["line"],
-        lightcolor=c["line"],
-        darkcolor=c["line"],
-        insertcolor=c["accent"],
-        padding=(6, 4),
-    )
-    style.map(
-        STYLE_ENTRY,
-        fieldbackground=[("disabled", c["panel_bg"])],
-        foreground=[("disabled", c["ink_3"])],
-        bordercolor=[("focus", c["accent"])],
-    )
-    style.configure(
-        STYLE_TREEVIEW,
-        background=c["surface"],
-        fieldbackground=c["surface"],
-        foreground=c["ink"],
-        borderwidth=0,
-        rowheight=26,
-        font=f["body"],
-    )
-    style.map(
-        STYLE_TREEVIEW,
-        background=[("selected", c["selection"])],
-        foreground=[("selected", c["ink"])],
-    )
-    style.configure(
-        STYLE_CHECKBUTTON,
-        background=c["panel_bg"],
-        foreground=c["ink"],
-        font=f["body"],
-    )
-    style.map(
-        STYLE_CHECKBUTTON,
-        background=[("active", c["panel_bg"])],
-        foreground=[("disabled", c["ink_3"])],
-    )
-    style.configure(STYLE_SEPARATOR, background=c["line"])
+def toolbar_style_for_role(style_role: str) -> str:
+    """Resolve a semantic toolbar role to its style name."""
+    try:
+        return _STYLE_BY_ROLE[style_role]
+    except KeyError as error:
+        raise ValueError(f"Unknown toolbar style role: {style_role}") from error

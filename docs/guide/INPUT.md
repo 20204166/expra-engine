@@ -39,13 +39,24 @@ persists bindings into `project.json`.
 |---|---|---|
 | Keyboard | key names (`pygame.key.name`) | press/release |
 | Mouse | `button-<n>` | buttons only |
+| Gamepad | `button-<n>` (buttons), `axis-<n>` (axes) | buttons press/release; axes via `axis_value` |
+
+Analog axes are bound separately from digital buttons:
+
+```python
+input_map.bind_axis(ActionId("move_x"), PhysicalInput("gamepad", "axis-0"), deadzone=0.2)
+input_map.set_axis(PhysicalInput("gamepad", "axis-0"), 0.5)  # deadzone-applied
+input_map.axis_value("move_x")                                 # -> 0.375
+```
+
+All gamepads converge on the single `gamepad` device identity; per-device
+disambiguation is not represented.
 
 ## What is NOT supported
 
-- **Gamepad / joystick** — `GamepadAxis` exists but no pygame joystick events
-  are processed.
-- **Analog/axis input** — only binary pressed/released phases.
-- **A "held" phase** — there is no held state in `ActionEvent`; use
+- **Gamepad hats / device add-remove events** — only buttons and axes are
+  consumed.
+- **A \"held\" phase** — there is no held state in `ActionEvent`; use
   `is_held`.
 - **Mouse motion as an action** — motion goes to UI, not through the input map.
 

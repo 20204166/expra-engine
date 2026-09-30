@@ -58,6 +58,26 @@ def _region_dict(value: SpriteRegion | None) -> list[int] | None:
     return None if value is None else [value.x, value.y, value.width, value.height]
 
 
+def _normalize_points(
+    value: tuple[tuple[float, float], ...] | list[tuple[float, float]] | None,
+) -> tuple[tuple[float, float], ...] | None:
+    """Normalize polygon points to a tuple of finite (x, y) pairs, or ``None``."""
+    if value is None:
+        return None
+    try:
+        raw = tuple(value)
+    except TypeError as exc:
+        raise ValueError("polygon points must be a sequence of (x, y) pairs") from exc
+    normalized: list[tuple[float, float]] = []
+    for point in raw:
+        try:
+            x, y = pair_values(point, "points")
+        except (TypeError, ValueError) as exc:
+            raise ValueError("each polygon point must be an (x, y) pair") from exc
+        normalized.append((_finite(x, "points.x"), _finite(y, "points.y")))
+    return tuple(normalized)
+
+
 class PrimitiveComponent(Component):
     component_type = "primitive"
 
@@ -72,6 +92,8 @@ class PrimitiveComponent(Component):
         outline_width: float = 0.0,
         layer: int = 0,
         visible: bool = True,
+        points: tuple[tuple[float, float], ...] | list[tuple[float, float]] | None = None,
+        thickness: float = 1.0,
         *,
         enabled: bool = True,
     ) -> None:
@@ -85,6 +107,15 @@ class PrimitiveComponent(Component):
         self.outline_width = _finite(outline_width, "outline_width")
         self.layer = int(layer)
         self.visible = bool(visible)
+        self.points = _normalize_points(points)
+        self.thickness = _finite(thickness, "thickness")
+        if self.kind == "polygon" and (self.points is None or len(self.points) < 3):
+            raise ValueError("polygon primitive requires at least three points")
+        if self.kind == "line":
+            if self.points is None or len(self.points) != 2:
+                raise ValueError("line primitive requires exactly two points")
+            if self.thickness <= 0:
+                raise ValueError("line thickness must be positive")
 
     @property
     def fill(self) -> Color:
@@ -103,7 +134,7 @@ class PrimitiveComponent(Component):
         self._outline = None if value is None else _color(value)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        data: dict[str, Any] = {
             "type": self.component_type,
             "enabled": self.enabled,
             "kind": self.kind,
@@ -116,6 +147,11 @@ class PrimitiveComponent(Component):
             "layer": self.layer,
             "visible": self.visible,
         }
+        if self.points is not None:
+            data["points"] = [[x, y] for x, y in self.points]
+        if self.thickness != 1.0:
+            data["thickness"] = self.thickness
+        return data
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> PrimitiveComponent:
@@ -129,6 +165,8 @@ class PrimitiveComponent(Component):
             outline_width=data.get("outline_width", 0.0),
             layer=data.get("layer", 0),
             visible=data.get("visible", True),
+            points=data.get("points"),
+            thickness=data.get("thickness", 1.0),
             enabled=data.get("enabled", True),
         )
 

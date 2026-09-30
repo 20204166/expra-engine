@@ -1,8 +1,6 @@
 """Editor viewport camera — stable-scale adapter over Camera2D.
 
-Extracted from viewport.py to keep both modules under the 900-line budget.
-Public API is re-exported from expra_engine.ui.viewport for backwards
-compatibility.
+Shared by the editor viewport logic (``editor/viewport_core.py``) and the Qt panel.
 """
 
 from __future__ import annotations

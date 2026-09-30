@@ -36,8 +36,8 @@ _REQUIRED_PACKAGE_MEMBERS = (
     "expra_engine/main.py",
     "expra_engine/core/__init__.py",
     "expra_engine/editor/__init__.py",
-    "expra_engine/editor/app.py",
-    "expra_engine/editor/delivery.py",
+    "expra_engine/editor/qt/app.py",
+    "expra_engine/editor/qt/delivery.py",
     "expra_engine/editor/instance_lock.py",
     "expra_engine/editor/persistence.py",
     "expra_engine/editor/preferences.py",
@@ -208,25 +208,24 @@ _MINOR_SURFACES = frozenset(
     {
         "expra_engine/main.py",
         "expra_engine/core/engine.py",
-        "expra_engine/ui/editor_window.py",
+        "expra_engine/editor/qt/main_window.py",
     }
 )
 
 _FEATURE_SURFACES = frozenset(
     {
         "expra_engine/coordinators/app_coordinator.py",
-        "expra_engine/editor/app.py",
+        "expra_engine/editor/qt/app.py",
         "expra_engine/editor/preferences.py",
         "expra_engine/runtime/event_queue.py",
         "expra_engine/core/scene.py",
         "expra_engine/design/__init__.py",
         "expra_engine/design/tokens.py",
-        "expra_engine/ui/console.py",
-        "expra_engine/ui/hierarchy.py",
-        "expra_engine/ui/inspector.py",
-        "expra_engine/ui/layout.py",
+        "expra_engine/editor/qt/console.py",
+        "expra_engine/editor/qt/hierarchy.py",
+        "expra_engine/editor/qt/inspector.py",
         "expra_engine/ui/styles.py",
-        "expra_engine/ui/viewport.py",
+        "expra_engine/editor/qt/viewport.py",
     }
 )
 

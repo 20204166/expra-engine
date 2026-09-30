@@ -16,10 +16,12 @@ from typing import Any
 
 from expra_engine.core.component import TransformComponent
 from expra_engine.core.scene.scene_instance import (
+    SceneInstanceComponent,
     SceneInstanceCycleError,
     SceneInstanceSourceError,
     resolve_scene_instances,
 )
+from expra_engine.core.script_component import ScriptComponent
 from expra_engine.core.world import World
 
 __all__ = (
@@ -30,12 +32,14 @@ __all__ = (
     "CreateEntityCommand",
     "CreateSceneInstanceCommand",
     "DeleteEntityCommand",
+    "MakeSceneInstanceUniqueCommand",
     "RemoveComponentCommand",
     "RenameEntityCommand",
     "ReparentEntityCommand",
     "ReplaceWorldDocumentCommand",
     "SetComponentPropertyCommand",
     "SetExposedValueCommand",
+    "SetInstanceOverrideCommand",
     "ToggleEnabledCommand",
     "TransformEntityCommand",
 )
@@ -470,6 +474,131 @@ class SetExposedValueCommand(Command):
     @property
     def description(self) -> str:
         return f"Set {self._field}"
+
+
+class SetInstanceOverrideCommand(Command):
+    """Write a generated descendant's exposed-value edit to its owning instance override.
+
+    Keeps both the authored ``SceneInstanceComponent.overrides`` map and the
+    current materialized clone's exposed value in sync so the edit is visible
+    immediately and round-trips through save/load resolution.
+    """
+
+    def __init__(self, scene: Any, entity_id: str, field: str, value: Any) -> None:
+        self._scene = scene
+        self._entity_id = entity_id
+        self._field = field
+        self._new = value
+        origin = scene.entity_origin(entity_id)
+        self._root_id: str | None = origin.instance_root_id
+        entity = scene.find_entity(entity_id)
+        self._entity_name: str | None = entity.name if entity is not None else None
+        self._captured = False
+        self._old_override: Any = None
+        self._had_old_override = False
+        self._old_clone: Any = None
+        self._had_old_clone = False
+
+    def _root_component(self) -> SceneInstanceComponent | None:
+        root = self._scene.find_entity(self._root_id) if self._root_id is not None else None
+        return root.get_component(SceneInstanceComponent) if root is not None else None
+
+    def _clone(self) -> Any | None:
+        return self._scene.find_entity(self._entity_id)
+
+    def execute(self) -> None:
+        component = self._root_component()
+        clone = self._clone()
+        if component is None or clone is None or self._entity_name is None:
+            return
+        script = clone.get_component(ScriptComponent)
+        if script is None:
+            return
+        if not self._captured:
+            existing = component.overrides.get(self._entity_name, {})
+            self._had_old_override = self._field in existing
+            self._old_override = existing.get(self._field)
+            self._had_old_clone = self._field in script.exposed_values
+            self._old_clone = script.exposed_values.get(self._field)
+            self._captured = True
+        component.overrides.setdefault(self._entity_name, {})[self._field] = self._new
+        script.exposed_values[self._field] = self._new
+
+    def undo(self) -> None:
+        component = self._root_component()
+        clone = self._clone()
+        if component is None or clone is None or not self._captured:
+            return
+        target = component.overrides.get(self._entity_name)
+        if self._had_old_override:
+            if target is not None:
+                target[self._field] = self._old_override
+        elif target is not None:
+            target.pop(self._field, None)
+            if not target:
+                component.overrides.pop(self._entity_name, None)
+        script = clone.get_component(ScriptComponent)
+        if script is not None:
+            if self._had_old_clone:
+                script.exposed_values[self._field] = self._old_clone
+            else:
+                script.exposed_values.pop(self._field, None)
+
+    @property
+    def description(self) -> str:
+        return f"Set instance override {self._field}"
+
+
+class MakeSceneInstanceUniqueCommand(Command):
+    """Detach an instance root from its source, keeping materialized children as authored.
+
+    Execute removes the ``SceneInstanceComponent`` and clears the root's
+    materialization bookkeeping, leaving the current resolved subtree as ordinary
+    authored entities. Undo restores the component and re-resolves the source,
+    discarding any local authored changes made after the detach.
+    """
+
+    def __init__(self, scene: Any, root_id: str, resolve_source: Callable[[str], Any]) -> None:
+        self._scene = scene
+        self._root_id = root_id
+        self._resolve_source = resolve_source
+        self._component: SceneInstanceComponent | None = None
+        self._applied = False
+
+    def execute(self) -> None:
+        root = self._scene.find_entity(self._root_id)
+        if root is None or self._applied:
+            return
+        component = root.get_component(SceneInstanceComponent)
+        if component is None:
+            return
+        self._component = component
+        root.remove_component(component)
+        children = self._scene._instance_children.pop(self._root_id, ())
+        for child_id in children:
+            self._scene._instance_roots.pop(child_id, None)
+        self._applied = True
+
+    def undo(self) -> None:
+        if not self._applied or self._component is None:
+            return
+        root = self._scene.find_entity(self._root_id)
+        if root is None:
+            return
+        stale = [e for e in self._scene.walk_hierarchy(self._root_id) if e.entity_id != self._root_id]
+        stale_ids = {e.entity_id for e in stale}
+        self._scene._entities = [e for e in self._scene._entities if e.entity_id not in stale_ids]
+        if self._scene._entity_index is not None:
+            for stale_id in stale_ids:
+                self._scene._entity_index.pop(stale_id, None)
+        self._scene._children_index = None
+        root.add_component(self._component)
+        resolve_scene_instances(self._scene, resolve_source=self._resolve_source)
+        self._applied = False
+
+    @property
+    def description(self) -> str:
+        return "Make Scene Instance unique"
 
 
 class SetComponentPropertyCommand(Command):

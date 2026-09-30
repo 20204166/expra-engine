@@ -159,28 +159,59 @@ class NormalMapResolver:
                 NormalMapResolutionStatus.INVALID,
                 detail=f"base resource invalid: {exc}",
             )
-        try:
-            metadata = self._resources.metadata(normal_id)
-        except FileNotFoundError as exc:
+        for candidate in self._resolution_candidates(selected_mode, base_id, normal_id):
+            try:
+                metadata = self._resources.metadata(candidate)
+            except FileNotFoundError:
+                continue
+            except (OSError, ValueError) as exc:
+                return NormalMapResolution(
+                    base_id,
+                    str(candidate),
+                    NormalMapResolutionStatus.INVALID,
+                    detail=str(exc),
+                )
             return NormalMapResolution(
                 base_id,
-                normal_id,
-                NormalMapResolutionStatus.MISSING,
-                detail=str(exc),
-            )
-        except (OSError, ValueError) as exc:
-            return NormalMapResolution(
-                base_id,
-                normal_id,
-                NormalMapResolutionStatus.INVALID,
-                detail=str(exc),
+                str(candidate),
+                NormalMapResolutionStatus.RESOLVED,
+                content_identity=(int(metadata.size), str(metadata.content_hash)),
             )
         return NormalMapResolution(
             base_id,
             normal_id,
-            NormalMapResolutionStatus.RESOLVED,
-            content_identity=(int(metadata.size), str(metadata.content_hash)),
+            NormalMapResolutionStatus.MISSING,
+            detail=str(self._missing_detail(normal_id)),
         )
+
+    def _resolution_candidates(
+        self,
+        mode: NormalMapMode,
+        base_id: str,
+        primary: str,
+    ) -> tuple[ResourceId, ...]:
+        """Ordered auto-pair candidates: same-extension first, then ``_normal.png``.
+
+        The canonical generated normal is always PNG, so a ``.jpg``/``.webp``
+        albedo still pairs with its generated ``<stem>_normal.png`` sibling.
+        Same-extension user-authored normals take precedence.
+        """
+        candidates: list[ResourceId] = [ResourceId.parse(primary)]
+        if mode is NormalMapMode.AUTO_PAIR:
+            base = ResourceId.parse(base_id)
+            source_path = PurePosixPath(base.path)
+            if source_path.suffix.casefold() != ".png":
+                candidates.append(
+                    ResourceId(
+                        base.scheme,
+                        base.namespace,
+                        source_path.with_name(f"{source_path.stem}_normal.png").as_posix(),
+                    )
+                )
+        return tuple(candidates)
+
+    def _missing_detail(self, normal_id: str) -> str:
+        return f"no paired normal found; expected {normal_id}"
 
     def register_dependency(self, base_texture_id: str, normal_texture_id: str) -> None:
         """Register a resolved pair for export/invalidation dependency closure."""

@@ -21,9 +21,10 @@ def _make_package(root: Path, version: str) -> None:
         subdir = pkg / subpackage
         subdir.mkdir()
         (subdir / "__init__.py").write_text("")
+    (pkg / "editor" / "qt").mkdir()
     for relative in (
-        "editor/app.py",
-        "editor/delivery.py",
+        "editor/qt/app.py",
+        "editor/qt/delivery.py",
         "editor/instance_lock.py",
         "editor/persistence.py",
         "editor/preferences.py",
@@ -119,7 +120,7 @@ class ManifestDiffTests(unittest.TestCase):
         design_change = _release.DiffSummary((), (), ("expra_engine/design/tokens.py",))
         self.assertEqual(_release.classify_bump(design_change), "feature")
 
-        editor_panel_change = _release.DiffSummary((), (), ("expra_engine/ui/inspector.py",))
+        editor_panel_change = _release.DiffSummary((), (), ("expra_engine/editor/qt/inspector.py",))
         self.assertEqual(_release.classify_bump(editor_panel_change), "feature")
 
         patch_change = _release.DiffSummary((), (), ("expra_engine/core/utils.py",))
@@ -155,6 +156,16 @@ class VersionFileTests(unittest.TestCase):
             self.assertEqual(_release.read_current_version(package), "1.0.0.0")
             _release.write_current_version(package, "1.1.0.0")
             self.assertEqual(_release.read_current_version(package), "1.1.0.0")
+
+
+class BuildScriptTests(unittest.TestCase):
+    def test_wheel_script_cleans_stale_setuptools_outputs_before_build(self) -> None:
+        script = (Path(__file__).parents[1] / "scripts" / "build-wheel.sh").read_text(
+            encoding="utf-8"
+        )
+        clean = script.index('rm -rf "$here/build"')
+        build = script.index('"$py" -m build --wheel')
+        self.assertLess(clean, build)
 
 
 class WheelManifestTests(unittest.TestCase):

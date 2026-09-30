@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import contextlib
 from pathlib import Path
-from tkinter import messagebox, simpledialog
+from typing import Any
 
 from expra_engine.editor.script_tools import attach_script, create_behaviour_script
 from expra_engine.runtime.script_component import ScriptComponent
@@ -14,21 +14,27 @@ from expra_engine.runtime.script_registry import ScriptRegistry
 class ScriptEditorActionsMixin:
     """New/attach/remove Behaviour script actions for EditorWindow."""
 
+    # Provided by the concrete editor window.
+    _assets: Any
+    _console: Any
+    _dialogs: Any
+    _engine: Any
+    _present_all: Any
+    _selected_id: Any
+
     def _act_new_script(self) -> None:
         project = self._engine.project
         if project is None:
-            messagebox.showwarning("New Script", "Open a project before creating scripts.")
+            self._dialogs.show_warning("New Script", "Open a project before creating scripts.")
             return
-        relative_path = simpledialog.askstring(
-            "New Script", "Path under scripts/", parent=self._root
-        )
-        class_name = simpledialog.askstring("New Script", "Behaviour class name", parent=self._root)
+        relative_path = self._dialogs.ask_string("New Script", "Path under scripts/")
+        class_name = self._dialogs.ask_string("New Script", "Behaviour class name")
         if not relative_path or not class_name:
             return
         try:
             resource = create_behaviour_script(project.path, f"scripts/{relative_path}", class_name)
         except (ValueError, FileExistsError) as exc:
-            messagebox.showerror("New Script", str(exc), parent=self._root)
+            self._dialogs.show_error("New Script", str(exc))
             return
         self._console.log(f"[Editor] Created script: {resource}")
         self._assets.refresh()
@@ -40,12 +46,8 @@ class ScriptEditorActionsMixin:
         entity = scene.find_entity(self._selected_id) if scene else None
         if entity is None:
             return
-        script_id = simpledialog.askstring(
-            "Attach Script", "project://scripts/example.py", parent=self._root
-        )
-        class_name = simpledialog.askstring(
-            "Attach Script", "Behaviour class name", parent=self._root
-        )
+        script_id = self._dialogs.ask_string("Attach Script", "project://scripts/example.py")
+        class_name = self._dialogs.ask_string("Attach Script", "Behaviour class name")
         if not script_id or not class_name:
             return
         try:
@@ -57,7 +59,7 @@ class ScriptEditorActionsMixin:
                     name: field.default for name, field in behaviour_type.exposed_schema().items()
                 }
         except (ValueError, TypeError) as exc:
-            messagebox.showerror("Attach Script", str(exc), parent=self._root)
+            self._dialogs.show_error("Attach Script", str(exc))
             return
         self._console.log(f"[Editor] Attached {class_name} to {entity.name}")
         self._present_all()

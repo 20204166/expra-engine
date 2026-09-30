@@ -11,13 +11,13 @@ The Engine holds:
 - runtime systems registry
 
 The editor presents and edits that state through the coordinator boundary.
-The engine never owns widgets or Tk resources.
+The engine never owns widgets or GUI-toolkit resources.
 
 Runtime event system adapted from ppb/engine.py GameEngine
 (PursuedPyBear, Artistic License 2.0). Key preserved semantics:
   - EventQueue owns signal/publish
   - scene transitions flush the queue first to prevent stale delivery
-  - loop_once / tick API enables Tk-embedding and standalone runner
+  - loop_once / tick API enables GUI-embedding and standalone runner
   - RuntimeSystems start/stop with PLAY transitions
 """
 
@@ -408,6 +408,7 @@ class Engine:
                 self._last_update = None
                 self._quit_requested = False
                 self._stop_in_progress = False
+                self._input_map.reset_held()
             return True
         return False
 
@@ -446,9 +447,9 @@ class Engine:
 
         Designed for external-loop embedding::
 
-            # In Tk .after() callback:
+            # In a GUI timer callback (e.g. QTimer):
             dt = engine.tick()
-            root.after(16, game_loop)
+            timer.start(16)
 
         Inspired by ppb/engine.py loop_once() (PursuedPyBear, Artistic
         License 2.0).

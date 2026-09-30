@@ -1,7 +1,7 @@
 # Export
 
-The exporter bundles a project into a standalone build with no Tk or editor
-runtime.
+The exporter bundles a project into a standalone build with no editor UI
+toolkit or editor runtime.
 
 ## CLI
 

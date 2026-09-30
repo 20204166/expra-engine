@@ -168,6 +168,19 @@ class TestRuntimeInput(unittest.TestCase):
         self.assertFalse(second.is_held(jump))
         self.assertEqual(second.press(space), ())
 
+    def test_engine_stop_resets_held_input_state(self) -> None:
+        engine = Engine()
+        engine.set_scene(Scene("Input"))
+        engine.input_map.bind(ActionId("jump"), PhysicalInput("keyboard", "space"))
+
+        engine.play()
+        engine.input_map.press(PhysicalInput("keyboard", "space"))
+        self.assertTrue(engine.input_map.is_held("jump"))
+
+        engine.stop()
+
+        self.assertFalse(engine.input_map.is_held("jump"))
+
 
 if __name__ == "__main__":
     unittest.main()
@@ -230,6 +243,35 @@ class InputMapEdgeTests(unittest.TestCase):
         m = InputMap()
         self.assertEqual(m.press(PhysicalInput("keyboard", "q")), ())
 
+    def test_reset_held_clears_without_emitting_events(self) -> None:
+        m = InputMap()
+        m.bind(ActionId("jump"), PhysicalInput("keyboard", "space"))
+        m.press(PhysicalInput("keyboard", "space"))
+        self.assertTrue(m.is_held("jump"))
+
+        m.reset_held()
+
+        self.assertFalse(m.is_held("jump"))
+        self.assertEqual(m.held_actions, frozenset())
+
+    def test_multiple_bindings_keep_action_held_until_all_released(self) -> None:
+        attack = ActionId("attack")
+        space = PhysicalInput("keyboard", "space")
+        left = PhysicalInput("mouse", "button-1")
+        m = InputMap()
+        m.bind(attack, space)
+        m.bind(attack, left)
+
+        m.press(space)
+        m.press(left)
+        self.assertTrue(m.is_held(attack))
+
+        m.release(space)
+        self.assertTrue(m.is_held(attack))  # still held via mouse
+
+        m.release(left)
+        self.assertFalse(m.is_held(attack))
+
 
 class GamepadAxisTests(unittest.TestCase):
     def test_inside_deadzone_is_zero(self) -> None:
@@ -265,3 +307,92 @@ class GamepadAxisTests(unittest.TestCase):
     def test_zero_deadzone_never_suppresses(self) -> None:
         axis = GamepadAxis(0.001, deadzone=0.0)
         self.assertGreater(axis.apply_deadzone(), 0.0)
+
+
+class PhysicalInputHardeningTests(unittest.TestCase):
+    def test_whitespace_only_control_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            PhysicalInput("keyboard", "   ")
+
+    def test_whitespace_only_device_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            PhysicalInput("   ", "a")
+
+    def test_device_and_control_are_stripped_and_lowercased(self) -> None:
+        physical = PhysicalInput(" Keyboard ", " A ")
+        self.assertEqual(physical.device, "keyboard")
+        self.assertEqual(physical.control, "a")
+
+    def test_blank_modifiers_are_dropped(self) -> None:
+        physical = PhysicalInput("keyboard", "a", frozenset({" ctrl ", " ", ""}))
+        self.assertEqual(physical.modifiers, frozenset({"ctrl"}))
+
+
+class InputMapAxisTests(unittest.TestCase):
+    def test_set_axis_applies_deadzone(self) -> None:
+        m = InputMap()
+        stick = PhysicalInput("gamepad", "axis-0")
+        m.bind_axis(ActionId("move_x"), stick, deadzone=0.2)
+        m.set_axis(stick, 0.5)
+        self.assertAlmostEqual(m.axis_value("move_x"), 0.375)
+
+    def test_axis_inside_deadzone_is_zero(self) -> None:
+        m = InputMap()
+        stick = PhysicalInput("gamepad", "axis-0")
+        m.bind_axis(ActionId("move_x"), stick, deadzone=0.2)
+        m.set_axis(stick, 0.1)
+        self.assertEqual(m.axis_value("move_x"), 0.0)
+
+    def test_unbound_axis_value_is_zero(self) -> None:
+        m = InputMap()
+        self.assertEqual(m.axis_value("move_x"), 0.0)
+
+    def test_invalid_deadzone_rejected(self) -> None:
+        m = InputMap()
+        stick = PhysicalInput("gamepad", "axis-0")
+        with self.assertRaises(ValueError):
+            m.bind_axis(ActionId("move_x"), stick, deadzone=1.0)
+        with self.assertRaises(ValueError):
+            m.bind_axis(ActionId("move_x"), stick, deadzone=-0.1)
+
+    def test_duplicate_axis_different_action_rejected(self) -> None:
+        m = InputMap()
+        stick = PhysicalInput("gamepad", "axis-0")
+        m.bind_axis(ActionId("move_x"), stick, deadzone=0.1)
+        with self.assertRaises(ValueError):
+            m.bind_axis(ActionId("move_y"), stick, deadzone=0.1)
+
+    def test_out_of_range_value_is_clamped(self) -> None:
+        m = InputMap()
+        stick = PhysicalInput("gamepad", "axis-0")
+        m.bind_axis(ActionId("move_x"), stick, deadzone=0.2)
+        m.set_axis(stick, 2.0)
+        self.assertAlmostEqual(m.axis_value("move_x"), 1.0)
+
+    def test_malformed_axis_value_is_ignored(self) -> None:
+        m = InputMap()
+        stick = PhysicalInput("gamepad", "axis-0")
+        m.bind_axis(ActionId("move_x"), stick, deadzone=0.1)
+        m.set_axis(stick, 0.8)
+        m.set_axis(stick, "not-a-number")
+        self.assertAlmostEqual(m.axis_value("move_x"), GamepadAxis(0.8, 0.1).apply_deadzone())
+
+    def test_reset_held_clears_axis_values(self) -> None:
+        m = InputMap()
+        stick = PhysicalInput("gamepad", "axis-0")
+        m.bind_axis(ActionId("move_x"), stick, deadzone=0.0)
+        m.set_axis(stick, 0.9)
+        self.assertAlmostEqual(m.axis_value("move_x"), 0.9)
+
+        m.reset_held()
+
+        self.assertEqual(m.axis_value("move_x"), 0.0)
+
+    def test_clear_removes_axis_bindings(self) -> None:
+        m = InputMap()
+        stick = PhysicalInput("gamepad", "axis-0")
+        m.bind_axis(ActionId("move_x"), stick, deadzone=0.0)
+        m.set_axis(stick, 0.9)
+        m.clear()
+        m.set_axis(stick, 0.9)
+        self.assertEqual(m.axis_value("move_x"), 0.0)

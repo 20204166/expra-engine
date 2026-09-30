@@ -1,4 +1,4 @@
-"""Optional Pygame-to-Tk pixel bridge used by the editor viewport."""
+"""Optional Pygame-to-native-image pixel bridge used by the editor viewport."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from expra_engine.runtime.pygame_normal_mapping import PygameNormalMapCache
 from expra_engine.runtime.pygame_renderer import PygameRenderer, PygameResourceProvider
 from expra_engine.runtime.render_diagnostics import RenderDiagnostics
 from expra_engine.runtime.rendering import (
+    SUPPORTED_PRIMITIVE_KINDS,
     OrthographicCamera,
     RenderContext,
     RenderFrame,
@@ -25,12 +26,11 @@ from expra_engine.runtime.rendering import (
 
 __all__ = (
     "EditorPixelRenderer",
-    "PillowEditorPhotoImage",
     "encode_pygame_surface",
     "encode_pygame_surface_fast",
     "frame_textures_available",
     "render_editor_frame_to_image",
-    "render_editor_frame_to_tk_image",
+    "render_editor_frame_to_pixel_image",
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -48,7 +48,7 @@ def render_editor_frame_to_image(
     entity_names: Mapping[str, str] | None = None,
     observer: ObservabilityWatcher | None = None,
 ) -> Any | None:
-    """Render one canonical frame and bridge its pixels into Tk safely."""
+    """Render one canonical frame and bridge its pixels into an editor image safely."""
     diagnostics = diagnostics or RenderDiagnostics(_LOGGER)
     try:
         surface = surface_factory((context.viewport.width, context.viewport.height))
@@ -93,7 +93,7 @@ def render_editor_frame_to_image(
 
 
 def encode_pygame_surface(pygame_module: Any, surface: Any) -> bytes:
-    """Encode an offscreen surface in a format Tk can decode.
+    """Encode an offscreen surface as PNG bytes.
 
     Uses the backend's own (SDL_image) PNG encoder -- the general-purpose,
     always-correct path used by one-shot/offline consumers (the expra-mcp
@@ -114,20 +114,17 @@ def encode_pygame_surface_fast(pygame_module: Any, surface: Any) -> bytes:
     """Encode a surface as a real, valid, alpha-preserving PNG -- fast.
 
     No longer the live interactive editor viewport's path (see
-    ``PillowEditorPhotoImage`` / the Pillow bridge inside
-    ``render_editor_frame_to_tk_image``, which replaced it -- benchmarked
-    ~4-7x faster end to end by skipping PNG encode/decode entirely). Kept as
-    a tested, dependency-free (no Pillow needed), alpha-exact fast PNG
-    encoder for any future non-Tk or offline consumer; also the reference
-    this module's Pillow path was benchmarked against, see
-    tools/perf/bench_pixel_bridge_candidates.py.
+    the Pillow bridge inside ``render_editor_frame_to_pixel_image``, which
+    replaced it -- benchmarked ~4-7x faster end to end by skipping PNG
+    encode/decode entirely). Kept as a tested, dependency-free (no Pillow
+    needed), alpha-exact fast PNG encoder for offline consumers.
 
     Measured against Blacksite Relay at 1280x720 (60 render items) before
     the Pillow bridge existed: the backend's own PNG encoder
     (``encode_pygame_surface``) cost ~40-50ms per frame and decoding it back
-    inside Tk's ``PhotoImage`` cost another ~20-35ms -- ~65-75ms total. Raw
+    inside a toolkit image cost another ~20-35ms -- ~65-75ms total. Raw
     RGB/PPM was measured ~4x faster than this but was rejected: this editor
-    renders onto a surface filled with (0, 0, 0, 0) precisely so the Tk
+    renders onto a surface filled with (0, 0, 0, 0) precisely so the viewport
     canvas grid shows through empty regions (see
     ``PygameRenderer._clear_surface`` with ``clear_color=None``); PPM has no
     alpha channel and would replace that transparency with an opaque black
@@ -182,8 +179,7 @@ def frame_textures_available(
                 texture_id is None
                 and item.text is None
                 and item.nine_slice is None
-                and item.primitive.kind
-                not in {"rectangle", "rect", "circle", "point", "rounded_rectangle"}
+                and item.primitive.kind not in SUPPORTED_PRIMITIVE_KINDS
             ):
                 diagnostics.report(
                     ("preflight", "primitive", item.key, item.primitive.kind),
@@ -251,61 +247,6 @@ def frame_textures_available(
         return False
 
 
-class PillowEditorPhotoImage:
-    """A ``PIL.ImageTk.PhotoImage`` that also proxies real Tk pixel read-back.
-
-    ``PIL.ImageTk.PhotoImage`` wraps a genuine ``tkinter.PhotoImage`` (usable
-    anywhere Tk expects an image -- ``str(this)`` returns its real Tk image
-    name) but does not expose ``tkinter.PhotoImage.get``/``transparency_get``
-    itself. Those two methods are one-line forwards to the same underlying
-    Tcl ``<image> get``/``<image> transparency get`` commands
-    ``tkinter.PhotoImage`` calls, so proxying them here costs nothing and
-    keeps pixel-level test/inspection code (and any future MCP pixel
-    inspection) working exactly like it did against a plain
-    ``tkinter.PhotoImage``.
-    """
-
-    def __init__(self, image: Any, *, master: Any) -> None:
-        from PIL import ImageTk
-
-        self._photo = ImageTk.PhotoImage(image, master=master)
-        self.tk = self._photo.tk
-
-    def __str__(self) -> str:
-        return str(self._photo)
-
-    def width(self) -> int:
-        return self._photo.width()
-
-    def height(self) -> int:
-        return self._photo.height()
-
-    def paste(self, image: Any) -> None:
-        self._photo.paste(image)
-
-    def get(self, x: int, y: int) -> tuple[int, int, int]:
-        return self.tk.call(str(self), "get", x, y)
-
-    def transparency_get(self, x: int, y: int) -> bool:
-        return bool(self.tk.getboolean(self.tk.call(str(self), "transparency", "get", x, y)))
-
-    def write(
-        self,
-        filename: str,
-        format: str | None = None,  # matches tkinter.PhotoImage.write's own signature
-        from_coords: tuple[int, ...] | None = None,
-    ) -> None:
-        """Match ``tkinter.PhotoImage.write`` -- used by expra-mcp's
-        ``capture_viewport`` to export the live pixel layer as a PNG.
-        """
-        args: tuple[Any, ...] = (str(self), "write", filename)
-        if format:
-            args = (*args, "-format", format)
-        if from_coords:
-            args = (*args, "-from", *from_coords)
-        self.tk.call(args)
-
-
 def _render_pillow_bridge(
     frame: RenderFrame,
     context: RenderContext,
@@ -315,24 +256,19 @@ def _render_pillow_bridge(
     pygame_module: Any,
     width: int,
     height: int,
-    image_master: Any,
     diagnostics: RenderDiagnostics,
     entity_names: Mapping[str, str] | None,
     observer: ObservabilityWatcher | None,
     photo_image_reuse: Any | None,
+    image_factory: Callable[..., Any],
 ) -> Any | None:
-    """Render one frame straight into a Tk photo image via Pillow.
+    """Render one frame straight into an editor image via Pillow.
 
     Pygame surface -> ``pygame.image.tostring`` (RGBA bytes, no PNG) ->
     ``PIL.Image.frombuffer`` (zero-copy reinterpret of those same bytes) ->
-    ``PillowEditorPhotoImage.paste`` (a direct in-memory pixel-block write
-    into the existing Tk photo image via Pillow's own maintained
-    ``_imagingtk`` extension). No PNG compression, no PNG decode, and the
-    live Tk image object is reused across frames of the same size instead of
-    reallocated. Benchmarked ~4-7x faster end to end than the previous PNG
-    bridge (``encode_pygame_surface_fast`` + ``tk.PhotoImage.configure``) on
-    both Space Pong and Blacksite Relay at 800x600 and 1280x720 -- see
-    tools/perf/bench_pixel_bridge_candidates.py.
+    the image's ``paste`` (a direct in-memory pixel-block write into the
+    existing image). No PNG compression, no PNG decode, and the live image
+    object is reused across frames of the same size instead of reallocated.
     """
     total_token = observer.begin("editor.pixelbridge.total") if observer is not None else None
     try:
@@ -377,7 +313,7 @@ def _render_pillow_bridge(
             photo_image_reuse.paste(pil_image)
             image = photo_image_reuse
         else:
-            image = PillowEditorPhotoImage(pil_image, master=image_master)
+            image = image_factory(pil_image)
         if upload_token is not None:
             assert observer is not None
             observer.finish(upload_token)
@@ -398,7 +334,7 @@ def _render_pillow_bridge(
             observer.finish(total_token)
 
 
-def render_editor_frame_to_tk_image(
+def render_editor_frame_to_pixel_image(
     frame: RenderFrame,
     context: RenderContext,
     *,
@@ -407,7 +343,7 @@ def render_editor_frame_to_tk_image(
     resource_service: Any | None,
     resource_provider: Callable[[str], Any | None] | None,
     pygame_module: Any,
-    image_master: Any,
+    image_factory: Callable[..., Any],
     diagnostics: RenderDiagnostics | None = None,
     entity_names: Mapping[str, str] | None = None,
     observer: ObservabilityWatcher | None = None,
@@ -416,14 +352,14 @@ def render_editor_frame_to_tk_image(
     normal_map_resolver: NormalMapResolver | None = None,
     normal_map_cache: PygameNormalMapCache | None = None,
 ) -> Any | None:
-    """Render a complete editor frame, or return ``None`` for Tk fallback.
+    """Render a complete editor frame, or return ``None`` for geometry fallback.
 
-    Uses a direct Pygame-surface -> Pillow -> Tk pixel path (see
+    Uses a direct Pygame-surface -> Pillow -> editor-image pixel path (see
     ``_render_pillow_bridge``) rather than the PNG encode/decode round trip
     ``encode_pygame_surface``/``encode_pygame_surface_fast`` still provide
     for one-shot/offline consumers (e.g. the expra-mcp static
     ``render_snapshot`` runner, where a real PNG byte stream is the actual
-    need, not a live Tk image).
+    need, not a live editor image).
     """
     diagnostics = diagnostics or RenderDiagnostics(_LOGGER)
     provider = resource_provider
@@ -485,11 +421,11 @@ def render_editor_frame_to_tk_image(
             pygame_module=pygame_module,
             width=width,
             height=height,
-            image_master=image_master,
             diagnostics=diagnostics,
             entity_names=entity_names,
             observer=observer,
             photo_image_reuse=photo_image_reuse,
+            image_factory=image_factory,
         )
     except Exception as exc:  # noqa: BLE001 - editor backend failures use geometry fallback
         _log_presentation_failure(
@@ -512,29 +448,27 @@ def editor_render_context(editor_camera: Any, width: int, height: int) -> Render
 
 
 class EditorPixelRenderer:
-    """Own optional Pygame resources and produce a complete Tk image."""
+    """Own optional Pygame resources and produce a complete editor image."""
 
     def __init__(
         self,
         resource_service: Any | None = None,
         *,
         observer: ObservabilityWatcher | None = None,
+        image_factory: Callable[..., Any],
     ) -> None:
         self._resource_service = resource_service
         self._observer = observer
+        self._image_factory = image_factory
         self._provider: PygameResourceProvider | None = None
         self._provider_resources: Any | None = None
         self._diagnostics = RenderDiagnostics(_LOGGER)
         self._last_image: Any | None = None
-        # One PillowEditorPhotoImage reused across frames via .paste()
-        # instead of allocating+decoding a brand-new one every render.
-        # Unlike tk.PhotoImage.configure(), Pillow's paste() does NOT resize
-        # in place (see _render_pillow_bridge's width()/height() check), so
-        # a viewport resize allocates a fresh image rather than reusing this
-        # one. Also rebuilt whenever image_master changes, since a photo
-        # image is bound to the Tk interpreter it was created under.
+        # One image reused across frames via .paste() instead of allocating
+        # a brand-new one every render. paste() does NOT resize in place (see
+        # _render_pillow_bridge's width()/height() check), so a viewport
+        # resize allocates a fresh image rather than reusing this one.
         self._photo_image: Any | None = None
-        self._photo_image_master: Any | None = None
         self._lighting_pass: PygameLightingPass | None = None
         self._normal_map_resolver: NormalMapResolver | None = (
             NormalMapResolver(resource_service) if resource_service is not None else None
@@ -569,7 +503,6 @@ class EditorPixelRenderer:
         self._diagnostics.clear()
         self._last_image = None
         self._photo_image = None
-        self._photo_image_master = None
         if self._lighting_pass is not None:
             self._lighting_pass.clear()
 
@@ -586,7 +519,6 @@ class EditorPixelRenderer:
         self._diagnostics.clear()
         self._last_image = None
         self._photo_image = None
-        self._photo_image_master = None
         if self._lighting_pass is not None:
             self._lighting_pass.clear()
 
@@ -596,7 +528,6 @@ class EditorPixelRenderer:
         editor_camera: Any,
         width: int,
         height: int,
-        image_master: Any,
         *,
         entity_names: Mapping[str, str] | None = None,
     ) -> Any | None:
@@ -620,10 +551,7 @@ class EditorPixelRenderer:
                 self._provider_resources = self._resource_service
             if self._resource_service is not None and self._normal_map_resolver is None:
                 self._normal_map_resolver = NormalMapResolver(self._resource_service)
-            if self._photo_image_master is not image_master:
-                self._photo_image = None
-                self._photo_image_master = image_master
-            image = render_editor_frame_to_tk_image(
+            image = render_editor_frame_to_pixel_image(
                 frame,
                 editor_render_context(editor_camera, width, height),
                 width=width,
@@ -631,7 +559,7 @@ class EditorPixelRenderer:
                 resource_service=self._resource_service,
                 resource_provider=self._provider,
                 pygame_module=pygame,
-                image_master=image_master,
+                image_factory=self._image_factory,
                 diagnostics=self._diagnostics,
                 entity_names=entity_names,
                 observer=self._observer,

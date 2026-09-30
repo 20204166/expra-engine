@@ -26,11 +26,9 @@ from expra_engine.editor.commands import (
 from expra_engine.editor.interactions import duplicate_selection
 from expra_engine.runtime.area import AreaComponent
 from expra_engine.runtime.collider import ColliderComponent
-from expra_engine.ui.editor_window import EditorWindow
+from tests.support.qt_editor import make_editor, pump
 from expra_engine.ui.viewport_render_target import build_editor_render_target
-from tests.support.tk_display import display_available
 
-DISPLAY_AVAILABLE = display_available()
 BLACKSITE = Path(__file__).parents[1] / "examples" / "blacksite_relay"
 
 # Deliberately different from both existing levels: Level 1 is 38.5 x 16.2
@@ -45,7 +43,6 @@ def _event(x: float, y: float, state: int = 0) -> SimpleNamespace:
     return SimpleNamespace(x=x, y=y, state=state)
 
 
-@unittest.skipUnless(DISPLAY_AVAILABLE, "no display for real Tk editor tests")
 class BlacksiteLevel3BuildTests(unittest.TestCase):
     def test_level_03_test_cell_is_built_entirely_through_the_editor(self) -> None:
         with TemporaryDirectory() as directory:
@@ -61,13 +58,13 @@ class BlacksiteLevel3BuildTests(unittest.TestCase):
             (working_root / "levels" / "level_03_test_cell.level.pb").unlink(missing_ok=True)
             project = Project.load(working_root)
 
-            window = EditorWindow(Engine())
+            window = make_editor(Engine())
             try:
                 # 1. Open the project through the real editor bridge -- this
                 # is the same ProjectWorkflow.open_loaded() a human's
                 # File > Open Project triggers, landing on levels/main.level.pb.
                 window._project_workflow.open_loaded(project)
-                window._root.update()
+                pump(window)
                 base_entity_count = len(window._engine.edit_scene.entities)  # type: ignore[union-attr]
                 self.assertEqual(base_entity_count, 66)
 
@@ -76,7 +73,7 @@ class BlacksiteLevel3BuildTests(unittest.TestCase):
                 # editor" starting point (inherits the working arena/player/
                 # camera/HUD baseline instead of rebuilding it from nothing).
                 window._project_workflow.duplicate_scene("level_03_test_cell")
-                window._root.update()
+                pump(window)
                 scene = window._engine.edit_scene
                 self.assertEqual(scene.name, "level_03_test_cell")  # type: ignore[union-attr]
                 self.assertEqual(len(scene.entities), base_entity_count)  # type: ignore[union-attr]
@@ -151,12 +148,12 @@ class BlacksiteLevel3BuildTests(unittest.TestCase):
                 drone2 = scene.find_entity_by_name("Security Drone 2")  # type: ignore[union-attr]
                 assert drone1 is not None and drone2 is not None
                 window._on_viewport_entity_click((drone1.entity_id, drone2.entity_id), False)
-                window._root.update()
+                pump(window)
                 self.assertEqual(set(window._selected_ids), {drone1.entity_id, drone2.entity_id})
                 assert scene is not None
                 enemy_count_before = len(scene.get_entities_by_tag("enemy"))
                 duplicate_selection(window)
-                window._root.update()
+                pump(window)
                 self.assertEqual(len(scene.get_entities_by_tag("enemy")), enemy_count_before + 2)
                 new_enemy_ids = set(window._selected_ids) - {drone1.entity_id, drone2.entity_id}
                 self.assertEqual(len(new_enemy_ids), 2)
@@ -168,7 +165,7 @@ class BlacksiteLevel3BuildTests(unittest.TestCase):
                 before_pos = (dragged_transform.x, dragged_transform.y)
 
                 window._on_viewport_entity_click((dragged_id,), False)
-                window._root.update()
+                pump(window)
                 history_before_drag = len(window._command_stack.history)
                 start_screen = window._viewport._camera.project(before_pos)
                 target_world = (18.0, 18.0)
@@ -178,7 +175,7 @@ class BlacksiteLevel3BuildTests(unittest.TestCase):
                 )
                 window._viewport._spatial_edit.continue_drag(_event(*end_screen))
                 window._viewport._spatial_edit.end_drag()
-                window._root.update()
+                pump(window)
                 self.assertEqual(len(window._command_stack.history), history_before_drag + 1)
                 self.assertAlmostEqual(dragged_transform.x, 18.0, delta=0.5)
                 self.assertAlmostEqual(dragged_transform.y, 18.0, delta=0.5)
@@ -212,7 +209,7 @@ class BlacksiteLevel3BuildTests(unittest.TestCase):
                 from expra_engine.editor.commands import CreateEntityCommand
 
                 window._command_stack.push(CreateEntityCommand(scene, alarm_entity))
-                window._root.update()
+                pump(window)
                 self.assertIsNotNone(scene.find_entity_by_name("Test Cell Alarm Zone"))  # type: ignore[union-attr]
 
                 # Confirm the render target marks it as an Area, distinct
@@ -241,12 +238,12 @@ class BlacksiteLevel3BuildTests(unittest.TestCase):
             # simulating a real editor restart -- not the same in-memory
             # objects.
             reopened_project = Project.load(working_root)
-            reopened_window = EditorWindow(Engine())
+            reopened_window = make_editor(Engine())
             try:
                 reopened_window._project_workflow.open_loaded(reopened_project)
-                reopened_window._root.update()
+                pump(reopened_window)
                 reopened_window._project_workflow.open_scene("levels/level_03_test_cell.level.pb")
-                reopened_window._root.update()
+                pump(reopened_window)
                 reopened_scene = reopened_window._engine.edit_scene
                 assert reopened_scene is not None
                 self.assertEqual(len(reopened_scene.entities), saved_entity_count)
@@ -276,7 +273,7 @@ class BlacksiteLevel3BuildTests(unittest.TestCase):
                 # level's own content: script starts, player clamps to the
                 # new arena bounds, Stop restores the untouched edit scene).
                 self.assertTrue(reopened_window._engine.play())
-                reopened_window._root.update()
+                pump(reopened_window)
                 self.assertEqual(reopened_window._engine.run_state, EngineRunState.PLAY)
                 behaviours = reopened_window._engine.behaviour_system.instances
                 self.assertEqual(len(behaviours), 1)
@@ -286,7 +283,7 @@ class BlacksiteLevel3BuildTests(unittest.TestCase):
 
                 reopened_window._engine.tick(0.05)
                 reopened_window._engine.stop()
-                reopened_window._root.update()
+                pump(reopened_window)
                 self.assertEqual(reopened_window._engine.run_state, EngineRunState.EDIT)
                 self.assertEqual(
                     reopened_window._engine.edit_scene.to_dict(),  # type: ignore[union-attr]

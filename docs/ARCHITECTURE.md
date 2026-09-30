@@ -1,5 +1,10 @@
 # Expra Engine — Architecture
 
+> **Historical snapshot.** This document describes the retired Tk editor
+> architecture and is retained for background only. The supported editor is
+> Qt-only; see [`docs/guide/ARCHITECTURE.md`](guide/ARCHITECTURE.md) and
+> [`docs/guide/EDITOR.md`](guide/EDITOR.md) for the current architecture.
+
 ## Overview
 
 Expra Engine is a game editor and runtime organized around explicit state,

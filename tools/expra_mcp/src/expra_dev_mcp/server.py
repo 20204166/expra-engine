@@ -15,9 +15,9 @@ Behaviour code, gated by trusted_project_roots), ``run_checks`` (named
 pytest/ruff/pyright/mypy/build profiles, never an arbitrary shell), and
 ``export_inspect`` (the real exporter -- ``action="export"`` gated behind
 ``execution.allow_network`` since it downloads a Python runtime + packages).
-Phase 2F adds ``editor_session``: a REAL Tk ``EditorWindow`` driven through
+Phase 2F adds ``editor_session``: a REAL Qt ``EditorWindow`` driven through
 a long-lived worker subprocess and a newline-delimited JSON IPC protocol
-(``_editor_worker.py`` / ``editor_sessions.py``), never touching Tk from
+(``_editor_worker.py`` / ``editor_sessions.py``), never touching Qt from
 this server's own process/thread. Performance/polish lands in 2G (see
 tools/expra_mcp/README.md).
 """
@@ -119,7 +119,7 @@ def build_server(cfg: ExpraMcpConfig) -> MCPServer:
         description=(
             "Report the MCP server's and Expra's Python/interpreter identity, whether "
             "expra_engine imports from the configured source tree (vs. a stale installed "
-            "package), pygame/Tk availability, dev-tool availability (git, rg, pytest, ruff, "
+            "package), pygame/PySide6 availability, dev-tool availability (git, rg, pytest, ruff, "
             "pyright, mypy, xvfb-run), default-project and reference-repository status, and "
             "an overall READY / READY_WITH_LIMITATIONS / NOT_READY readiness verdict. "
             "Always read-only; call this before any environment-sensitive debugging."
@@ -664,7 +664,7 @@ def build_server(cfg: ExpraMcpConfig) -> MCPServer:
     @server.tool(
         name="runtime_probe",
         description=(
-            "Drive a REAL headless Engine (core/engine.py -- zero pygame/Tk dependency) "
+            "Drive a REAL headless Engine (core/engine.py -- zero pygame/Qt dependency) "
             "through a deterministic sequence of steps within one call, since scene/behaviour/"
             "physics state must persist across steps: play, pause, resume, stop, tick (dt), "
             "key_down/key_up (semantic input via the real InputMap, dispatched through the real "
@@ -846,7 +846,7 @@ def build_server(cfg: ExpraMcpConfig) -> MCPServer:
     @server.tool(
         name="editor_session",
         description=(
-            "Operate a REAL Expra EditorWindow (genuine Tk, not simulated) through a "
+            "Operate a REAL Expra EditorWindow (genuine Qt, not simulated) through a "
             "long-lived worker subprocess. action='start' launches the worker (no project "
             "argument -- always follow with 'open_project'); reports "
             "editor_session_available=false with a reason if no usable display exists and "
@@ -854,7 +854,7 @@ def build_server(cfg: ExpraMcpConfig) -> MCPServer:
             "project exactly like File > Open Project (executes project-authored Behaviour "
             "code, gated to trusted_project_roots). 'play'/'pause'/'resume'/'stop' drive the "
             "real editor Play button handlers -- 'stop' provably restores the untouched edit "
-            "scene. 'send_key' uses genuine Tk event_generate (phase='down'|'up'), exercising "
+            "scene. 'send_key' uses genuine Qt key events (phase='down'|'up'), exercising "
             "the real keyboard binding path a human press would take -- never direct input "
             "injection. 'wait' (duration_ms) lets the real RuntimePreviewLoop auto-tick in "
             "real time while the event loop keeps pumping. 'select_entity', 'inspect' "
@@ -996,8 +996,8 @@ def build_server(cfg: ExpraMcpConfig) -> MCPServer:
             "growing with iteration count. 'document_load' (needs a project/resource or a "
             "synthetic entity count) measures generic JSON/PB document stages through the real "
             "Project load path. 'editor_redraw_stress' (needs session_id from a "
-            "started editor_session) repeatedly redraws the REAL live Tk viewport, measuring "
-            "Canvas item count and PhotoImage count via real Tcl introspection ('image names'). "
+            "started editor_session) repeatedly redraws the REAL live Qt viewport, measuring "
+            "Canvas item count and live editor-image count. "
             "Every action reports verdict: 'bounded' | 'growing' | 'inconclusive', backed by the "
             "actual before/after numbers -- never asserts a leak without retention evidence."
         ),
@@ -1186,13 +1186,13 @@ def build_server(cfg: ExpraMcpConfig) -> MCPServer:
         )
 
     @server.prompt(
-        name="tk-regression",
-        title="Diagnose a Tk/editor scheduling regression",
-        description="Guide an agent through diagnosing a Tk/editor scheduling, threading, or coordinator regression by mining exp_ui and Expra's current coordinators.",
+        name="editor-regression",
+        title="Diagnose an editor scheduling regression",
+        description="Guide an agent through diagnosing an editor scheduling, threading, or coordinator regression by mining exp_ui and Expra's current coordinators.",
     )
-    def tk_regression_prompt(symptom: str) -> str:
+    def editor_regression_prompt(symptom: str) -> str:
         return (
-            f"Diagnose this Tk/editor regression: {symptom!r}. Prioritize exp_ui (the original "
+            f"Diagnose this editor regression: {symptom!r}. Prioritize exp_ui (the original "
             "AppCoordinator/UICoordinator implementation) and Expra's current coordinators over "
             "inventing a new pattern:\n"
             "1. source_search(repos=['expra'], query='UICoordinator') and query='AppCoordinator' "
@@ -1201,16 +1201,16 @@ def build_server(cfg: ExpraMcpConfig) -> MCPServer:
             "2. source_search(repos=['exp_ui'], query=<the matching concept: 'render_coordinator', "
             "'action_coordinator', 'window_lifecycle', etc>) -- read the ORIGINAL implementation "
             "this was adapted from; identify which invariant it enforces (staleness rejection, "
-            "generation numbers, coalescing, main-thread-only Tk mutation, shutdown order).\n"
+            "generation numbers, coalescing, main-thread-only widget mutation, shutdown order).\n"
             "3. Determine whether current Expra preserves that invariant or has diverged from it "
             "-- this is usually where the regression actually lives.\n"
             "4. If the regression involves the live editor specifically, reproduce it with a "
             "real editor_session (start -> open_project -> the exact repro steps -> state/inspect) "
             "rather than reasoning about it in the abstract -- editor_session drives the real "
-            "EditorWindow's real Tk main-thread event loop.\n"
-            "5. Never call widget.after_idle() from a worker thread, and never mutate Tk objects "
-            "off the main thread -- confirm any proposed fix respects "
-            "ui/editor_window.py's own documented threading invariant.\n"
+            "EditorWindow's real Qt main-thread event loop.\n"
+            "5. Never touch a Qt widget or QTimer from a worker thread; cross threads through "
+            "QtDeliveryQueue -- confirm any proposed fix respects "
+            "editor/qt/delivery.py's documented threading contract.\n"
             "Root-cause the specific invariant that broke; don't just paper over the symptom."
         )
 

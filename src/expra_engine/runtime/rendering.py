@@ -23,6 +23,7 @@ from expra_engine.ui_model.geometry import Rect
 from expra_engine.ui_model.nine_slice import NineSlice
 
 __all__ = (
+    "SUPPORTED_PRIMITIVE_KINDS",
     "Color",
     "LightDescriptor",
     "MaterialDescriptor",
@@ -44,6 +45,12 @@ __all__ = (
 
 Vec2 = tuple[float, float]
 Vec3 = tuple[float, float, float]
+
+# Canonical primitive-kind contract shared by extraction and the editor's
+# Pygame pixel preflight. The backend must implement every kind in this set.
+SUPPORTED_PRIMITIVE_KINDS = frozenset(
+    {"point", "rectangle", "rect", "circle", "rounded_rectangle", "polygon", "line"}
+)
 
 
 def _tuple(values: tuple[float, ...] | list[float], size: int, name: str) -> tuple[float, ...]:
@@ -222,8 +229,14 @@ class LightDescriptor:
             ("cone_angle", self.cone_angle),
             ("height", self.height),
         )
-        if any(isinstance(value, bool) or not isinstance(value, Real) for _, value in numeric_fields):
-            invalid = next(name for name, value in numeric_fields if isinstance(value, bool) or not isinstance(value, Real))
+        if any(
+            isinstance(value, bool) or not isinstance(value, Real) for _, value in numeric_fields
+        ):
+            invalid = next(
+                name
+                for name, value in numeric_fields
+                if isinstance(value, bool) or not isinstance(value, Real)
+            )
             raise ValueError(f"{invalid} must be a finite number")
         energy = _finite(self.energy, "energy")
         radius = _finite(self.radius, "radius")
@@ -367,6 +380,8 @@ class PrimitiveDescriptor:
     kind: str
     size: Vec2 = (1.0, 1.0)
     radius: float | None = None
+    points: tuple[tuple[float, float], ...] = ()
+    thickness: float = 1.0
 
     def __post_init__(self) -> None:
         if not self.kind:
@@ -379,6 +394,17 @@ class PrimitiveDescriptor:
             radius = _finite(self.radius, "radius")
             if radius <= 0:
                 raise ValueError("primitive radius must be positive")
+        points = tuple(tuple(point) for point in self.points)
+        object.__setattr__(self, "points", points)
+        if self.kind == "polygon" and len(points) < 3:
+            raise ValueError("polygon primitive requires at least three points")
+        if self.kind == "line":
+            if len(points) != 2:
+                raise ValueError("line primitive requires exactly two points")
+            thickness = _finite(self.thickness, "thickness")
+            object.__setattr__(self, "thickness", thickness)
+            if thickness <= 0:
+                raise ValueError("line thickness must be positive")
 
 
 class RenderPhase(IntEnum):
@@ -439,13 +465,53 @@ class RenderItem:
 
     def _projected_bounds(self, context: RenderContext) -> tuple[float, float, float, float]:
         transform = self.visual_transform
-        center = context.camera.project(transform.position, context.viewport)
+        if self.primitive.kind in ("polygon", "line") and self.primitive.points:
+            angle = math.radians(transform.rotation)
+            cos_angle = math.cos(angle)
+            sin_angle = math.sin(angle)
+            projected = tuple(
+                context.camera.project(
+                    (
+                        transform.position[0]
+                        + local_x * transform.scale[0] * cos_angle
+                        - local_y * transform.scale[1] * sin_angle,
+                        transform.position[1]
+                        + local_x * transform.scale[0] * sin_angle
+                        + local_y * transform.scale[1] * cos_angle,
+                    ),
+                    context.viewport,
+                )
+                for local_x, local_y in self.primitive.points
+            )
+            xs = tuple(point[0] for point in projected)
+            ys = tuple(point[1] for point in projected)
+            if self.primitive.kind == "line":
+                padding = (
+                    self.primitive.thickness
+                    * max(abs(transform.scale[0]), abs(transform.scale[1]))
+                    / context.camera.width
+                    * context.viewport.width
+                    / 2
+                )
+            else:
+                padding = max(self.material.outline_width / 2, 0.5)
+            return (
+                min(xs) - padding,
+                min(ys) - padding,
+                max(xs) + padding,
+                max(ys) + padding,
+            )
+        center = context.camera.project(
+            (transform.position[0], transform.position[1]), context.viewport
+        )
         # ``radius`` is overloaded: for circle/point it is the full extent of
         # the shape, but for rounded_rectangle it is only a corner radius --
         # the shape's actual extent is still ``size``. Treating a rounded
         # rectangle's tiny corner radius as its bounding radius would cull it
         # far too aggressively (or too late) during visibility checks.
-        radius_is_extent = self.primitive.kind in ("circle", "point") and self.primitive.radius is not None
+        radius_is_extent = (
+            self.primitive.kind in ("circle", "point") and self.primitive.radius is not None
+        )
         if not radius_is_extent and (transform.rotation or context.camera.rotation):
             half_width = abs(self.primitive.size[0] * transform.scale[0]) / 2
             half_height = abs(self.primitive.size[1] * transform.scale[1]) / 2
@@ -498,9 +564,7 @@ class RenderItem:
         )
 
 
-def render_item_order_key(
-    item: RenderItem, insertion_index: int
-) -> tuple[int, int, float, int]:
+def render_item_order_key(item: RenderItem, insertion_index: int) -> tuple[int, int, float, int]:
     """Return the canonical draw-item sort key shared by the frame and the planner.
 
     Draw order — phase, then layer, then world depth, then insertion order — is

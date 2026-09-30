@@ -234,14 +234,13 @@ def test_editor_pixel_renderer_reuses_its_lighting_pass_across_frames(monkeypatc
         passed_owners.append(kwargs.get("lighting_pass"))
         return object()
 
-    monkeypatch.setattr(editor_pixel_renderer, "render_editor_frame_to_tk_image", fake_render)
-    pixel_renderer = EditorPixelRenderer()
+    monkeypatch.setattr(editor_pixel_renderer, "render_editor_frame_to_pixel_image", fake_render)
+    pixel_renderer = EditorPixelRenderer(image_factory=object)
     camera = ViewportCamera((101, 101))
-    master = object()
     frame = _light_frame("point")
 
-    assert pixel_renderer.render(frame, camera, 101, 101, master) is not None
-    assert pixel_renderer.render(frame, camera, 101, 101, master) is not None
+    assert pixel_renderer.render(frame, camera, 101, 101) is not None
+    assert pixel_renderer.render(frame, camera, 101, 101) is not None
 
     assert passed_owners[0] is pixel_renderer._lighting_pass
     assert passed_owners[1] is pixel_renderer._lighting_pass

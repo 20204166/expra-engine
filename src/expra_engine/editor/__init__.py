@@ -1,1 +1,1 @@
-"""Editor layer — Tk/ttkbootstrap application shell, persistence, delivery."""
+"""Editor layer — toolkit-independent editor logic; the Qt shell lives in ``editor.qt``."""

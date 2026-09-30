@@ -12,6 +12,8 @@ from types import CodeType
 _FORBIDDEN_IMPORTS: tuple[str, ...] = (
     "tkinter",
     "ttkbootstrap",
+    "PySide6",
+    "shiboken6",
     "expra_engine.editor",
     "expra_engine.ui",
     "expra_engine.design",

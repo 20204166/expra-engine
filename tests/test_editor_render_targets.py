@@ -24,8 +24,9 @@ from expra_engine.runtime.visual_components import (
     SpriteComponent,
     TextComponent,
 )
-from expra_engine.ui.editor_window import EditorWindow
-from expra_engine.ui.viewport import ViewportCamera, build_editor_render_target
+from expra_engine.editor.window_core import EditorWindowCore
+from expra_engine.ui.viewport_camera import ViewportCamera
+from expra_engine.ui.viewport_render_target import build_editor_render_target
 
 
 class RenderTargetRegistryTests(unittest.TestCase):
@@ -70,6 +71,13 @@ class RenderTargetRegistryTests(unittest.TestCase):
         self.assertEqual(coordinator.render_failures, 1)
 
 
+class _RoutingWindow(EditorWindowCore):
+    """Core logic without a GUI shell; lighting preview is off."""
+
+    def _preview_lighting_enabled(self) -> bool:
+        return False
+
+
 class EditorRenderTargetTests(unittest.TestCase):
     def test_editor_viewport_routes_runtime_interpolation_only_during_play(self) -> None:
         class ViewportSink:
@@ -81,7 +89,7 @@ class EditorRenderTargetTests(unittest.TestCase):
 
         interpolator = object()
         sink = ViewportSink()
-        window = cast(Any, EditorWindow.__new__(EditorWindow))
+        window = cast(Any, _RoutingWindow.__new__(_RoutingWindow))
         window._viewport = sink
         window._engine = SimpleNamespace(
             run_state=EngineRunState.EDIT,
@@ -91,7 +99,6 @@ class EditorRenderTargetTests(unittest.TestCase):
             world_streaming_system=None,
         )
         window._active_document = SimpleNamespace(kind=None, document=None)
-        window._preview_lighting_var = SimpleNamespace(get=lambda: False)
         scene = Scene("routing")
 
         for state, overlays, expected_interpolator in (

@@ -40,7 +40,7 @@ class PanelRouter:
     """Register named panels once and switch between the retained frames.
 
     Panel frames are built exactly once and kept alive; only visibility
-    changes on navigation so scroll positions, Tk variables, and focus
+    changes on navigation so scroll positions, field state, and focus
     state are preserved across switches.
 
     Status: this is a reusable navigation primitive with no production

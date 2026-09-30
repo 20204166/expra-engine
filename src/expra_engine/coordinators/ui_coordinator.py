@@ -1,4 +1,4 @@
-"""Presentation render orchestration for the Tk UI.
+"""Presentation render orchestration for the editor UI.
 
 Adapted from System Analyzer maintenance/ui/render_coordinator.py
 (UICoordinator, RenderIntent).

@@ -10,7 +10,7 @@ from expra_dev_mcp.server import build_server
 from mcp import Client
 from mcp.types import GetPromptResult, TextContent
 
-EXPECTED_PROMPTS = {"debug-renderer", "mine-reference", "tk-regression", "release-check"}
+EXPECTED_PROMPTS = {"debug-renderer", "mine-reference", "editor-regression", "release-check"}
 
 
 def _first_message_text(result: GetPromptResult) -> str:
@@ -51,10 +51,10 @@ async def test_mine_reference_prompt_references_source_tools() -> None:
         assert "godot" in text
 
 
-async def test_tk_regression_prompt_mentions_exp_ui_and_coordinators() -> None:
+async def test_editor_regression_prompt_mentions_exp_ui_and_coordinators() -> None:
     server = build_server(conftest.full_config())
     async with Client(server) as client:
-        result = await client.get_prompt("tk-regression", {"symptom": "viewport freezes after Stop"})
+        result = await client.get_prompt("editor-regression", {"symptom": "viewport freezes after Stop"})
         text = _first_message_text(result)
         assert "exp_ui" in text
         assert "UICoordinator" in text

@@ -1,7 +1,7 @@
 """Protocol-level tests for performance_probe, driven through the official
 mcp Client. render_stress/resource_cache exercise the static subprocess
 path against real Blacksite Relay assets; editor_redraw_stress exercises a
-real live Tk editor session (heavier -- kept to a single test).
+real live Qt editor session (heavier -- kept to a single test).
 """
 
 from __future__ import annotations

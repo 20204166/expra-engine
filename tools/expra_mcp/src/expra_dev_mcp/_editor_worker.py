@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Long-lived Expra editor worker.
 
-Owns a REAL Tk ``EditorWindow`` on this process's own main thread, driven
+Owns a REAL Qt editor window on this process's own main thread, driven
 entirely through a newline-delimited JSON command protocol over
 stdin/stdout. Executed as a subprocess under the CONFIGURED Expra
 interpreter -- never imported by the expra-mcp server's own process (design
@@ -14,16 +14,17 @@ Protocol:
                                                 | {"id": int, "ok": false, "error": str}
 
 The first stdout line is a startup handshake with id=0, reporting whether
-the Tk window was constructed successfully.
+the editor window was constructed successfully.
+
+The toolkit-specific surface this worker needs (create, pump events, focus,
+send a key, schedule, run/quit, size, image count) lives in the small
+``_QtShell`` adapter below.
 
 Threading: a background daemon thread ONLY reads stdin lines and pushes
-them onto a queue -- it never touches Tk. All Tk mutation happens on this
-process's own main thread inside root.after()-scheduled polling, per the
-hard invariant documented in ui/editor_window.py's own module docstring
-("ALL Tk mutations on the main thread... Never call widget.after_idle()
-from a worker" -- confirmed by reading that file). If stdin closes (the
-parent MCP server died), this worker shuts itself down rather than
-lingering as an orphaned Tk window.
+them onto a queue -- it never touches Qt. All Qt mutation happens on this
+process's own main thread inside QTimer-scheduled polling (widgets only on
+the GUI thread). If stdin closes (the parent MCP server died), this worker
+shuts itself down rather than lingering as an orphaned editor window.
 """
 
 from __future__ import annotations
@@ -197,7 +198,105 @@ class _RecordCapture(logging.Handler):
 
 
 # ---------------------------------------------------------------------------
-# Command dispatch -- runs entirely on the Tk main thread
+# Qt shell -- the only place this worker touches Qt directly
+# ---------------------------------------------------------------------------
+
+
+_QT_NAMED_KEYS = {
+    "space": "Key_Space",
+    "Return": "Key_Return",
+    "Escape": "Key_Escape",
+    "Left": "Key_Left",
+    "Right": "Key_Right",
+    "Up": "Key_Up",
+    "Down": "Key_Down",
+    "Tab": "Key_Tab",
+    "Home": "Key_Home",
+    "End": "Key_End",
+    "Delete": "Key_Delete",
+    "BackSpace": "Key_Backspace",
+}
+
+
+class _QtShell:
+    name = "qt"
+
+    def create(self, engine: Any, preferences_path: Path) -> Any:
+        from PySide6.QtWidgets import QApplication
+
+        from expra_engine.editor.qt.main_window import EditorWindow
+        from expra_engine.editor.qt.preflight import qt_startup_problem
+        from expra_engine.editor.qt.theme import apply_editor_theme
+        from expra_engine.ui.styles import accent_theme_colors
+
+        problem = qt_startup_problem()
+        if problem is not None:
+            raise RuntimeError(problem)
+        self.app = QApplication.instance() or QApplication(sys.argv[:1])
+        apply_editor_theme(self.app, accent_theme_colors("cyan"))
+        self.window = EditorWindow(engine, preferences_path=preferences_path)
+        self.window.show()
+        return self.window
+
+    def pump(self) -> None:
+        for _ in range(3):
+            self.app.processEvents()
+
+    def size(self) -> tuple[int, int]:
+        return self.window.width(), self.window.height()
+
+    def focus(self) -> None:
+        self.window.activateWindow()
+        self.window.raise_()
+
+    def _qt_key(self, key: str) -> tuple[Any, str]:
+        from PySide6.QtCore import Qt
+
+        if key in _QT_NAMED_KEYS:
+            qt_key = getattr(Qt.Key, _QT_NAMED_KEYS[key])
+            return qt_key, " " if key == "space" else ""
+        if len(key) == 1 and key.isascii() and key.isalpha():
+            return getattr(Qt.Key, f"Key_{key.upper()}"), key
+        if len(key) == 1 and key.isdigit():
+            return getattr(Qt.Key, f"Key_{key}"), key
+        if key.startswith("F") and key[1:].isdigit():
+            return getattr(Qt.Key, f"Key_{key}"), ""
+        raise ValueError(f"unsupported key for the Qt editor session: {key!r}")
+
+    def send_key(self, key: str, phase: str) -> None:
+        # The real Qt event system: the key event goes through QApplication's
+        # event dispatch, reaching the same window key filter a human keypress does.
+        from PySide6.QtCore import QEvent, Qt
+        from PySide6.QtGui import QKeyEvent
+        from PySide6.QtWidgets import QApplication
+
+        self.focus()
+        qt_key, text = self._qt_key(key)
+        kind = QEvent.Type.KeyPress if phase == "down" else QEvent.Type.KeyRelease
+        QApplication.sendEvent(
+            self.window, QKeyEvent(kind, qt_key, Qt.KeyboardModifier.NoModifier, text)
+        )
+        self.pump()
+
+    def after(self, delay_ms: int, callback: Any) -> None:
+        from PySide6.QtCore import QTimer
+
+        QTimer.singleShot(delay_ms, callback)
+
+    def run(self) -> None:
+        self.app.exec()
+
+    def quit(self) -> None:
+        self.app.quit()
+
+    def image_count(self) -> int:
+        from expra_engine.editor.qt.image_bridge import live_image_count
+
+        return live_image_count()
+
+
+# ---------------------------------------------------------------------------
+# Command dispatch -- runs entirely on the Qt main thread
 # ---------------------------------------------------------------------------
 
 
@@ -207,39 +306,28 @@ def _dispatch(
     *,
     engine: Any,
     window: Any,
-    root: Any,
+    shell: Any,
     state: dict[str, Any],
 ) -> dict:
     if command == "open_project":
         from expra_engine.core.project import Project
-        from expra_engine.runtime.script_registry import ScriptRegistry
+        from expra_engine.core.scene import Scene
 
         expra_root = Path(params["expra_root"])
         project = Project.load(expra_root / params["project"])
-        scene = project.load_document(params.get("scene"), observer=window._observer)
-        # Mirrors editor/project_workflow.py's ProjectWorkflow.open_loaded()
-        # exactly (confirmed by reading it), so this behaves identically to
-        # a human choosing File > Open Project.
-        window._engine.set_project(project)
-        window._engine.set_scene(scene)
-        window._viewport.set_resource_service(project.resource_service())
-        window._engine.set_script_registry(ScriptRegistry(project.path))
-        window._selected_ids = ()
-        window._root.title(f"{project.name} — Expra Editor")
-        window._present_all()
-        # Real Tk key bindings only fire for events routed to a widget that
-        # actually has keyboard focus -- confirmed empirically: without
-        # this, event_generate("<KeyPress>", ...) is silently dropped, even
-        # though it's synthetic. There is no real user to click the window,
-        # so we must force it ourselves.
-        window._root.focus_force()
+        # Use the same workflow owner as File > Open Project. Besides keeping
+        # MCP/editor state in parity, it correctly distinguishes Scene/Level
+        # entrypoints from Worlds and installs each through its canonical path.
+        window._project_workflow.open_loaded(project)
+        document = window._active_document.document
+        shell.focus()
         state["expra_root"] = str(expra_root)
         state["project"] = params["project"]
         return {
             "executed_project_code": True,
             "project_name": project.name,
-            "entity_count": len(scene.entities),
-            "document_kind": scene.document_kind.value,
+            "entity_count": len(document.entities) if isinstance(document, Scene) else 0,
+            "document_kind": document.document_kind.value,
             "run_state": engine.run_state.value,
         }
 
@@ -271,20 +359,15 @@ def _dispatch(
         return {"run_state": engine.run_state.value}
 
     if command == "send_key":
-        # Deliberately uses the REAL Tk event system (event_generate),
-        # exercising the actual <KeyPress>/<KeyRelease> bindings a human
-        # keypress would trigger (EditorWindow.__init__ binds these on
-        # self._root, forwarding through the same InputMap.press()/
-        # .release() + engine.signal() pipeline runtime_probe uses) --
-        # NOT direct InputMap injection, per the spec's own explicit
-        # instruction not to treat that as proof of editor keyboard
-        # handling.
+        # Deliberately uses the REAL Qt event system (QApplication.sendEvent),
+        # exercising the actual key handling a human keypress
+        # would trigger (the window forwards it through the same
+        # InputMap.press()/.release() + engine.signal() pipeline runtime_probe
+        # uses) -- NOT direct InputMap injection, per the spec's own explicit
+        # instruction not to treat that as proof of editor keyboard handling.
         key = params["key"]
         phase = params.get("phase", "down")
-        event_type = "<KeyPress>" if phase == "down" else "<KeyRelease>"
-        root.focus_force()  # defensive: focus can be lost between calls, and a dropped keyboard event is silent
-        root.event_generate(event_type, keysym=key)
-        root.update()
+        shell.send_key(key, phase)
         return {"key": key, "phase": phase, "run_state": engine.run_state.value}
 
     if command == "select_entity":
@@ -326,7 +409,7 @@ def _dispatch(
         window._engine.set_scene(scene)
         window._last_save_path = project.document_file(relative_path)
         window._selected_ids = ()
-        window._root.title(window._project_workflow.window_title())
+        window._set_window_title(window._project_workflow.window_title())
         window._present_all()
         return {
             "relative_path": relative_path,
@@ -373,9 +456,8 @@ def _dispatch(
         return {"run_state": engine.run_state.value}
 
     if command == "capture_viewport":
-        # ViewportPanel._pixel_image is a real tk.PhotoImage; .write() with
-        # format="png" works directly (confirmed empirically on this
-        # machine's real DISPLAY -- produced a genuine, valid PNG). This
+        # ViewportPanel._pixel_image is the live pixel-layer image (a QtEditorImage);
+        # .write() with format="png" saves it. This
         # captures the pygame-rendered sprite/texture layer only --
         # Canvas-drawn overlays (grid, collider outlines, selection
         # markers) are vector-drawn directly on the Canvas widget and are
@@ -446,10 +528,11 @@ def _dispatch(
         }
 
     if command == "performance_probe":
-        # The only performance_probe action that needs a LIVE Tk widget --
+        # The only performance_probe action that needs a LIVE editor widget --
         # static/headless stress (render_stress, resource_cache) lives in
-        # _static_runner.py instead. Uses real Tcl introspection
-        # ("image names") for the PhotoImage count, not a guess.
+        # _static_runner.py instead. The live-image count comes from the
+        # QtEditorImage registry (the key stays ``photoimage_count_*`` in the
+        # JSON protocol).
         iterations = max(1, int(params.get("iterations", 30)))
         canvas = window._viewport._canvas
         render_logger = logging.getLogger("expra_engine.runtime.pygame_renderer")
@@ -460,7 +543,7 @@ def _dispatch(
         # report a spurious handler leak (confirmed live: this exact bug
         # existed in _static_runner.py's render_stress too).
         items_before = len(canvas.find_all())
-        images_before = len(root.tk.call("image", "names"))
+        images_before = shell.image_count()
         handlers_before = len(render_logger.handlers) + len(editor_logger.handlers)
 
         capture = _RecordCapture()
@@ -470,13 +553,13 @@ def _dispatch(
         start = time.monotonic()
         for _ in range(iterations):
             window._present_all()
-            root.update()
+            shell.pump()
         duration = time.monotonic() - start
 
         render_logger.removeHandler(capture)
         editor_logger.removeHandler(capture)
         items_after = len(canvas.find_all())
-        images_after = len(root.tk.call("image", "names"))
+        images_after = shell.image_count()
         handlers_after = len(render_logger.handlers) + len(editor_logger.handlers)
 
         item_growth = items_after - items_before
@@ -531,7 +614,7 @@ def main() -> None:
 
     try:
         from expra_engine.core.engine import Engine
-        from expra_engine.ui.editor_window import EditorWindow
+        shell = _QtShell()
     except Exception as exc:  # noqa: BLE001 -- must always answer the startup handshake
         _respond(0, False, error=f"could not import editor: {type(exc).__name__}: {exc}")
         return
@@ -539,22 +622,20 @@ def main() -> None:
     preferences_directory = tempfile.TemporaryDirectory(prefix="expra-editor-worker-")
     preferences_path = Path(preferences_directory.name) / "preferences.json"
     try:
-        from expra_engine.ui import editor_window as _editor_window_module
-
-        _editor_window_module._PREFERENCES_PATH = preferences_path
         engine = Engine()
-        window = EditorWindow(engine)
-        root = window._root
+        window = shell.create(engine, preferences_path)
         # Forces real geometry before the first capture -- confirmed
-        # necessary empirically: winfo_width()/height() return 1 until the
-        # window has actually been mapped by the window manager.
-        root.update()
+        # necessary empirically: the window reports a placeholder size until
+        # it has actually been shown and its events processed.
+        shell.pump()
     except Exception as exc:  # noqa: BLE001
         preferences_directory.cleanup()
         _respond(0, False, error=f"could not construct editor window: {type(exc).__name__}: {exc}")
         return
 
-    _respond(0, True, {"width": root.winfo_width(), "height": root.winfo_height()})
+    width, height = shell.size()
+    _respond(0, True, {"width": width, "height": height, "ui": shell.name})
+
 
     command_queue: queue.Queue[dict[str, Any]] = queue.Queue()
     reader = threading.Thread(target=_reader_thread, args=(command_queue,), daemon=True)
@@ -564,8 +645,8 @@ def main() -> None:
 
     def handle(request_id: int, command: str, params: dict[str, Any]) -> None:
         if command == "wait":
-            # Deferred response: schedule via root.after() rather than
-            # time.sleep(), so the Tk mainloop keeps pumping (and the real
+            # Deferred response: schedule via QTimer rather than
+            # time.sleep(), so the Qt event loop keeps pumping (and the real
             # RuntimePreviewLoop keeps auto-ticking, matching genuine
             # real-time Play behavior) while we wait, instead of freezing
             # the whole event loop.
@@ -578,10 +659,10 @@ def main() -> None:
                     {"waited_ms": duration_ms, "run_state": window._engine.run_state.value},
                 )
 
-            root.after(max(0, duration_ms), _respond_after)
+            shell.after(max(0, duration_ms), _respond_after)
             return
         try:
-            data = _dispatch(command, params, engine=engine, window=window, root=root, state=state)
+            data = _dispatch(command, params, engine=engine, window=window, shell=shell, state=state)
             _respond(request_id, True, data)
         except Exception as exc:  # noqa: BLE001 -- one bad command must not crash the worker
             _respond(request_id, False, error=f"{type(exc).__name__}: {exc}")
@@ -604,7 +685,7 @@ def main() -> None:
                         window._on_close()
                     if command == "close":
                         _respond(request_id, True, {"closed": True})
-                    root.quit()
+                    shell.quit()
                     return
                 if not isinstance(command, str):
                     _respond(
@@ -616,11 +697,11 @@ def main() -> None:
                 handle(request_id, command, item)
         except queue.Empty:
             pass
-        root.after(20, poll)
+        shell.after(20, poll)
 
-    root.after(20, poll)
+    shell.after(20, poll)
     try:
-        root.mainloop()
+        shell.run()
     finally:
         preferences_directory.cleanup()
 

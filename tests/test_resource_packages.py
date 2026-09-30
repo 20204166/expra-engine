@@ -48,6 +48,21 @@ def test_manifest_validates_identity_resources_and_dependencies() -> None:
     assert manifest.dependencies == ("engine://fonts/default.ttf",)
 
 
+@pytest.mark.parametrize("field,value", [("format_version", True), ("format_version", 1.0)])
+def test_manifest_rejects_non_integer_format_version(field: str, value: object) -> None:
+    with pytest.raises(MalformedPackageManifestError, match="top-level"):
+        PackageManifest.from_mapping({**_manifest(b"hello"), field: value})
+
+
+def test_manifest_rejects_boolean_resource_size() -> None:
+    manifest = _manifest(b"hello")
+    resource = dict(manifest["resources"][0])
+    resource["size"] = True
+
+    with pytest.raises(MalformedPackageManifestError, match="resource metadata"):
+        PackageManifest.from_mapping({**manifest, "resources": [resource]})
+
+
 @pytest.mark.parametrize(
     "manifest",
     [

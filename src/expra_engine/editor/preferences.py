@@ -13,6 +13,9 @@ _LOG = logging.getLogger(__name__)
 _SCHEMA_VERSION = 1
 
 
+DEFAULT_PREFERENCES_PATH = Path.home() / ".expra" / "preferences.json"
+
+
 @dataclass(frozen=True, slots=True)
 class EditorPreferences:
     theme: str = "darkly"

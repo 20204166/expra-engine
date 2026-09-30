@@ -53,7 +53,11 @@ requires = distribution.requires or []
 assert any(requirement.startswith("pygame>=2.6") for requirement in requires), requires
 assert not any('extra == "runtime-pygame"' in requirement for requirement in requires), requires
 
+assert any(requirement.lower().startswith("pyside6>=") and "extra ==" not in requirement for requirement in requires), requires
+
 import pygame
+import PySide6
+import expra_engine.editor.qt.app  # the default frontend imports without any manual extra step
 from expra_engine.main import main
 from expra_engine.ui.editor_pixel_renderer import EditorPixelRenderer
 
@@ -61,5 +65,8 @@ launcher = shutil.which("expra-editor")
 assert launcher is not None
 assert main is not None
 assert EditorPixelRenderer is not None
-print(f"installed editor smoke passed: {wheel.name}; pygame={pygame.version.ver}; launcher={launcher}")
+print(
+    f"installed editor smoke passed: {wheel.name}; pygame={pygame.version.ver}; "
+    f"PySide6={PySide6.__version__}; launcher={launcher}"
+)
 PY

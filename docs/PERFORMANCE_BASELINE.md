@@ -1,5 +1,9 @@
 # Performance Baseline
 
+> **Historical baseline.** Measurements and editor implementation references
+> below predate completion of the Qt-only editor migration; use as recorded
+> historical data, not as current frontend documentation.
+
 This is the append-only performance baseline for Expra. Add one new row for
 each released version; do not revise earlier rows. Keep the observation
 workloads and iteration counts unchanged unless the table records the change.

@@ -130,14 +130,4 @@ class EditorDocumentSurface:
         }.get(self._active_document.kind, "Document")
 
     def _refresh_typed_save_labels(self) -> None:
-        label = self._save_label_for_kind()
-        if hasattr(self, "_toolbar"):
-            save_button = self._toolbar.action_buttons.get("save_document")
-            if save_button is not None:
-                save_button.configure(text=f"Save {label}")
-        if getattr(self, "_save_menu_index", None) is not None:
-            self._file_menu.entryconfigure(self._save_menu_index, label=f"Save {label}")
-            self._file_menu.entryconfigure(
-                self._save_as_menu_index,
-                label=f"Save {label} As...",
-            )
+        self._apply_save_label(self._save_label_for_kind())

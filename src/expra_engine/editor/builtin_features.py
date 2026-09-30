@@ -141,7 +141,7 @@ def build_builtin_features(window: Any) -> tuple[EditorFeatureSpec, ...]:
                     accelerator="Ctrl+D",
                 ),
             ),
-            shortcuts=(ShortcutContribution("<Control-d>", "duplicate_selection"),),
+            shortcuts=(ShortcutContribution("Ctrl+D", "duplicate_selection"),),
         ),
         EditorFeatureSpec(
             "scripting",
@@ -173,8 +173,8 @@ def build_builtin_features(window: Any) -> tuple[EditorFeatureSpec, ...]:
                 ),
             ),
             shortcuts=(
-                ShortcutContribution("<Control-z>", "undo"),
-                ShortcutContribution("<Control-y>", "redo"),
+                ShortcutContribution("Ctrl+Z", "undo"),
+                ShortcutContribution("Ctrl+Y", "redo"),
             ),
         ),
         EditorFeatureSpec(

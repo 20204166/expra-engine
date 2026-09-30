@@ -1,7 +1,7 @@
 """Renderer-neutral semantic design tokens.
 
 These values describe intent, not widget configuration. Backend adapters may
-translate them into Tk, OpenGL, SDL, or another renderer's primitives.
+translate them into Qt, OpenGL, SDL, or another renderer's primitives.
 """
 
 SEMANTIC_COLORS: dict[str, str] = {

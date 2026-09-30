@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Any, cast
 
@@ -27,6 +28,24 @@ class LevelMetadata:
     default_camera_id: str | None = None
     tags: tuple[str, ...] = field(default_factory=tuple)
 
+    def __post_init__(self) -> None:
+        if self.world_bounds is not None:
+            try:
+                raw_bounds = tuple(self.world_bounds)
+            except TypeError as error:
+                raise ValueError("Level world_bounds must contain four finite numbers") from error
+            if len(raw_bounds) != 4 or any(isinstance(value, bool) for value in raw_bounds):
+                raise ValueError("Level world_bounds must contain four finite numbers")
+            try:
+                bounds = tuple(float(value) for value in raw_bounds)
+            except (TypeError, ValueError, OverflowError) as error:
+                raise ValueError("Level world_bounds must contain four finite numbers") from error
+            if not all(math.isfinite(value) for value in bounds):
+                raise ValueError("Level world_bounds must contain four finite numbers")
+            if bounds[2] <= 0.0 or bounds[3] <= 0.0:
+                raise ValueError("Level world_bounds width and height must be positive")
+            object.__setattr__(self, "world_bounds", bounds)
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "display_name": self.display_name,
@@ -41,7 +60,7 @@ class LevelMetadata:
         bounds = data.get("world_bounds")
         return cls(
             display_name=data.get("display_name"),
-            world_bounds=tuple(bounds) if bounds else None,
+            world_bounds=bounds,
             spawn_entity_id=data.get("spawn_entity_id"),
             default_camera_id=data.get("default_camera_id"),
             tags=tuple(data.get("tags", ())),
@@ -79,7 +98,7 @@ class Level(Scene):
 
     def find_anchor(self, anchor_id: str):
         """Return the ordinary Level entity and anchor marker for one ID."""
-        from expra_engine.runtime.level_anchor import LevelAnchorComponent
+        from expra_engine.core.level_anchor import LevelAnchorComponent
 
         self.validate_anchors()
         return next(
@@ -94,7 +113,7 @@ class Level(Scene):
 
     def validate_anchors(self) -> None:
         """Reject duplicate named anchors before a Level can be used by a World."""
-        from expra_engine.runtime.level_anchor import LevelAnchorComponent
+        from expra_engine.core.level_anchor import LevelAnchorComponent
 
         seen: set[str] = set()
         for entity in self.entities:

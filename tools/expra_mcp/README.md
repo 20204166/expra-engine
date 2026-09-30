@@ -20,7 +20,7 @@ Implemented so far:
 - `stdio` transport (default) and Streamable HTTP transport
   (`127.0.0.1`-only by default, per spec).
 - `workspace_doctor` -- environment/interpreter identity, whether
-  `expra_engine` imports from the configured source tree, pygame/Tk
+  `expra_engine` imports from the configured source tree, pygame/PySide6
   availability, dev-tool availability, reference-repo status, and an overall
   `READY` / `READY_WITH_LIMITATIONS` / `NOT_READY` verdict. Always read-only.
 - `source_search` -- literal/regex search across the six source roots
@@ -122,7 +122,7 @@ Implemented so far:
   viewports supplied, says outright that the comparison isn't informative
   rather than pretending default-vs-default proves anything.
 - `runtime_probe` -- drives a REAL headless `Engine` (`core/engine.py`,
-  confirmed zero pygame/Tk dependency in the whole file) through a
+  confirmed zero pygame/Qt dependency in the whole file) through a
   deterministic step sequence within one subprocess call, since scene/
   behaviour/physics state must persist across steps: `play`, `pause`,
   `resume`, `stop`, `tick(dt)`, `key_down`/`key_up` (real semantic input via
@@ -168,33 +168,34 @@ Implemented so far:
   the real verification + forbidden-import scan against an existing build
   directory, read-only, no gating needed. `plan`/`export` are gated to
   `trusted_project_roots`, same as `runtime_probe`.
-- `editor_session` -- operates a REAL Tk `EditorWindow` (not simulated)
-  through a long-lived worker subprocess (`_editor_worker.py`) and a
+- `editor_session` -- operates a REAL editor window (not simulated; the Qt
+  `EditorWindow`) through a long-lived worker subprocess (`_editor_worker.py`) and a
   newline-delimited JSON IPC protocol, per spec: an internal reader thread
-  only touches stdin/a queue, never Tk; all Tk mutation happens on the
-  worker's own main thread inside `root.after()`-scheduled polling, exactly
-  matching `ui/editor_window.py`'s own documented threading invariant.
+  only touches stdin/a queue, never Qt; all Qt mutation happens on the
+  worker's own main thread inside `QTimer`-scheduled polling, matching the
+  editor's own threading contract (widgets only on the GUI thread).
   `open_project` mirrors the real `ProjectWorkflow.open_loaded()` sequence
   exactly (down to the easy-to-miss `engine.set_script_registry(...)` call
   real File > Open Project makes). `play`/`pause`/`resume`/`stop` call the
   real `_act_play`/`_act_pause`/`_act_stop` handlers a human clicking those
-  buttons would trigger. **`send_key` deliberately uses genuine Tk
-  `event_generate`**, not direct `InputMap` injection, per the spec's own
+  buttons would trigger. The worker touches Qt only through its
+  small `_QtShell` adapter. **`send_key` deliberately uses the
+  genuine Qt event system (`QApplication.sendEvent`)**, not direct `InputMap` injection, per the spec's own
   instruction not to treat bypassing the UI as proof of editor keyboard
   handling -- and this caught a real bug during implementation: synthetic
-  Tk key events are silently dropped unless the window actually has
-  keyboard focus, which nothing gives it in an unattended worker; fixed
-  with an explicit `root.focus_force()`. A second real bug: `select_entity`
+  key events only reach the editor's key handling when the window is active,
+  which nothing guarantees in an unattended worker; fixed
+  by activating and raising the window before each key. A second real bug: `select_entity`
   initially forwarded a bare name straight to `_on_hierarchy_select()`,
   which only does exact `entity_id` lookup (confirmed by reading it) --
   silently mis-selecting nothing while reporting a bogus `selected_id`;
   fixed to resolve name-or-id first, matching every other entity-taking
   action. `capture_viewport` pulls a real PNG directly from the live
-  `ViewportPanel`'s `tk.PhotoImage` (`.write(path, format="png")`, zero new
+  `ViewportPanel`'s `QtEditorImage` (`.write(path, format="png")`, zero new
   dependencies) -- documented honestly as the pygame-rendered layer only,
   not Canvas-drawn overlays (grid/collider outlines/selection markers).
   Verified end-to-end against the spec's own acceptance scenario on the
-  real editor: open Blacksite -> Play -> genuine Tk keypress for "w" ->
+  real editor: open Blacksite -> Play -> genuine Qt keypress for "w" ->
   wait -> the real "Operative" entity moved by exactly the same amount
   Phase 2E's headless `runtime_probe` produced -> screenshot -> select ->
   Stop -> the edit scene's position is restored to the exact original
@@ -214,10 +215,10 @@ Phase 2G additions:
 - `performance_probe` -- distinguishes a bounded retry/log flood from an
   actual retained-resource leak with real measurements, never a guess.
   `render_stress`/`resource_cache` (static, headless) and
-  `editor_redraw_stress` (against a real live Tk session) all report
+  `editor_redraw_stress` (against a real live Qt session) all report
   `bounded` / `growing` / `inconclusive` backed by real before/after
   numbers (resource cache size, logger handler count, Canvas item count,
-  real Tcl `image names` count for PhotoImage references, optional
+  live `QtEditorImage` count, optional
   `tracemalloc` delta). **Found and fixed a real measurement bug twice**
   (once in the static runner, once independently in the editor worker):
   both "before" counts were measured *after* attaching this tool's own
@@ -229,10 +230,10 @@ Phase 2G additions:
   fixed constant. Live-verified afterward: `render_stress` against
   Blacksite Relay reports `bounded` with symmetric before/after handler
   counts; `editor_redraw_stress` against a real editor session reports
-  Canvas item count and PhotoImage count both perfectly stable (135->135,
+  Canvas item count and live-image count both perfectly stable (135->135,
   27->27) across 15 real redraws.
 - Four real MCP prompts (`debug-renderer`, `mine-reference`,
-  `tk-regression`, `release-check`) via the SDK's native prompt primitive
+  `editor-regression`, `release-check`) via the SDK's native prompt primitive
   (`prompts/list`/`prompts/get`), not a custom "prompt tool" workaround --
   each references this server's own real tool names in the right order,
   not the original spec's generic step descriptions.

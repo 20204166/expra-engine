@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import tkinter as tk
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 from types import SimpleNamespace
@@ -149,7 +148,7 @@ def test_diagnostic_can_include_editor_presentation(tmp_path: Path, monkeypatch)
         return Image()
 
     monkeypatch.setattr(
-        "expra_engine.runtime.texture_diagnostics._render_editor_frame_to_tk_image", bridge
+        "expra_engine.runtime.texture_diagnostics._render_editor_frame_to_pixel_image", bridge
     )
     pygame.init()
     try:
@@ -159,7 +158,7 @@ def test_diagnostic_can_include_editor_presentation(tmp_path: Path, monkeypatch)
             asset_id,
             context=RenderContext(Viewport(0, 0, 160, 120)),
             pygame_module=pygame,
-            image_master=object(),
+            editor_image_factory=object,
         )
     finally:
         pygame.quit()
@@ -167,15 +166,15 @@ def test_diagnostic_can_include_editor_presentation(tmp_path: Path, monkeypatch)
     assert result.ok
     assert result.editor_image_size == (160, 120)
     assert result.stages[-1].name == "editor_presentation"
-    assert captured["image_master"] is not None
+    assert captured["image_factory"] is not None
 
 
 def test_generic_project_reaches_real_editor_presentation(tmp_path: Path) -> None:
     pygame = pytest.importorskip("pygame")
-    try:
-        root = tk.Tk()
-    except tk.TclError:
-        pytest.skip("no display for real Tk editor presentation")
+    from expra_engine.editor.qt.image_bridge import QtEditorImage
+    from tests.support.qt_app import ensure_qt_app
+
+    ensure_qt_app()
     project, scene, asset_id = make_texture_project(tmp_path)
     pygame.init()
     try:
@@ -185,11 +184,10 @@ def test_generic_project_reaches_real_editor_presentation(tmp_path: Path) -> Non
             asset_id,
             context=RenderContext(Viewport(0, 0, 160, 120)),
             pygame_module=pygame,
-            image_master=root,
+            editor_image_factory=QtEditorImage,
         )
     finally:
         pygame.quit()
-        root.destroy()
 
     assert result.ok
     assert result.editor_image_size == (160, 120)
@@ -310,7 +308,7 @@ def test_diagnose_reports_malformed_editor_image_dimensions(tmp_path: Path, monk
             return 120
 
     monkeypatch.setattr(
-        "expra_engine.runtime.texture_diagnostics._render_editor_frame_to_tk_image",
+        "expra_engine.runtime.texture_diagnostics._render_editor_frame_to_pixel_image",
         lambda *_args, **_kwargs: Image(),
     )
     pygame.init()
@@ -321,7 +319,7 @@ def test_diagnose_reports_malformed_editor_image_dimensions(tmp_path: Path, monk
             asset_id,
             context=RenderContext(Viewport(0, 0, 160, 120)),
             pygame_module=pygame,
-            image_master=object(),
+            editor_image_factory=object,
         )
     finally:
         pygame.quit()

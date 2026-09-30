@@ -30,6 +30,25 @@ See the historical `docs/PERFORMANCE_BASELINE.md` and `PERFORMANCE_AUDIT.md`
 (repo root) for earlier measurements. Those are snapshots at the time they were
 taken; treat specific numbers as dated.
 
+## Sprite scaling mode
+
+`PygameRenderer` accepts a `pixel_art_mode: bool = False` constructor argument.
+
+- `False` (default): uses `pygame.transform.smoothscale` — bilinear, suited to photography or large smooth artwork.
+- `True`: uses `pygame.transform.scale` — nearest-neighbour, suited to pixel art. Eliminates blur when 32×32 sprites are scaled to 2× or more.
+
+Pass it at launch-site creation, not per-frame. Example in a standalone launcher:
+
+```python
+renderer = PygameRenderer(
+    pygame, None,
+    screen_size=(1100, 700),
+    pixel_art_mode=True,  # nearest-neighbour globally for all sprites
+)
+```
+
+There is no per-sprite override; `pixel_art_mode` is a renderer-wide setting.
+
 ## Performance probes (MCP)
 
 `performance_probe` distinguishes bounded retry/log flood from an actual

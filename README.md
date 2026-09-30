@@ -45,21 +45,39 @@ the editor, export, and more. Older design and planning notes remain at the
 +------------------------------------------------------+
 ```
 
-The editor's semantic design vocabulary is available without GUI dependencies
-through `expra_engine.design`. The Tk-specific adapter remains under
-`expra_engine.ui`; shipped games must not depend on Tk. See
+The editor is a PySide6 Qt application; shared editor behavior and semantic
+design vocabulary remain toolkit-independent where practical. Shipped games
+must not depend on editor UI toolkits. See
 `docs/GAME_UI_FUTURE.md` for the future renderer-backed game UI boundary.
 
 ## Running The Editor
 
 ```bash
-pip install -e .
-expra-editor
+pip install -e .          # installs the editor dependencies, including PySide6
+expra-editor              # Qt (PySide6) editor -- the default
 # or
 python -m expra_engine
 ```
 
-The editor uses Tk through `expra_engine.ui`. It is not the game runtime.
+The editor uses PySide6 (Qt Widgets) as its only frontend. It is separate from
+the game runtime, and exported games never depend on Qt or editor modules.
+
+PySide6 is a required dependency of the editor install (`pip install`, the
+installer scripts and the Windows installer all pull it in); it is never a
+dependency of an exported game.
+
+**Linux/X11 prerequisite:** Qt's `xcb` platform plugin needs the system library
+`libxcb-cursor0`, which pip cannot install:
+
+```bash
+sudo apt install libxcb-cursor0        # Debian/Ubuntu
+sudo dnf install xcb-util-cursor       # Fedora
+sudo pacman -S xcb-util-cursor         # Arch
+```
+
+If it is missing, `expra-editor` stops before Qt starts and prints this
+instruction (Qt itself would otherwise abort with a core dump). Wayland,
+Windows and macOS need no extra system package.
 
 Game rendering is defined by the backend-neutral `Renderer` protocol in
 `expra_engine.runtime.rendering`. The current Pygame adapter uses an

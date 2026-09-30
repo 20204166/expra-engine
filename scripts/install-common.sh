@@ -64,6 +64,11 @@ install_wheel() {
         return 1
     }
 
+    if [[ "$(uname -s)" == "Linux" ]] && ! ldconfig -p 2>/dev/null | grep -q 'libxcb-cursor\.so\.0'; then
+        echo "NOTE: the Qt editor needs the system library libxcb-cursor0 on X11 (not found)." >&2
+        echo "      Debian/Ubuntu: sudo apt install libxcb-cursor0 | Fedora: sudo dnf install xcb-util-cursor | Arch: sudo pacman -S xcb-util-cursor" >&2
+    fi
+
     if [[ "$mode" == "user" ]]; then
         local launcher_dir="${EXPRA_ENGINE_BIN_DIR:-$HOME/.local/bin}"
         mkdir -p "$launcher_dir"

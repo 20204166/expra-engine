@@ -1,17 +1,21 @@
 # Stale Doc Audit
 
+> **Historical audit.** This file reflects the document state at the revision
+> below. The editor is now Qt-only; `docs/THREADING.md` has been rewritten for
+> `QtDeliveryQueue`, and root architecture notes are clearly marked historical.
+
 Freshness of the older documents at the `docs/` root, relative to the current
 source (commit `fa774e8`). Status: **accurate** / **partial** / **stale** /
 **historical**.
 
 | File | Status | Notes | Action |
 |---|---|---|---|
-| `ARCHITECTURE.md` | partial | Ownership matrix and threading model are accurate, but the "Future: Game Export *(not implemented)*" section is **stale** — export is fully implemented. | Superseded by `guide/ARCHITECTURE.md`. |
+| `ARCHITECTURE.md` | historical | Describes the retired Tk editor and contains old export status. | Historical banner added; current details are in `guide/ARCHITECTURE.md`. |
 | `PROJECTS.md` | partial | Mostly correct; still references the legacy `scenes/main.json` layout; the canonical format is now `.pb`. | Superseded by `guide/PROJECTS.md`. |
 | `SCRIPTING.md` | accurate | Matches current behaviour API. | Merged into `guide/BEHAVIOURS_AND_SCRIPTING.md`. |
 | `SCRIPTING_SOURCE_AUDIT.md` | historical | Records baseline at commit `783f051`. | Retain as history. |
 | `FILESYSTEM.md` | accurate | Matches current filesystem API. | Merged into `guide/RESOURCES_AND_ASSETS.md`. |
-| `THREADING.md` | accurate | Threading invariant holds; one diagram shows the older `after_idle` deliver path while the current path is `TkDeliveryQueue` (25 ms poll) — a minor discrepancy. | Retain; see `guide/ARCHITECTURE.md`. |
+| `THREADING.md` | historical | The earlier audit described Tk main-thread delivery. | Rewritten for the current Qt GUI-thread and `QtDeliveryQueue` contract. |
 | `DEVELOPMENT_MCP.md` | accurate | Detailed and current MCP description. | Merged (condensed) into `guide/MCP_AND_DEBUGGING.md`. |
 | `GAME_EXPORT_FUTURE.md` | partial | Filename says "FUTURE" but the export subsystem is implemented; the "deferred" section (macOS, single-file, general dep resolution) is still accurate. | Retain; see `guide/EXPORT.md`. |
 | `GAME_UI_FUTURE.md` | accurate | Correctly documents an unimplemented future runtime UI. | Retain; see `guide/UI.md`. |

@@ -1,6 +1,6 @@
 """expra_engine.export — game export pipeline.
 
-This package is entirely independent of tkinter/ttkbootstrap and the editor.
+This package is entirely independent of any GUI toolkit and the editor.
 It can be imported from CI, CLI, and production game runtime packaging tools.
 """
 

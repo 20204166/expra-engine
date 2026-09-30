@@ -36,14 +36,14 @@ __all__ = ("SpatialEditController",)
 
 _TransformTuple = tuple[float, float, float, float, float]
 
-# X11 Tk event.state bits used to detect modifier keys during a drag.
+# X11-style event.state bits (the canvas event contract) used to detect modifier keys during a drag.
 _SHIFT_BIT = 0x0001
 _CONTROL_BIT = 0x0004
 _ALT_BIT = 0x0008
 
 
 def event_extends_selection(event: Any) -> bool:
-    """Return True if Shift or Control is held on this Tk event."""
+    """Return True if Shift or Control is held on this canvas event."""
     state = int(getattr(event, "state", 0) or 0)
     return bool(state & _SHIFT_BIT) or bool(state & _CONTROL_BIT)
 
@@ -60,6 +60,17 @@ def _write_transform(entity: Any, values: _TransformTuple) -> None:
     if transform is None:
         return
     transform.x, transform.y, transform.rotation, transform.scale_x, transform.scale_y = values
+
+
+def _is_linked_entity(scene: Any, entity_id: str) -> bool:
+    """Return True for a materialized Scene Instance descendant (read-only here)."""
+    origin_resolver = getattr(scene, "entity_origin", None)
+    if origin_resolver is None:
+        return False
+    try:
+        return origin_resolver(entity_id).kind == "materialized"
+    except (KeyError, AttributeError):
+        return False
 
 
 class SpatialEditController:
@@ -128,7 +139,11 @@ class SpatialEditController:
         originals: dict[str, _TransformTuple] = {}
         for eid in selected:
             entity = scene.find_entity(eid)
-            transform = _read_transform(entity) if entity is not None else None
+            if entity is None:
+                continue
+            if _is_linked_entity(scene, eid):
+                continue
+            transform = _read_transform(entity)
             if transform is not None:
                 originals[eid] = transform
         if not originals:

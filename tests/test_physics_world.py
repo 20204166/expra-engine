@@ -67,7 +67,7 @@ def test_overlap_includes_exact_edge_contact_and_filters_layers():
 def test_raycast_returns_nearest_hit_with_stable_tie_order():
     scene = make_scene()
     first = add_box(scene, "first", 5.0, 0.0)
-    second = add_box(scene, "second", 5.0, 0.0)
+    add_box(scene, "second", 5.0, 0.0)
     world = PhysicsWorld2D(scene)
 
     result = world.raycast((0.0, 0.0), (1.0, 0.0), 10.0)
@@ -86,6 +86,21 @@ def test_disabled_and_removed_colliders_are_ignored():
     assert world.raycast((-3.0, 0.0), (1.0, 0.0), 10.0).entity_id == second.entity_id
     scene.remove_entity(second.entity_id)
     assert world.raycast((-3.0, 0.0), (1.0, 0.0), 10.0).hit is False
+
+
+def test_entity_order_for_removed_entities_is_pruned_after_queries():
+    scene = make_scene()
+    world = PhysicsWorld2D(scene)
+
+    for index in range(32):
+        entity = add_box(scene, f"temporary-{index}", float(index), 0.0)
+        world.overlap(entity.entity_id)
+        scene.remove_entity(entity.entity_id)
+
+    survivor = add_box(scene, "survivor", 0.0, 0.0)
+    world.overlap(survivor.entity_id)
+
+    assert set(world._entity_order) == {survivor.entity_id}
 
 
 def test_physics_queries_use_hierarchy_composed_world_positions() -> None:

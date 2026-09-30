@@ -42,30 +42,11 @@ _STYLES_COLOR_KEYS: frozenset[str] = frozenset(
 _STYLES_SPACING_KEYS: frozenset[str] = frozenset({"xs", "sm", "md", "lg"})
 
 # The renderer-neutral weight vocabulary.  Adapters may translate to backend
-# equivalents ("regular" → "normal" for Tk, 400 for CSS, etc.).
+# equivalents ("regular" → 400 for CSS, QFont.Normal for Qt, etc.).
 _KNOWN_WEIGHTS: frozenset[str] = frozenset({"regular", "bold", "italic", "bold italic"})
 
 
 class DesignTokenTests(unittest.TestCase):
-    def test_editor_font_adapter_uses_renderer_neutral_typography_tokens(self) -> None:
-        import expra_engine.ui.styles as styles
-
-        original_body = styles.TYPOGRAPHY_SCALE["body"]
-        original_title = styles.TYPOGRAPHY_SCALE["title"]
-        styles.TYPOGRAPHY_SCALE["body"] = {"size": 17, "weight": "regular"}
-        styles.TYPOGRAPHY_SCALE["title"] = {"size": 18, "weight": "bold italic"}
-        try:
-            body_font = styles._font_from_token("body")
-            title_font = styles._font_from_token("title")
-        finally:
-            styles.TYPOGRAPHY_SCALE["body"] = original_body
-            styles.TYPOGRAPHY_SCALE["title"] = original_title
-
-        self.assertEqual(body_font, ("Helvetica", 17))
-        self.assertEqual(title_font, ("Helvetica", 18, "bold", "italic"))
-        self.assertEqual(styles._font_from_token("title"), ("Helvetica", 18, "bold"))
-        self.assertEqual(styles._font_from_token("mono", family="Courier"), ("Courier", 10))
-
     def test_default_accent_adapter_reads_semantic_color_tokens(self) -> None:
         import expra_engine.ui.styles as styles
 
@@ -102,7 +83,7 @@ class DesignTokenTests(unittest.TestCase):
 class TestSemanticColors(unittest.TestCase):
     """Every SEMANTIC_COLORS value must be a valid #RRGGBB hex literal.
 
-    Tk silently ignores or mis-renders shortened (#RGB), CSS-style (rgb(…)),
+    GUI toolkits silently ignore or mis-render shortened (#RGB), CSS-style (rgb(…)),
     or platform-specific color names on non-native backends.
     """
 

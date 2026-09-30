@@ -44,9 +44,9 @@ class PygameIdentity(BaseModel):
     error: str | None = None
 
 
-class TkIdentity(BaseModel):
+class QtIdentity(BaseModel):
     available: bool
-    tcl_tk_version: str | None = None
+    pyside6_version: str | None = None
     display: str | None = None
     wayland_display: str | None = None
     error: str | None = None
@@ -83,7 +83,7 @@ class WorkspaceDoctorResult(BaseModel):
     expra_python: PythonIdentity
     expra: ExpraIdentity
     pygame: PygameIdentity
-    tk: TkIdentity
+    qt: QtIdentity
     tools: list[ToolStatus]
     default_project: ProjectStatus | None = None
     references: list[ReferenceStatus] = Field(default_factory=list)

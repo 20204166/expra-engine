@@ -23,6 +23,8 @@ EXCLUDED_DEV_PACKAGES: frozenset[str] = frozenset(
         "expra_engine.ui",
         "tkinter",
         "ttkbootstrap",
+        "PySide6",
+        "shiboken6",
     }
 )
 

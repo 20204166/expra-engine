@@ -141,7 +141,7 @@ def component_from_dict(data: dict[str, Any]) -> Component:
         _register_builtin_components()
     component_type = data.get("type", "")
     if component_type == "script":
-        from expra_engine.runtime.script_component import (
+        from expra_engine.core.script_component import (
             ScriptComponent,
             UnresolvedScriptComponent,
         )
@@ -208,8 +208,8 @@ def _register_world_components() -> None:
         )
     ):
         return
+    from expra_engine.core.level_anchor import LevelAnchorComponent
     from expra_engine.runtime.level_anchor import (
-        LevelAnchorComponent,
         StreamingAnchorComponent,
         WorldPersistentActorComponent,
     )

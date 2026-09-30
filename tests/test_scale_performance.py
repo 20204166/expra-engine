@@ -36,9 +36,8 @@ from expra_engine.core.scene import (
 )
 from expra_engine.editor.commands import Command, CommandStack
 from expra_engine.ui.spatial_edit import SpatialEditController
-from tests.support.tk_display import display_available
+from tests.support.qt_app import ensure_qt_app, pump_qt
 
-DISPLAY_AVAILABLE = display_available()
 
 
 def _build_hierarchy(n: int, group_size: int = 5) -> Scene:
@@ -246,25 +245,24 @@ class InstanceScaleTests(unittest.TestCase):
         self.assertLess(timings[400] / max(timings[100], 1e-6), 12.0, timings)
 
 
-@unittest.skipUnless(DISPLAY_AVAILABLE, "no display for real Tk editor tests")
 class HierarchyPanelScaleTests(unittest.TestCase):
     def test_render_scales_linearly_and_does_not_leak_stale_ids_across_scenes(self) -> None:
-        import tkinter as tk
+        from expra_engine.editor.qt.hierarchy import HierarchyPanel
 
-        from expra_engine.ui.hierarchy import HierarchyPanel
-
-        root = tk.Tk()
+        ensure_qt_app()
+        panel = HierarchyPanel()
+        panel.resize(300, 400)
+        panel.show()
         try:
-            panel = HierarchyPanel(root)
             timings: dict[int, float] = {}
             for n in (100, 500, 1000):
                 scene = _build_hierarchy(n)
                 panel.render(scene)
-                root.update()
+                pump_qt(1)
 
                 def re_render(s: Scene = scene) -> None:
                     panel.render(s)  # re-render (retained-widget diff path)
-                    root.update()
+                    pump_qt(1)
 
                 timings[n] = _best_of(re_render, repeats=3)
                 self.assertEqual(len(panel._entity_ids), n)
@@ -282,25 +280,24 @@ class HierarchyPanelScaleTests(unittest.TestCase):
                 panel.render(scene_b)
             self.assertEqual(len(panel._entity_ids), 50)
         finally:
-            root.destroy()
+            panel.close()
 
 
-@unittest.skipUnless(DISPLAY_AVAILABLE, "no display for real Tk editor tests")
 class RapidSelectionStressTests(unittest.TestCase):
     """Spec section 41 PERFORMANCE: rapid selection over a large hierarchy must
     stay bounded and leave selection bookkeeping exact."""
 
     def test_rapid_selection_over_large_scene_stays_bounded(self) -> None:
-        import tkinter as tk
+        from expra_engine.editor.qt.hierarchy import HierarchyPanel
 
-        from expra_engine.ui.hierarchy import HierarchyPanel
-
-        root = tk.Tk()
+        ensure_qt_app()
+        panel = HierarchyPanel()
+        panel.resize(300, 400)
+        panel.show()
         try:
-            panel = HierarchyPanel(root)
             scene = _build_hierarchy(1000)
             panel.render(scene)
-            root.update()
+            pump_qt(1)
             ids = [entity.entity_id for entity in scene.entities]
             self.assertEqual(len(ids), 1000)
 
@@ -310,13 +307,13 @@ class RapidSelectionStressTests(unittest.TestCase):
             for i in range(0, len(ids), 50):  # 20 multi-selections of 50
                 panel.select_many(tuple(ids[i : i + 50]))
             duration = time.perf_counter() - start
-            root.update()
+            pump_qt(1)
 
             # The last select_many was ids[950:1000].
             self.assertEqual(len(panel._selected_ids), 50)
             self.assertLess(duration, 3.0, f"rapid selection timings: {duration:.3f}s")
         finally:
-            root.destroy()
+            panel.close()
 
 
 class CommandStackStressTests(unittest.TestCase):

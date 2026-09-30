@@ -9,6 +9,12 @@ from typing import Any
 
 from expra_engine.core.component import TransformComponent
 from expra_engine.runtime.input import PhysicalInput
+from expra_engine.runtime.pygame_input import (
+    gamepad_button_name,
+    keyboard_control_name,
+    mouse_button_name,
+    translate_axis_event,
+)
 from expra_engine.runtime.rendering import (
     OrthographicCamera,
     RenderContext,
@@ -90,6 +96,11 @@ class PygameRuntime:
             init = getattr(self.pygame, "init", None)
             if init is not None:
                 init()
+            joystick = getattr(self.pygame, "joystick", None)
+            if joystick is not None:
+                joystick_init = getattr(joystick, "init", None)
+                if callable(joystick_init):
+                    joystick_init()
             self.surface = self._surface_factory(self.size)
             self._context = RenderContext(Viewport(0, 0, *self.size), self.camera)
             if self.ui_root is not None:
@@ -144,7 +155,9 @@ class PygameRuntime:
 
     def screen_to_world(self, point: tuple[float, float]) -> tuple[float, float]:
         """Convert runtime pixel coordinates through the active camera."""
-        viewport = self._context.viewport if self._context is not None else Viewport(0, 0, *self.size)
+        viewport = (
+            self._context.viewport if self._context is not None else Viewport(0, 0, *self.size)
+        )
         return self.camera.unproject(point, viewport)
 
     def _draw_world_transition_overlay(self) -> None:
@@ -171,7 +184,10 @@ class PygameRuntime:
             fingerprint = json.dumps(settings, sort_keys=True, separators=(",", ":"))
         except (TypeError, ValueError):
             fingerprint = repr(settings)
-        if scene.scene_id != self._camera_scene_id or fingerprint != self._camera_settings_fingerprint:
+        if (
+            scene.scene_id != self._camera_scene_id
+            or fingerprint != self._camera_settings_fingerprint
+        ):
             self._camera_scene_id = scene.scene_id
             self._camera_settings_fingerprint = fingerprint
             if isinstance(settings, dict):
@@ -179,7 +195,9 @@ class PygameRuntime:
                     settings.apply_to(self.camera)
                 else:
                     self.camera.apply_dict(settings)
-                self.camera_target_id = getattr(settings, "target_entity_id", None) or self.camera_target_id
+                self.camera_target_id = (
+                    getattr(settings, "target_entity_id", None) or self.camera_target_id
+                )
         world_system = getattr(self.engine, "world_streaming_system", None)
         context = None
         if world_system is not None:
@@ -239,46 +257,72 @@ class PygameRuntime:
                     self.ui_root.layout(UIViewport(width, height))
             elif event_type == self.pygame.KEYDOWN:
                 self._keys.add(event.key)
-                handled = self.ui_root is not None and self.ui_root.dispatch(
-                    UIEvent("key_down", key=self._key_name(event.key))
-                ) is not None
+                handled = (
+                    self.ui_root is not None
+                    and self.ui_root.dispatch(
+                        UIEvent("key_down", key=keyboard_control_name(self.pygame, event.key))
+                    )
+                    is not None
+                )
                 if not handled:
                     self._signal_input(
-                        "press", PhysicalInput("keyboard", self._key_name(event.key))
+                        "press",
+                        PhysicalInput("keyboard", keyboard_control_name(self.pygame, event.key)),
                     )
             elif event_type == self.pygame.KEYUP:
                 self._keys.discard(event.key)
-                handled = self.ui_root is not None and self.ui_root.dispatch(
-                    UIEvent("key_up", key=self._key_name(event.key))
-                ) is not None
+                handled = (
+                    self.ui_root is not None
+                    and self.ui_root.dispatch(
+                        UIEvent("key_up", key=keyboard_control_name(self.pygame, event.key))
+                    )
+                    is not None
+                )
                 if not handled:
                     self._signal_input(
-                        "release", PhysicalInput("keyboard", self._key_name(event.key))
+                        "release",
+                        PhysicalInput("keyboard", keyboard_control_name(self.pygame, event.key)),
                     )
             elif event_type == getattr(self.pygame, "MOUSEMOTION", object()):
                 if self.ui_root is not None:
                     self.ui_root.dispatch(UIEvent("pointer_move", position=tuple(event.pos)))
             elif event_type == getattr(self.pygame, "MOUSEBUTTONDOWN", object()):
-                handled = self.ui_root is not None and self.ui_root.dispatch(
-                    UIEvent("pointer_down", position=tuple(event.pos), button=str(event.button))
-                ) is not None
+                handled = (
+                    self.ui_root is not None
+                    and self.ui_root.dispatch(
+                        UIEvent("pointer_down", position=tuple(event.pos), button=str(event.button))
+                    )
+                    is not None
+                )
                 if not handled:
                     self._signal_input(
-                        "press", PhysicalInput("mouse", f"button-{event.button}")
+                        "press", PhysicalInput("mouse", mouse_button_name(event.button))
                     )
             elif event_type == getattr(self.pygame, "MOUSEBUTTONUP", object()):
-                handled = self.ui_root is not None and self.ui_root.dispatch(
-                    UIEvent("pointer_up", position=tuple(event.pos), button=str(event.button))
-                ) is not None
+                handled = (
+                    self.ui_root is not None
+                    and self.ui_root.dispatch(
+                        UIEvent("pointer_up", position=tuple(event.pos), button=str(event.button))
+                    )
+                    is not None
+                )
                 if not handled:
                     self._signal_input(
-                        "release", PhysicalInput("mouse", f"button-{event.button}")
+                        "release", PhysicalInput("mouse", mouse_button_name(event.button))
                     )
-
-    def _key_name(self, key: Any) -> str:
-        key_api = getattr(self.pygame, "key", None)
-        name = getattr(key_api, "name", None)
-        return str(name(key)) if callable(name) else str(key)
+            elif event_type == getattr(self.pygame, "JOYBUTTONDOWN", object()):
+                self._signal_input(
+                    "press", PhysicalInput("gamepad", gamepad_button_name(event.button))
+                )
+            elif event_type == getattr(self.pygame, "JOYBUTTONUP", object()):
+                self._signal_input(
+                    "release", PhysicalInput("gamepad", gamepad_button_name(event.button))
+                )
+            elif event_type == getattr(self.pygame, "JOYAXISMOTION", object()):
+                translated = translate_axis_event(self.pygame, event)
+                if translated is not None:
+                    physical, value = translated
+                    self._signal_axis(physical, value)
 
     def _signal_input(self, phase: str, physical: PhysicalInput) -> None:
         """Resolve a translated physical input through the engine's input map."""
@@ -289,3 +333,10 @@ class PygameRuntime:
         transitions = getattr(input_map, phase)(physical)
         for action_event in transitions:
             signal(action_event)
+
+    def _signal_axis(self, physical: PhysicalInput, value: float) -> None:
+        """Update an analog action value from a translated physical axis."""
+        input_map = getattr(self.engine, "input_map", None)
+        set_axis = getattr(input_map, "set_axis", None)
+        if set_axis is not None:
+            set_axis(physical, value)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import unittest
 
 from expra_engine.core.component import TransformComponent
@@ -17,6 +18,15 @@ class DocumentKindTests(unittest.TestCase):
 
 
 class LevelTests(unittest.TestCase):
+    def test_level_metadata_rejects_malformed_or_non_finite_world_bounds(self) -> None:
+        for bounds in ((0.0, 0.0, 1.0), (0.0, 0.0, 1.0, math.inf)):
+            with self.subTest(bounds=bounds), self.assertRaises(ValueError):
+                LevelMetadata(world_bounds=bounds)
+
+    def test_level_metadata_from_dict_uses_the_same_bounds_validation(self) -> None:
+        with self.assertRaisesRegex(ValueError, "four finite numbers"):
+            LevelMetadata.from_dict({"world_bounds": 42})
+
     def test_level_is_a_scene_with_level_kind(self) -> None:
         level = Level("Main")
         self.assertIsInstance(level, Scene)

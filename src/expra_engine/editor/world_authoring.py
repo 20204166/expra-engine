@@ -5,7 +5,6 @@ from __future__ import annotations
 import math
 from dataclasses import replace
 from pathlib import Path
-from tkinter import filedialog, messagebox, simpledialog
 from typing import Any
 
 from expra_engine.core.project import ProjectError
@@ -256,7 +255,7 @@ class WorldAuthoringWorkflow:
         )
         workflow = getattr(window, "_project_workflow", None)
         if workflow is not None:
-            window._root.title(workflow.window_title())
+            window._set_window_title(workflow.window_title())
 
     def _active_world(self) -> World:
         world = getattr(getattr(self.window, "_active_document", None), "document", None)
@@ -276,7 +275,16 @@ def _active_world_path(window: Any, project: Any) -> str | None:
 
 
 class WorldEditorActionsMixin:
-    """Tk dialogs and drop/selection handlers for World authoring in EditorWindow."""
+    """Dialogs and drop/selection handlers for World authoring in EditorWindow."""
+
+    # Provided by the concrete editor window.
+    _actions: Any
+    _active_document: Any
+    _dialogs: Any
+    _engine: Any
+    _observer: Any
+    _project_workflow: Any
+    _viewport: Any
 
     def _editing_world_document(self) -> bool:
         run_state = getattr(self._engine, "run_state", None)
@@ -314,14 +322,16 @@ class WorldEditorActionsMixin:
             try:
                 relative = resolved_project_relative_path(project.path, entry.path).as_posix()
                 canvas = self._viewport._canvas
-                canvas_x = root_x - canvas.winfo_rootx()
-                canvas_y = root_y - canvas.winfo_rooty()
-                if not (0 <= canvas_x <= canvas.winfo_width() and 0 <= canvas_y <= canvas.winfo_height()):
+                origin_x, origin_y = canvas.global_origin()
+                canvas_width, canvas_height = canvas.viewport_size()
+                canvas_x = root_x - origin_x
+                canvas_y = root_y - origin_y
+                if not (0 <= canvas_x <= canvas_width and 0 <= canvas_y <= canvas_height):
                     return
                 origin = self._viewport._camera.unproject((canvas_x, canvas_y))
                 self._project_workflow.add_level_to_world(relative, origin=origin)
             except (OSError, ProjectError, ValueError) as error:
-                messagebox.showerror("Add Level to World", str(error), parent=self._root)
+                self._dialogs.show_error("Add Level to World", str(error))
             return
         drop_asset_on_viewport(self, entry, root_x, root_y)
 
@@ -329,34 +339,33 @@ class WorldEditorActionsMixin:
         project = self._engine.project
         if project is None or not isinstance(self._active_document.document, World):
             return
-        selected = filedialog.askopenfilename(
-            title="Add Level to World",
+        result = self._dialogs.ask_open_file(
+            "Add Level to World",
             initialdir=str(project.levels_dir),
             filetypes=[("Level documents", "*.level.pb")],
         )
+        selected = result if isinstance(result, str) else ""
         if not selected:
             return
         try:
             relative = resolved_project_relative_path(project.path, Path(selected)).as_posix()
             self._project_workflow.add_level_to_world(relative)
         except (OSError, ProjectError, ValueError) as error:
-            messagebox.showerror("Add Level to World", str(error), parent=self._root)
+            self._dialogs.show_error("Add Level to World", str(error))
 
     def _act_create_world_connection(self) -> None:
         project = self._engine.project
         world = self._active_document.document
         if project is None or not isinstance(world, World) or len(world.levels) < 2:
-            messagebox.showwarning(
+            self._dialogs.show_warning(
                 "Create Connection",
                 "Add at least two Level references before creating a connection.",
-                parent=self._root,
             )
             return
         level_ids = tuple(item.instance_id for item in world.levels)
-        source_level_id = simpledialog.askstring(
+        source_level_id = self._dialogs.ask_string(
             "Create Connection",
             f"Source Level ID ({', '.join(level_ids)}):",
-            parent=self._root,
         )
         if source_level_id not in level_ids:
             return
@@ -364,7 +373,7 @@ class WorldEditorActionsMixin:
         try:
             source_level = project.read_document(source_descriptor.resource_path, observer=self._observer)
         except (OSError, ProjectError, ValueError) as error:
-            messagebox.showerror("Create Connection", str(error), parent=self._root)
+            self._dialogs.show_error("Create Connection", str(error))
             return
         if not isinstance(source_level, Level):
             return
@@ -375,15 +384,13 @@ class WorldEditorActionsMixin:
                 if (marker := entity.get_component(LevelAnchorComponent)) is not None
             )
         )
-        source_anchor_id = simpledialog.askstring(
+        source_anchor_id = self._dialogs.ask_string(
             "Create Connection",
             f"Source exit anchor ({', '.join(source_anchors)}):",
-            parent=self._root,
         )
-        destination_level_id = simpledialog.askstring(
+        destination_level_id = self._dialogs.ask_string(
             "Create Connection",
             f"Destination Level ID ({', '.join(level_ids)}):",
-            parent=self._root,
         )
         if destination_level_id not in level_ids:
             return
@@ -395,7 +402,7 @@ class WorldEditorActionsMixin:
                 destination_descriptor.resource_path, observer=self._observer
             )
         except (OSError, ProjectError, ValueError) as error:
-            messagebox.showerror("Create Connection", str(error), parent=self._root)
+            self._dialogs.show_error("Create Connection", str(error))
             return
         if not isinstance(destination_level, Level):
             return
@@ -406,18 +413,16 @@ class WorldEditorActionsMixin:
                 if (marker := entity.get_component(LevelAnchorComponent)) is not None
             )
         )
-        destination_anchor_id = simpledialog.askstring(
+        destination_anchor_id = self._dialogs.ask_string(
             "Create Connection",
             f"Destination entrance anchor ({', '.join(destination_anchors)}):",
-            parent=self._root,
         )
         if not source_anchor_id or not destination_anchor_id:
             return
-        transition_name = simpledialog.askstring(
+        transition_name = self._dialogs.ask_string(
             "Create Connection",
             "Transition mode (seamless, fade, instant, loading):",
-            initialvalue=TransitionMode.SEAMLESS.value,
-            parent=self._root,
+            initial_value=TransitionMode.SEAMLESS.value,
         )
         if not transition_name:
             return
@@ -445,17 +450,16 @@ class WorldEditorActionsMixin:
                 and destination_marker is not None
                 and source_marker[1].kind is LevelAnchorKind.BOTH
                 and destination_marker[1].kind is LevelAnchorKind.BOTH
-                and messagebox.askyesno(
+                and self._dialogs.ask_yes_no(
                     "Create Reverse Connection?",
                     "Create a separate reverse connection?",
-                    parent=self._root,
                 )
             )
             self._project_workflow.add_world_connection(
                 connection, create_reverse=create_reverse
             )
         except (OSError, ProjectError, TypeError, ValueError) as error:
-            messagebox.showerror("Create Connection", str(error), parent=self._root)
+            self._dialogs.show_error("Create Connection", str(error))
 
     def _open_world_level(self, instance_id: str) -> None:
         world = self._active_document.document
@@ -473,13 +477,13 @@ class WorldEditorActionsMixin:
         try:
             self._project_workflow.update_level_placement(instance_id, origin)
         except (ProjectError, TypeError, ValueError) as error:
-            messagebox.showerror("World Placement", str(error), parent=self._root)
+            self._dialogs.show_error("World Placement", str(error))
 
     def _on_world_set_initial_level(self, instance_id: str) -> None:
         try:
             self._project_workflow.set_initial_level(instance_id)
         except (ProjectError, TypeError, ValueError) as error:
-            messagebox.showerror("Set Initial Level", str(error), parent=self._root)
+            self._dialogs.show_error("Set Initial Level", str(error))
 
     def _on_world_remove_item(self, selection: str) -> None:
         try:
@@ -490,4 +494,4 @@ class WorldEditorActionsMixin:
                     selection.removeprefix("connection:")
                 )
         except (ProjectError, TypeError, ValueError) as error:
-            messagebox.showerror("Remove World Item", str(error), parent=self._root)
+            self._dialogs.show_error("Remove World Item", str(error))

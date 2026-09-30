@@ -8,7 +8,6 @@ presentation safety.
 from __future__ import annotations
 
 import logging
-import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -24,7 +23,6 @@ class EditorContext:
     actions: Any
     ui: Any
     app: Any | None = None
-    root: Any | None = None
     project: Any | None = None
 
 
@@ -290,66 +288,40 @@ class ShortcutRegistry:
         action_id = self._shortcuts.get(self.normalize(sequence))
         return action_id is not None and actions.dispatch(action_id)
 
-    def bind(self, root: Any, actions: Any) -> None:
-        for sequence in self._shortcuts:
-            root.bind_all(
-                sequence,
-                lambda _event, key=sequence: self.dispatch(key, actions),
-            )
-
     @staticmethod
     def normalize(sequence: str) -> str:
         value = sequence.strip()
         if not value:
             raise ValueError("Shortcut sequence cannot be empty")
-        event_sequence = re.fullmatch(r"(?:<[^<>]*>)(?:\s*<[^<>]*>)*", value)
-        if event_sequence is not None:
-            aliases = {"ctrl": "Control", "control": "Control", "alt": "Alt"}
+        if value.startswith("<") and value.endswith(">"):
+            raise ValueError("Shortcuts must use Qt QKeySequence syntax")
 
-            def normalize_event(event: str) -> str:
-                parts = [part for part in re.split(r"[-\s]+", event[1:-1].strip()) if part]
-                parts = [aliases.get(part.lower(), part) for part in parts]
-                type_index = next(
-                    (
-                        index
-                        for index, part in enumerate(parts)
-                        if part.casefold() in {"key", "keypress"}
-                    ),
-                    None,
-                )
-                if type_index is not None:
-                    if type_index == len(parts) - 1:
-                        parts[type_index] = "KeyPress"
-                    else:
-                        parts.pop(type_index)
-                return "<" + "-".join(parts) + ">"
+        def normalize_stroke(stroke: str) -> str:
+            stroke = stroke.strip()
+            if not stroke:
+                raise ValueError("Shortcut sequence contains an empty stroke")
+            if len(stroke) == 1:
+                return stroke.upper() if stroke.isalpha() else stroke
 
-            return " ".join(normalize_event(event) for event in re.findall(r"<[^<>]*>", value))
-        if len(value) == 1 and value.isascii() and value.isalnum():
-            value = f"<{value}>"
-        return value
+            if stroke.endswith("++"):
+                parts, key = stroke[:-2].split("+"), "+"
+            else:
+                parts = stroke.split("+")
+                key = parts.pop()
+            if not key or any(not part.strip() for part in parts):
+                raise ValueError(f"Invalid Qt shortcut sequence: {stroke!r}")
 
+            aliases = {"ctrl": "Ctrl", "alt": "Alt", "shift": "Shift", "meta": "Meta"}
+            modifiers: list[str] = []
+            for part in parts:
+                modifier = aliases.get(part.strip().casefold())
+                if modifier is None:
+                    raise ValueError(f"Invalid Qt shortcut modifier: {part!r}")
+                if modifier not in modifiers:
+                    modifiers.append(modifier)
+            modifiers.sort(key=("Ctrl", "Alt", "Shift", "Meta").index)
+            key = key.upper() if len(key) == 1 and key.isalpha() else key[0].upper() + key[1:]
+            return "+".join((*modifiers, key))
 
-class MenuFactory:
-    """Build menu commands from metadata and coordinator commands."""
-
-    def __init__(self, menus: dict[str, Any]) -> None:
-        self._menus = menus
-
-    def build(
-        self,
-        contributions: tuple[MenuContribution, ...],
-        actions: Any,
-    ) -> None:
-        ordered = sorted(contributions, key=lambda item: (item.parent, item.group, item.order))
-        for contribution in ordered:
-            menu = self._menus.get(contribution.parent)
-            if menu is None:
-                raise KeyError(f"Unknown menu: {contribution.parent}")
-            if contribution.separator_before:
-                menu.add_separator()
-            menu.add_command(
-                label=contribution.label,
-                command=actions.command(contribution.action_id),
-                accelerator=contribution.accelerator,
-            )
+        strokes = [normalize_stroke(stroke) for stroke in value.split(",")]
+        return ", ".join(strokes)

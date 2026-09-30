@@ -60,6 +60,10 @@ _BLOCKED_PACKAGES: frozenset[str] = frozenset(
     {
         "tkinter",
         "ttkbootstrap",
+        "PySide6",
+        "PySide6-Essentials",
+        "PySide6-Addons",
+        "shiboken6",
         "expra-engine-editor",
     }
 )

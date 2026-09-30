@@ -1,5 +1,5 @@
 """Protocol-level tests for editor_session, driven through the official mcp
-Client against a REAL Tk EditorWindow worker process on this machine's real
+Client against a REAL Qt EditorWindow worker process on this machine's real
 DISPLAY. Each test that opens a session is responsible for closing it --
 these tests spin up genuine editor processes, so they're heavier than the
 rest of the suite; kept to a reasonable count with related assertions
@@ -160,7 +160,7 @@ async def test_full_spec_acceptance_workflow(server) -> None:
                 "editor_session", {"action": "inspect", "session_id": session_id, "entity": "Operative"}
             )
             moved_y = moved.structured_content["data"]["world_pose"]["y"]
-            assert moved_y != baseline_y  # real Behaviour-driven movement, via genuine Tk key events
+            assert moved_y != baseline_y  # real Behaviour-driven movement, via genuine Qt key events
 
             snapshot = await client.call_tool(
                 "editor_session", {"action": "capture_viewport", "session_id": session_id}
@@ -203,7 +203,7 @@ async def test_send_key_requires_key(server) -> None:
 async def test_space_pong_paddles_use_canonical_pixel_path_across_play_stop_cycles(server) -> None:
     """Space Pong's rounded_rectangle paddles previously fell back to Canvas
     (frame_textures_available rejected the primitive). This proves, through
-    the real MCP protocol against a real Tk editor, that the pixel path is
+    the real MCP protocol against a real Qt editor, that the pixel path is
     now genuinely active in Edit AND stays active across repeated Play/Stop
     cycles -- not just that a static check passes once.
     """
@@ -271,7 +271,7 @@ async def test_frame_scene_frames_the_real_viewport(server) -> None:
 
 async def test_observability_snapshot_reflects_a_real_blacksite_play_session(server) -> None:
     """Dogfoods the whole observability wiring pass through the real MCP
-    protocol against a real Tk EditorWindow: open Blacksite -> Play ->
+    protocol against a real Qt EditorWindow: open Blacksite -> Play ->
     genuine key-driven movement (input -> behaviour -> physics.overlap) ->
     Pause -> Resume -> Stop -> one shared snapshot should show app/ui/
     runtime/render/editor surfaces together, not fragments from separate
