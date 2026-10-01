@@ -120,6 +120,9 @@ def verify_export(build_dir: Path) -> None:
     except (json.JSONDecodeError, OSError) as e:
         raise ExportVerificationError(f"Cannot parse build_manifest.json: {e}") from e
 
+    if not isinstance(build_manifest, dict):
+        raise ExportVerificationError("build_manifest.json must contain an object")
+
     missing = _REQUIRED_MANIFEST_KEYS - build_manifest.keys()
     if missing:
         raise ExportVerificationError(
@@ -134,6 +137,9 @@ def verify_export(build_dir: Path) -> None:
         asset_data = json.loads(asset_manifest_path.read_text())
     except (json.JSONDecodeError, OSError) as e:
         raise ExportVerificationError(f"Cannot parse asset_manifest.json: {e}") from e
+
+    if not isinstance(asset_data, dict):
+        raise ExportVerificationError("asset_manifest.json must contain an object")
 
     if "entries" not in asset_data:
         raise ExportVerificationError("asset_manifest.json missing 'entries' key")

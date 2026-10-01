@@ -5,33 +5,23 @@ All tests run on the Qt offscreen platform to avoid needing a display.
 
 from __future__ import annotations
 
-import os
 import threading
 import time
 
 import pytest
 
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+from tests.support.qt_app import ensure_qt_app, pump_qt
 
 
 @pytest.fixture(scope="module")
 def qt_app():
     """Module-scoped QApplication — created once, reused across tests."""
-    import sys
-
-    from PySide6.QtWidgets import QApplication
-
-    app = QApplication.instance() or QApplication(sys.argv)
-    yield app
+    yield ensure_qt_app()
 
 
-def _drain_events(app, ms: int = 100) -> None:
+def _drain_events(_app, ms: int = 100) -> None:
     """Process pending Qt events for up to ``ms`` milliseconds."""
-    from PySide6.QtCore import QEventLoop
-
-    deadline = time.monotonic() + ms / 1000.0
-    while time.monotonic() < deadline:
-        app.processEvents(QEventLoop.ProcessEventsFlag.AllEvents, 10)
+    pump_qt(ms)
 
 
 class TestQtDeliveryQueueBasic:

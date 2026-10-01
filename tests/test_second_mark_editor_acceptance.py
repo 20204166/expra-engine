@@ -7,8 +7,8 @@ viewport item structure, asset browser), an edit + save, Play/Stop, and Run Proj
 
 from __future__ import annotations
 
+import os
 import shutil
-import time
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -20,9 +20,15 @@ from expra_engine.core.engine import Engine, EngineRunState
 from expra_engine.core.project import Project
 from expra_engine.editor.assets import AssetEntry
 from expra_engine.filesystem import ResourceId
+from tests.support.qt_app import wait_until
 from tests.support.qt_editor import QtEditorHarness
 
-SECOND_MARK = Path("/home/btn17/Downloads/the-second-mark")
+SECOND_MARK = Path(
+    os.environ.get(
+        "EXPRA_SECOND_MARK_PROJECT",
+        str(Path(__file__).parents[2] / "the-second-mark"),
+    )
+).expanduser()
 
 pytestmark = [
     pytest.mark.skipif(
@@ -125,11 +131,18 @@ def _session(frontend: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
 
         _open_document(frontend, window, project, "levels/chapter_one.level.pb")
         window._act_play()
-        for _ in range(5):
-            frontend.pump(window)
+        wait_until(
+            lambda: frontend.pump(window),
+            lambda: window._engine.run_state is EngineRunState.PLAY,
+            timeout=2.0,
+        )
         result["play_state"] = window._engine.run_state.value
         window._act_stop()
-        frontend.pump(window)
+        wait_until(
+            lambda: frontend.pump(window),
+            lambda: window._engine.run_state is EngineRunState.EDIT,
+            timeout=2.0,
+        )
         result["stop_state"] = window._engine.run_state.value
         result["edit_x_after_stop"] = (
             window._engine.edit_scene.find_entity(player_id).get_component(TransformComponent).x
@@ -138,12 +151,11 @@ def _session(frontend: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
         window._project_workflow.run_project()
         controller = window._project_workflow._project_process_controller
         result["run_project_started"] = controller.process is not None
-        end = time.monotonic() + 2.0
-        while time.monotonic() < end and controller.process is not None:
-            frontend.pump(window)
-            if controller.process.poll() is not None:
-                break
-            time.sleep(0.05)
+        wait_until(
+            lambda: frontend.pump(window),
+            lambda: controller.process is None or controller.process.poll() is not None,
+            timeout=2.0,
+        )
         window._act_stop()
         frontend.pump(window)
         result["run_project_stopped"] = controller.process is None
@@ -162,9 +174,11 @@ def test_second_mark_editor_session(tmp_path, monkeypatch) -> None:
     assert result["world_rows"][0] == "The City of Vey"
     assert result["dirty_after_edit"] is True
     assert result["dirty_after_save"] is False
-    saved = Project.load(tmp_path / "qt-project").load_document("levels/chapter_one.level.pb")
+    saved = Project.load(tmp_path / "qt-project").load_scene("levels/chapter_one.level.pb")
     saved_courier = next(e for e in saved.entities if "Courier" in e.name)
-    assert saved_courier.get_component(TransformComponent).x == result["edited_x"]
+    saved_transform = saved_courier.get_component(TransformComponent)
+    assert saved_transform is not None
+    assert saved_transform.x == result["edited_x"]
     assert result["play_state"] == EngineRunState.PLAY.value
     assert result["stop_state"] == EngineRunState.EDIT.value
     assert result["run_project_started"] is True

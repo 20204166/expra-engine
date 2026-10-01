@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import shutil
 import threading
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 
+from expra_engine.core.component import registered_component_types
 from expra_engine.core.engine import Engine, EngineRunState
 from expra_engine.core.project import Project
 from expra_engine.core.scene.document_codec import decode_protobuf
 from expra_engine.export.exporter import GameExporter
+from expra_engine.export.packager import TargetPackager
 from expra_engine.export.plan import ExportPlan, ExportTarget, PythonArch, RuntimeProfile
 from expra_engine.runtime.collider import ColliderComponent
 from expra_engine.runtime.render_extractor import extract_render_frame
@@ -27,9 +31,7 @@ def _project_engine() -> tuple[Project, Engine]:
 def test_space_pong_project_uses_generic_scene_components_and_project_scripts() -> None:
     project = Project.load(PROJECT_DIR)
     scene = project.load_scene()
-    registered = {name for name, _ in __import__(
-        "expra_engine.core.component", fromlist=["registered_component_types"]
-    ).registered_component_types()}
+    registered = {name for name, _ in registered_component_types()}
 
     assert project.name == "Space Pong"
     assert project.start_scene == "levels/main.level.pb"
@@ -70,7 +72,7 @@ def test_space_pong_opens_resolves_scripts_runs_and_stops_without_mutating_saved
 def test_space_pong_runtime_covers_score_win_pause_restart_and_hit_feedback() -> None:
     _, engine = _project_engine()
     engine.play()
-    game = engine.behaviour_system.instances[0]
+    game = cast(Any, engine.behaviour_system.instances[0])
 
     game.score_point("left")
     game.score_point("left")
@@ -88,7 +90,7 @@ def test_space_pong_runtime_covers_score_win_pause_restart_and_hit_feedback() ->
 
     assert game.restart() is True
     assert engine.run_state is EngineRunState.PLAY
-    restarted = engine.behaviour_system.instances[0]
+    restarted = cast(Any, engine.behaviour_system.instances[0])
     assert restarted.score == (0, 0)
     assert restarted.status == "playing"
     engine.stop()
@@ -97,7 +99,7 @@ def test_space_pong_runtime_covers_score_win_pause_restart_and_hit_feedback() ->
 def test_space_pong_uses_playable_default_ball_speed() -> None:
     _, engine = _project_engine()
     engine.play()
-    game = engine.behaviour_system.instances[0]
+    game = cast(Any, engine.behaviour_system.instances[0])
 
     assert game.ball_velocity[0] == 18.0
     engine.stop()
@@ -106,7 +108,7 @@ def test_space_pong_uses_playable_default_ball_speed() -> None:
 def test_space_pong_ball_bounce_is_deterministic_at_the_arena_wall() -> None:
     _, engine = _project_engine()
     engine.play()
-    game = engine.behaviour_system.instances[0]
+    game = cast(Any, engine.behaviour_system.instances[0])
     game.ball_velocity = (4.0, 12.0)
     game._transform("ball").y = 27.5
 
@@ -119,28 +121,35 @@ def test_space_pong_ball_bounce_is_deterministic_at_the_arena_wall() -> None:
 def test_space_pong_hud_layout_is_stable_across_resize_and_render_extraction_is_generic() -> None:
     _, engine = _project_engine()
     engine.play()
-    game = engine.behaviour_system.instances[0]
+    game = cast(Any, engine.behaviour_system.instances[0])
     first = game.resize((800, 600))["score_left"]
     second = game.resize((1600, 900))["score_left"]
     assert first.x / 800 == second.x / 1600
     assert first.y / 600 == second.y / 900
 
-    frame = extract_render_frame(engine.active_scene)
+    active_scene = engine.active_scene
+    assert active_scene is not None
+    frame = extract_render_frame(active_scene)
     assert frame.items
     assert all(item.key for item in frame.items)
     engine.stop()
 
 
 def test_space_pong_save_reopen_and_export_workflow(tmp_path: Path) -> None:
-    project, _ = _project_engine()
+    source_document = (PROJECT_DIR / "levels" / "main.level.pb").read_bytes()
+    project_dir = tmp_path / "space-pong"
+    shutil.copytree(PROJECT_DIR, project_dir)
+    project, _ = load_project_engine(project_dir)
     scene = project.load_scene()
+    scene.name = "Space Pong Acceptance Roundtrip"
     project.save_document(scene)
-    reopened = Project.load(PROJECT_DIR)
+    reopened = Project.load(project_dir)
     assert reopened.load_scene().to_dict() == scene.to_dict()
+    assert (PROJECT_DIR / "levels" / "main.level.pb").read_bytes() == source_document
 
     output = tmp_path / "builds"
     plan = ExportPlan(
-        project_dir=PROJECT_DIR,
+        project_dir=project_dir,
         entry_point="__main__.py",
         output_dir=output,
         target=ExportTarget.LINUX,
@@ -152,7 +161,9 @@ def test_space_pong_save_reopen_and_export_workflow(tmp_path: Path) -> None:
         debug_launcher=True,
         runtime_profile=RuntimeProfile.NONE,
     )
-    result = GameExporter(packager=_Packager()).export(plan, cancel=threading.Event())
+    result = GameExporter(packager=cast(TargetPackager, _Packager())).export(
+        plan, cancel=threading.Event()
+    )
     assert (result / "Space_Pong" / "project.json").is_file()
     assert (result / "Space_Pong" / "scripts" / "space_pong_behaviour.py").is_file()
     assert (result / "Space_Pong" / "levels" / "main.level.pb").is_file()

@@ -15,18 +15,17 @@ import pytest
 
 from expra_engine.core.engine import EngineRunState
 from expra_engine.core.project import Project
+from tests.support.qt_app import wait_until
 
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 
 
 def _wait(frontend, w, condition, timeout: float = 10.0) -> bool:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
+    def _pump() -> None:
         frontend.pump(w)
-        if condition():
-            return True
         time.sleep(0.02)
-    return condition()
+
+    return wait_until(_pump, condition, timeout=timeout)
 
 
 def test_open_recent_menu_lists_a_project_as_soon_as_it_is_opened(frontend, window, tmp_path) -> None:

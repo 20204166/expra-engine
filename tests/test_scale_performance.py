@@ -39,7 +39,6 @@ from expra_engine.ui.spatial_edit import SpatialEditController
 from tests.support.qt_app import ensure_qt_app, pump_qt
 
 
-
 def _build_hierarchy(n: int, group_size: int = 5) -> Scene:
     """A mix of parent groups + children, not n flat roots -- exercises
     children_of()/walk_hierarchy() the way a real level actually would.

@@ -70,6 +70,20 @@ class TestVerifyExport(unittest.TestCase):
         with self.assertRaises(ExportVerificationError):
             verify_export(self._build)
 
+    def test_non_object_build_manifest_fails_closed(self) -> None:
+        (self._build / "build_manifest.json").write_text("[]")
+        (self._build / "asset_manifest.json").write_text(json.dumps({"entries": []}))
+
+        with self.assertRaises(ExportVerificationError):
+            verify_export(self._build)
+
+    def test_non_object_asset_manifest_fails_closed(self) -> None:
+        _write_valid_manifests(self._build)
+        (self._build / "asset_manifest.json").write_text("[]")
+
+        with self.assertRaises(ExportVerificationError):
+            verify_export(self._build)
+
     def test_asset_manifest_missing_entries_key_fails(self) -> None:
         _write_valid_manifests(self._build)
         (self._build / "asset_manifest.json").write_text(json.dumps({"not_entries": []}))

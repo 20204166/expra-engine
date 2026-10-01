@@ -4,29 +4,7 @@ import unittest
 from typing import Any
 
 from expra_engine.coordinators.transition import PendingTransition
-
-
-class FakeScheduler:
-    """Records scheduled callbacks with their delays."""
-
-    def __init__(self) -> None:
-        self._scheduled: list[tuple[int, Any]] = []
-        self._cancelled: list[Any] = []
-        self._next_id = 0
-
-    def schedule(self, delay: int, callback: Any) -> int:
-        self._next_id += 1
-        self._scheduled.append((delay, callback))
-        return self._next_id
-
-    def cancel(self, identifier: Any) -> bool:
-        self._cancelled.append(identifier)
-        return True
-
-    def fire_last(self) -> None:
-        if self._scheduled:
-            _, callback = self._scheduled[-1]
-            callback()
+from tests.support.scheduling import FakeScheduler
 
 
 class TestPendingTransition(unittest.TestCase):

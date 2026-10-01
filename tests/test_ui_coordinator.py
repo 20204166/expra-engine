@@ -14,6 +14,7 @@ from unittest.mock import patch
 
 from expra_engine.coordinators.ui_coordinator import RenderIntent, UICoordinator
 from expra_engine.observability import ObservabilityWatcher
+from tests.support.scheduling import FakeScheduler
 
 
 class TestUICoordinatorStaleRejection(unittest.TestCase):
@@ -485,22 +486,9 @@ class TestUICoordinatorTransitions(unittest.TestCase):
     """schedule_transition / cancel_transition must manage named timer slots."""
 
     def _make(self) -> "tuple[UICoordinator, list[tuple[int, Any]], list[Any]]":
-        scheduled: list[tuple[int, Any]] = []
-        cancelled: list[Any] = []
-        timer_id = 0
-
-        def fake_schedule(delay: int, callback: Any) -> int:
-            nonlocal timer_id
-            timer_id += 1
-            scheduled.append((delay, callback))
-            return timer_id
-
-        def fake_cancel(identifier: Any) -> bool:
-            cancelled.append(identifier)
-            return True
-
-        coord = UICoordinator(schedule=fake_schedule, cancel=fake_cancel)
-        return coord, scheduled, cancelled
+        fake = FakeScheduler()
+        coord = UICoordinator(schedule=fake.schedule, cancel=fake.cancel)
+        return coord, fake._scheduled, fake._cancelled
 
     def test_schedule_transition_fires_after_delay(self) -> None:
         coord, scheduled, _ = self._make()

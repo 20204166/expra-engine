@@ -63,7 +63,7 @@ class TestExportPlanValidation(unittest.TestCase):
 
     def test_missing_project_dir(self) -> None:
         with self.assertRaises(ValueError):
-            self._plan(project_dir=Path("/nonexistent/nowhere"))
+            self._plan(project_dir=self._project.parent / "missing")
 
     def test_missing_entry_point(self) -> None:
         with self.assertRaises(ValueError):

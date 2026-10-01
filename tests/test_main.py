@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import subprocess
 import sys
 
@@ -70,7 +71,7 @@ def _loaded_gui_roots_after(code: str) -> set[str]:
     result = subprocess.run(
         [sys.executable, "-c", script], capture_output=True, text=True, check=True
     )
-    return set(eval(result.stdout.strip().splitlines()[-1]))
+    return set(ast.literal_eval(result.stdout.strip().splitlines()[-1]))
 
 
 def test_importing_the_entry_point_does_not_load_tk() -> None:

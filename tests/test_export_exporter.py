@@ -10,6 +10,7 @@ import tempfile
 import threading
 import unittest
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -292,28 +293,19 @@ class TestGameExporter(unittest.TestCase):
             GameExporter(packager=packager).export(plan, cancel=cancel)
 
     def test_previous_build_intact_on_failure(self) -> None:
-        # Do a successful export first
         plan = self._plan()
         first_out = self._export(plan)
         sentinel = first_out / "sentinel.txt"
         sentinel.write_text("was here")
 
-        # Attempt to create a plan with a bad entry point — validation raises before export
-        with self.assertRaises(ValueError):
-            ExportPlan(
-                project_dir=self._project,
-                entry_point="nonexistent.py",
-                output_dir=self._output,
-                target=ExportTarget.WINDOWS,
-                game_name="Test Game",
-                game_version="1.0.0",
-                python_version="3.12.4",
-                arch=PythonArch.AMD64,
-                compile_bytecode=False,
-            )
+        packager = _NoopPackager(plan.target)
+        with (
+            patch.object(packager, "install_runtime", side_effect=RuntimeError("runtime failed")),
+            self.assertRaises(ExportError),
+        ):
+            self._export(plan, packager=packager)
 
-        # Sentinel from first export must still be there (atomic temp -> promote)
-        self.assertTrue(sentinel.exists())
+        self.assertEqual(sentinel.read_text(), "was here")
 
     def test_promotion_failure_preserves_previous_build(self) -> None:
         plan = self._plan()
@@ -387,7 +379,8 @@ class TestGameExporter(unittest.TestCase):
         out = self._export(plan)
         data = json.loads((out / "build_manifest.json").read_text())
         ts = data.get("build_timestamp", "")
-        self.assertTrue(ts.startswith("202"))  # ISO timestamp
+        timestamp = datetime.fromisoformat(ts)
+        self.assertEqual(timestamp.tzinfo, UTC)
 
     def test_runtime_manifest_uses_relative_mount_configuration(self) -> None:
         service = ResourceService(

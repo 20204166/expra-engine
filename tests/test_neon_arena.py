@@ -3,6 +3,7 @@
 import importlib
 import json
 import os
+import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -101,9 +102,16 @@ def _running_scripted() -> Engine:
 
 
 class TestNeonArena(unittest.TestCase):
+    def setUp(self) -> None:
+        self._temporary_directory = tempfile.TemporaryDirectory()
+        self._tmp_path = Path(self._temporary_directory.name)
+
+    def tearDown(self) -> None:
+        self._temporary_directory.cleanup()
+
     def test_entrypoint_creates_a_new_surface_for_video_resize(self) -> None:
         entrypoint = importlib.import_module("examples.neon_arena.__main__")
-        report_path = PROJECT_DIR / "test-resize-report.json"
+        report_path = self._tmp_path / "test-resize-report.json"
         fake_pygame = _SmokePygame(
             [
                 [SimpleNamespace(type=4, size=(1024, 768))],
@@ -131,11 +139,15 @@ class TestNeonArena(unittest.TestCase):
     def test_smoke_configuration_requires_positive_frame_count(self) -> None:
         entrypoint = importlib.import_module("examples.neon_arena.__main__")
 
-        with patch.dict(os.environ, {"EXPRA_SMOKE_FRAMES": "3"}, clear=False):
-            config = entrypoint.smoke_config_from_environment(PROJECT_DIR)
+        with patch.dict(
+            os.environ,
+            {"EXPRA_SMOKE_FRAMES": "3", "EXPRA_SMOKE_REPORT": "smoke_report.json"},
+            clear=False,
+        ):
+            config = entrypoint.smoke_config_from_environment(self._tmp_path)
 
         self.assertEqual(config.frame_limit, 3)
-        self.assertEqual(config.report_path, PROJECT_DIR / "smoke_report.json")
+        self.assertEqual(config.report_path, self._tmp_path / "smoke_report.json")
 
         with (
             patch.dict(os.environ, {"EXPRA_SMOKE_FRAMES": "0"}, clear=False),
@@ -145,7 +157,7 @@ class TestNeonArena(unittest.TestCase):
 
     def test_entrypoint_smoke_reports_updates_and_rendering_without_display(self) -> None:
         entrypoint = importlib.import_module("examples.neon_arena.__main__")
-        report_path = PROJECT_DIR / "test-smoke-report.json"
+        report_path = self._tmp_path / "test-smoke-report.json"
         fake_pygame = _SmokePygame()
 
         with (
@@ -172,7 +184,7 @@ class TestNeonArena(unittest.TestCase):
 
     def test_scripted_entrypoint_smoke_loads_project_behaviours(self) -> None:
         entrypoint = importlib.import_module("examples.neon_arena.__main__")
-        report_path = PROJECT_DIR / "test-scripted-smoke-report.json"
+        report_path = self._tmp_path / "test-scripted-smoke-report.json"
         fake_pygame = _SmokePygame()
 
         with (
@@ -198,7 +210,7 @@ class TestNeonArena(unittest.TestCase):
 
     def test_entrypoint_smoke_reports_start_failure_and_propagates_it(self) -> None:
         entrypoint = importlib.import_module("examples.neon_arena.__main__")
-        report_path = PROJECT_DIR / "test-smoke-failure-report.json"
+        report_path = self._tmp_path / "test-smoke-failure-report.json"
 
         with (
             patch.dict(
@@ -391,7 +403,7 @@ class TestNeonArena(unittest.TestCase):
             surface_factory=pygame.display.set_mode,
         )
         received: list[Any] = []
-        engine.signal = received.append  # type: ignore[method-assign]
+        cast(Any, engine).signal = received.append
         engine.play()
         runtime._poll_events()
         self.assertEqual(received[0].action, ActionId("move_right"))

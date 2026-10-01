@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import threading
-import time
 from pathlib import Path
 from unittest.mock import patch
 
@@ -11,6 +10,7 @@ import pytest
 
 from expra_engine.core.project import Project
 from expra_engine.export.events import ExportPhase, ExportProgressEvent
+from tests.support.qt_app import wait_until
 
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 
@@ -50,10 +50,11 @@ def test_export_flow_and_log(frontend, window, tmp_path) -> None:
         dialog._name_var.set("Parity Game")
         with patch("expra_engine.editor.export_dialog_core.GameExporter", _FakeExporter):
             assert w._actions.dispatch("export_game") is True
-            deadline = time.monotonic() + 10
-            while "Done:" not in dialog.log_text() and time.monotonic() < deadline:
-                frontend.pump(w)
-                time.sleep(0.02)
+            assert wait_until(
+                lambda: frontend.pump(w),
+                lambda: "Done:" in dialog.log_text(),
+                timeout=10,
+            ), dialog.log_text()
         lines = [line for line in dialog.log_text().splitlines() if line.strip()]
         assert lines[0] == "Starting export…"
         assert lines[1].endswith("5%  planning build")

@@ -23,12 +23,12 @@ def _make_fake_python_zip(dest_zip: Path, python_version: str = "3.12.4") -> Non
     """Create a minimal fake Windows embedded Python zip for tests."""
     major, minor, _ = python_version.split(".")
     with zipfile.ZipFile(dest_zip, "w") as zf:
-        zf.writestr(f"python{major}{minor}._pth", "python312.zip\n.\n")
+        zf.writestr(f"python{major}{minor}._pth", f"python{major}{minor}.zip\n.\n")
         zf.writestr("python.exe", "stub")
         zf.writestr("pythonw.exe", "stub")
 
 
-def _fake_downloader(url: str, dest: Path) -> None:
+def _fake_downloader(_url: str, dest: Path) -> None:
     """Fake downloader that writes a valid Python zip without network."""
     # Extract version from URL: python-3.12.4-embed-amd64.zip
     name = dest.name  # e.g. python-3.12.4-embed-amd64.zip
@@ -61,15 +61,13 @@ class TestWindowsPackagerRuntime(unittest.TestCase):
         dest = self._tmp / "python"
         cache = self._tmp / "cache"
         cancel = threading.Event()
-        msgs: list[str] = []
-
         WindowsPackager().install_runtime(
             "3.12.4",
             "amd64",
             dest,
             cache_dir=cache,
             cancel=cancel,
-            progress=msgs.append,
+            progress=lambda _: None,
             downloader=_fake_downloader,
         )
 

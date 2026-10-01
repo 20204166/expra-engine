@@ -12,12 +12,9 @@ from expra_engine.core.project import Project
 
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 
-def _rows(window):
+def _row_labels(window):
     tree = window._hierarchy._tree
-    return [
-        (tree.item(iid, "text"), tree.item(iid, "tags") if False else "")
-        for iid in window._hierarchy._row_state
-    ]
+    return [tree.item(iid, "text") for iid in window._hierarchy._row_state]
 
 
 def test_startup_state(frontend, window) -> None:
@@ -25,7 +22,7 @@ def test_startup_state(frontend, window) -> None:
     console = frontend.console_text(w)
     assert "[Editor] Expra Engine started" in console
     assert "[Editor] Loaded scene: Sample Scene" in console
-    assert [text for text, _ in _rows(w)] == ["[CAM] Camera", "[PLY] Player"]
+    assert _row_labels(w) == ["[CAM] Camera", "[PLY] Player"]
     assert frontend.title(w).endswith("Expra Editor")
     assert list(w._toolbar.action_buttons) == [
         "play",

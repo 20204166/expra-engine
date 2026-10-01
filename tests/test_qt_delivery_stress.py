@@ -13,14 +13,14 @@ from __future__ import annotations
 
 import gc
 import threading
-import time
 from pathlib import Path
 
 import pytest
 
-from expra_engine.core.engine import Engine, EngineRunState
+from expra_engine.core.engine import EngineRunState
 from expra_engine.core.project import Project
-from tests.support.qt_app import ensure_qt_app, pump_qt, qt_available
+from tests.support.qt_app import ensure_qt_app, pump_qt, qt_available, wait_until
+from tests.support.qt_editor import make_editor
 
 pytestmark = [
     pytest.mark.skipif(not qt_available(), reason="PySide6 not installed"),
@@ -76,10 +76,7 @@ class SimpleGuard:
 
 
 def _window(tmp_path: Path, name: str = "prefs"):
-    from expra_engine.editor.qt.main_window import EditorWindow
-
-    window = EditorWindow(Engine(), preferences_path=tmp_path / f"{name}.json")
-    window.show()
+    window = make_editor(preferences_path=tmp_path / f"{name}.json")
     pump_qt(30)
     return window
 
@@ -96,12 +93,7 @@ def _project(root: Path, name: str) -> Project:
 
 
 def _wait(condition, timeout: float = 5.0) -> bool:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        pump_qt(15)
-        if condition():
-            return True
-    return condition()
+    return wait_until(lambda: pump_qt(15), condition, timeout=timeout)
 
 
 def test_background_completion_is_delivered_on_the_ui_thread_to_a_live_widget(

@@ -50,15 +50,15 @@ def test_opening_world_replaces_scene_identity_and_resets_undo_ownership() -> No
     assert not document.command_stack.can_undo
 
 
-def test_successful_save_clears_dirty_state_but_failed_save_does_not() -> None:
+def test_mark_saved_clears_dirty_state_only_when_called() -> None:
+    """Mirrors project_workflow.py's save contract: callers call mark_saved only
+    after a successful write and return early on failure without calling it, so
+    a failed save leaves dirty state untouched here by simply never reaching it.
+    """
     document = ActiveDocument()
     document.open(Scene("Town"), Path("levels/town.level.pb"))
     document.mark_dirty()
 
-    try:
-        raise OSError("read-only destination")
-    except OSError:
-        pass
     assert document.is_dirty
 
     document.mark_saved(Path("levels/town.level.pb"))

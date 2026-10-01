@@ -5,20 +5,14 @@ All tests run on the Qt offscreen platform to avoid needing a display.
 
 from __future__ import annotations
 
-import os
-
 import pytest
 
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+from tests.support.qt_app import ensure_qt_app
 
 
 @pytest.fixture(scope="module")
 def qt_app():
-    import sys
-
-    from PySide6.QtWidgets import QApplication
-
-    return QApplication.instance() or QApplication(sys.argv)
+    return ensure_qt_app()
 
 
 class TestPilImageToQPixmap:

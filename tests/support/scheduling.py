@@ -12,6 +12,7 @@ from __future__ import annotations
 import threading
 from collections.abc import Callable
 from concurrent.futures import Executor, Future
+from typing import Any
 
 
 class FakeClock:
@@ -141,6 +142,33 @@ class ManualExecutor(Executor):
         if cancel_futures:
             for future, _ in self.jobs:
                 future.cancel()
+
+
+class FakeScheduler:
+    """Records scheduled/cancelled callbacks for the ``schedule``/``cancel``
+    callable-pair contract (``Callable[[int, Callable[[], None]], Any]`` /
+    ``Callable[[Any], bool]``) that ``PendingTransition`` and ``UICoordinator``
+    both accept for deterministic timer testing.
+    """
+
+    def __init__(self) -> None:
+        self._scheduled: list[tuple[int, Callable[[], None]]] = []
+        self._cancelled: list[Any] = []
+        self._next_id = 0
+
+    def schedule(self, delay: int, callback: Callable[[], None]) -> int:
+        self._next_id += 1
+        self._scheduled.append((delay, callback))
+        return self._next_id
+
+    def cancel(self, identifier: Any) -> bool:
+        self._cancelled.append(identifier)
+        return True
+
+    def fire_last(self) -> None:
+        if self._scheduled:
+            _, callback = self._scheduled[-1]
+            callback()
 
 
 class ImmediateExecutor(Executor):

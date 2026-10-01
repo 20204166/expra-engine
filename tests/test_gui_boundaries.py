@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import subprocess
 import sys
+from collections.abc import Iterable
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,7 @@ from expra_engine.export.packager import _is_blocked
 SRC = Path(__file__).resolve().parents[1] / "src" / "expra_engine"
 ENGINE_LAYERS = ("core", "runtime", "filesystem", "export", "coordinators", "observability")
 GUI_ROOTS = {"PySide6", "shiboken6", "PyQt5", "PyQt6", "tkinter", "ttkbootstrap", "_tkinter"}
+TK_ROOTS = {"tkinter", "ttkbootstrap", "_tkinter"}
 
 
 def _imported_roots(path: Path, *, module_level_only: bool = False) -> set[str]:
@@ -38,23 +40,25 @@ def _python_files(package: str) -> list[Path]:
     return sorted(root.rglob("*.py")) if root.is_dir() else []
 
 
+def _offenders(
+    paths: Iterable[Path], blocked_roots: set[str], *, module_level_only: bool = False
+) -> dict[str, list[str]]:
+    """Map each path's label (relative to ``SRC``) to its blocked-root imports."""
+    result: dict[str, list[str]] = {}
+    for path in paths:
+        hits = _imported_roots(path, module_level_only=module_level_only) & blocked_roots
+        if hits:
+            result[str(path.relative_to(SRC))] = sorted(hits)
+    return result
+
+
 @pytest.mark.parametrize("layer", ENGINE_LAYERS)
 def test_engine_layers_import_no_gui_toolkit(layer: str) -> None:
-    offenders = {
-        str(path.relative_to(SRC)): sorted(_imported_roots(path) & GUI_ROOTS)
-        for path in _python_files(layer)
-        if _imported_roots(path) & GUI_ROOTS
-    }
-    assert offenders == {}
+    assert _offenders(_python_files(layer), GUI_ROOTS) == {}
 
 
 def test_no_module_imports_tk() -> None:
-    offenders = {
-        str(path.relative_to(SRC)): sorted(_imported_roots(path) & {"tkinter", "ttkbootstrap", "_tkinter"})
-        for path in sorted(SRC.rglob("*.py"))
-        if _imported_roots(path) & {"tkinter", "ttkbootstrap", "_tkinter"}
-    }
-    assert offenders == {}
+    assert _offenders(sorted(SRC.rglob("*.py")), TK_ROOTS) == {}
 
 
 def test_shared_editor_core_modules_import_no_gui_toolkit() -> None:
@@ -74,11 +78,7 @@ def test_shared_editor_core_modules_import_no_gui_toolkit() -> None:
         "editor/document_actions.py",
         "coordinators/button_coordinator.py",
     )
-    offenders = {
-        name: sorted(_imported_roots(SRC / name, module_level_only=True) & GUI_ROOTS)
-        for name in shared
-        if _imported_roots(SRC / name, module_level_only=True) & GUI_ROOTS
-    }
+    offenders = _offenders((SRC / name for name in shared), GUI_ROOTS, module_level_only=True)
     assert offenders == {}
 
 
