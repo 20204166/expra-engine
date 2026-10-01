@@ -1,7 +1,7 @@
 # Expra Render-Math PyO3 Port
 
-**Status:** Optional Rust baseline implemented; native parity/build validated; benchmark gates remain active
-**Python reference:** Expra 0.6.2.0, repository HEAD `d22040235810b6ecede428b3bc6c5d8ed7c2764a`
+**Status:** Visibility and marker-projection kernels build and pass parity checks in the Linux CPython 3.12 native wheel; end-to-end marker-performance comparison remains pending
+**Python reference:** Expra 0.6.2.1, repository HEAD `4744b0138545e11ef629c64693e8692b2729a308` plus the pending release changes
 **Reference integration pattern:** User-owned `/home/btn17/Downloads/railrefund-main` PyO3 crates; no RailRefund application/render math is reused.
 
 ## Scope
@@ -52,11 +52,12 @@ diagnostics.
 - `RenderFrame.visible_items(context)` is the canonical query used by runtime,
   editor, preflight, and render-plan consumers.
 - `src/expra_engine/runtime/render_math.py` is the **only Python module that
-  imports/calls the optional PyO3 extension**. It packs inputs, validates the
-  result, and falls back to the same Python `RenderItem.is_visible()` reference
-  when the extension is absent or fails.
-- Runtime and Editor consume the returned visible items; there must not be
-  per-renderer PyO3 wrappers, per-item FFI calls, or a second renderer.
+  imports/calls the optional PyO3 extension**. It packs inputs, validates native
+  results, and owns the Python fallbacks for both `RenderItem.is_visible()` and
+  `Camera2D.translate_to_screen()`.
+- Runtime and Editor consume the returned visible items; editor marker drawing
+  consumes batched projected points. There must not be per-renderer PyO3 wrappers,
+  per-item FFI calls, or a second renderer.
 
 ## Faithful input and output contract
 
@@ -79,10 +80,23 @@ The native result is one Boolean visibility value per input item, in input
 order. It does not sort, mutate, allocate renderer objects, or return drawing
 commands.
 
+The editor-marker operation is separate and accepts one flat ordered `x/y`
+point buffer plus the Python camera's `left`, `top`, `pixel_ratio`, view center,
+rotation, and viewport width/height. It returns a flat ordered list of projected
+screen-coordinate pairs. It mirrors `Camera2D.translate_to_screen`'s
+zero-rotation operation order and rotated y-down screen convention. It does not
+select entities, inspect transforms, choose marker styles, or call Canvas.
+`native_projection_available()` detects this optional operation independently
+from visibility-kernel availability, so a stale or malformed projection symbol
+does not disable visibility math. Runtime projection failures disable only that
+operation and use the Camera2D reference path.
+
 The Rust baseline must mirror the Python rules exactly:
 
 - camera projection: unrotated and rotated formulas, offset, dimensions, and
   viewport origin;
+- batched editor-marker projection: exact `Camera2D.translate_to_screen`
+  coordinate convention and input ordering;
 - viewport-space anchors: y-up `x/y` offsets, local rotation/scale, and fixed
   pixel placement independent of camera pose;
 - visible depth range: inclusive `near <= z <= far`;
@@ -130,7 +144,11 @@ bundled into the engine wheel.
 2. When the extension is built, compare every native mask with the Python
    reference on those fixtures and seeded generated inputs. No tolerance is
    allowed for visibility booleans; underlying projected coordinates and bounds
-   must match to a documented floating tolerance before optimizing.
+   must match to a documented floating tolerance before optimizing. Batched
+   marker projection is covered by the same extension build and has a separate
+   Python/Rust coordinate parity matrix for unrotated/rotated cameras, offsets,
+   positive/negative points, exact viewport corners, malformed buffers, and
+   overflow rejection.
 3. Run Editor Pygame pixel tests and standalone World render tests through the
    single adapter; verify the missing-extension and native-error fallback paths.
 4. Benchmark extraction/culling, packing, native call, and end-to-end render
@@ -182,8 +200,9 @@ comparison; strict mode adds no fallback guarantee and remains a diagnostic mode
 ## Python viewport/runtime profiles
 
 A reproducible real-Qt motion harness is checked in at
-`tools/viewport_motion_benchmark.py`; it reports event-wall distributions and
-the actual `render:extract`/`render:plan` observations. On this Python 3.12 /
+`tools/viewport_motion_benchmark.py`; `--marker-ratio` controls how many entities
+are non-visual editor markers, and the harness reports event-wall distributions
+and actual `render:extract`/`render:plan` observations. On this Python 3.12 /
 PySide6 Linux workstation, the current 1,000-entity / 30-event pan run measured
 p50/p95 **26.00/28.11 ms**, compared with the earlier pre-optimization
 **170.76/185.19 ms**. The 10,000-entity / 20-event pan run measured
@@ -193,7 +212,7 @@ zero `render:extract` observations during camera motion. Reproduce with:
 
 ```bash
 python tools/viewport_motion_benchmark.py --entities 1000 --events 30
-python tools/viewport_motion_benchmark.py --entities 10000 --events 20
+python tools/viewport_motion_benchmark.py --entities 10000 --events 20 --marker-ratio 0.2
 ```
 
 At 10k entities, pan still exceeds the 16.67 ms frame budget; the remaining

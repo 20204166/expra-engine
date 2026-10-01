@@ -92,9 +92,10 @@ fn projection_camera_values(rotation: f64) -> Vec<f64> {
 fn batched_projection_matches_unrotated_camera2d_pixel_order() {
     let camera = projection_input(&projection_camera_values(0.0)).expect("valid projection camera");
 
-    let projected = project_points(&[2.0, 1.0, -10.0, 5.0], camera).expect("valid points");
+    let projected =
+        project_points(&[2.0, 1.0, -10.0, 5.0, 10.0, -10.0], camera).expect("valid points");
 
-    assert_eq!(projected, vec![480.0, 160.0, 0.0, 0.0]);
+    assert_eq!(projected, vec![480.0, 160.0, 0.0, 0.0, 800.0, 600.0]);
 }
 
 #[test]

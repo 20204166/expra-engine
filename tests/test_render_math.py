@@ -195,6 +195,7 @@ def test_project_camera_points_calls_native_once_for_the_ordered_batch(monkeypat
         ((float("nan"), 0.0),),
         ((0.0, float("inf")),),
         ((True, 0.0),),
+        ((10**400, 0.0),),
     ],
 )
 def test_project_camera_points_rejects_malformed_or_non_finite_points(points) -> None:

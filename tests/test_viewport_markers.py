@@ -64,7 +64,7 @@ def test_marker_projection_does_not_scan_components_when_transform_exists(monkey
     entity.add_component(TransformComponent(x=2.0, y=3.0))
     entity.add_component(LevelAnchorComponent("door", kind="entrance"))
     component_reads = 0
-    original_components = Entity.components.fget
+    original_components = vars(Entity)["components"].fget
     assert original_components is not None
 
     def counted_components(owner):

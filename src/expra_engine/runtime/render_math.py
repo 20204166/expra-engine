@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import math
 from collections.abc import Iterable, Sequence
+from importlib import import_module
 from numbers import Real
 from typing import Any
 
@@ -40,10 +41,11 @@ _KIND_CODES = {
     "line": 6.0,
 }
 
+_native_module: Any | None
 try:
-    import expra_render_math as _native_module
+    _native_module = import_module("expra_render_math")
 except (ImportError, OSError):  # Optional acceleration; pure Python stays available.
-    _native_module: Any | None = None
+    _native_module = None
 
 _native_disabled = False
 _native_failure_reported = False
@@ -149,7 +151,10 @@ def _invoke_native_visible_mask(
 def _finite_real(value: object, name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, Real):
         raise TypeError(f"{name} must be a real number")
-    converted = float(value)
+    try:
+        converted = float(value)
+    except (OverflowError, TypeError, ValueError) as error:
+        raise ValueError(f"{name} must be finite") from error
     if not math.isfinite(converted):
         raise ValueError(f"{name} must be finite")
     return converted
