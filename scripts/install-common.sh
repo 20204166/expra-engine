@@ -2,29 +2,90 @@
 # Shared wheel installer: per-user venv by default, elevated system install with --system.
 set -euo pipefail
 
+resolve_install_python() {
+    if [[ -n "${EXPRA_SYSTEM_PYTHON:-}" ]]; then
+        printf '%s\n' "$EXPRA_SYSTEM_PYTHON"
+    elif command -v python3 >/dev/null 2>&1; then
+        command -v python3
+    else
+        echo "ERROR: no Python 3 interpreter found; set EXPRA_SYSTEM_PYTHON." >&2
+        return 1
+    fi
+}
+
+select_compatible_wheel() {
+    local py="$1"
+    local wheelhouse="$2"
+    local version="$3"
+    "$py" - "$wheelhouse" "$version" <<'PY'
+import json
+import re
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+from urllib.parse import unquote, urlparse
+
+wheelhouse = Path(sys.argv[1]).resolve()
+version = sys.argv[2]
+with tempfile.NamedTemporaryFile(prefix=".expra-wheel-select-", suffix=".json", dir=wheelhouse, delete=False) as stream:
+    report_path = Path(stream.name)
+try:
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--dry-run",
+            "--ignore-installed",
+            "--no-deps",
+            "--no-index",
+            "--find-links",
+            str(wheelhouse),
+            "--report",
+            str(report_path),
+            f"expra-engine=={version}",
+        ],
+        check=True,
+        stdout=subprocess.DEVNULL,
+    )
+    install = json.loads(report_path.read_text(encoding="utf-8"))["install"]
+    if len(install) != 1:
+        raise SystemExit("pip did not select exactly one local Expra wheel")
+    url = urlparse(install[0]["download_info"]["url"])
+    if url.scheme != "file":
+        raise SystemExit("pip selected a non-local Expra wheel")
+    wheel = Path(unquote(url.path)).resolve()
+    wheel.relative_to(wheelhouse)
+    if not re.match(rf"^expra_engine-{re.escape(version)}-[^-]+-[^-]+-[^-]+\.whl$", wheel.name):
+        raise SystemExit("pip selected a wheel with an unexpected Expra version")
+    print(wheel)
+finally:
+    report_path.unlink(missing_ok=True)
+PY
+}
+
 install_wheel() {
     local wheel="$1"
     local mode="${2:-user}"
+    local wheel_name
+    local expected_version
+    wheel_name="$(basename "$wheel")"
+    if [[ "$wheel_name" =~ ^expra_engine-([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)-[^-]+-[^-]+-[^-]+\.whl$ ]]; then
+        expected_version="${BASH_REMATCH[1]}"
+    else
+        echo "ERROR: unexpected Expra wheel filename: $wheel_name" >&2
+        return 1
+    fi
 
     [[ "$mode" == "user" || "$mode" == "system" ]] || {
         echo "ERROR: unsupported install mode: $mode" >&2
         return 1
     }
 
-    local expected_version
-    expected_version="$(basename "$wheel")"
-    expected_version="${expected_version#expra_engine-}"
-    expected_version="${expected_version%-py3-none-any.whl}"
-
-    local base_py=""
-    if [[ -n "${EXPRA_SYSTEM_PYTHON:-}" ]]; then
-        base_py="$EXPRA_SYSTEM_PYTHON"
-    elif command -v python3 >/dev/null 2>&1; then
-        base_py="$(command -v python3)"
-    else
-        echo "ERROR: no Python 3 interpreter found; set EXPRA_SYSTEM_PYTHON." >&2
-        return 1
-    fi
+    local base_py
+    base_py="$(resolve_install_python)"
 
     if "$base_py" -c 'import sys; raise SystemExit(0 if sys.prefix != sys.base_prefix else 1)' \
         >/dev/null 2>&1 && [[ "$mode" == "system" ]]; then

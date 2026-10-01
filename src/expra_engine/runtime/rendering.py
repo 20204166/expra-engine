@@ -706,6 +706,9 @@ class RenderFrame:
     submissions: tuple[object, ...] = ()
     lights: tuple[LightDescriptor, ...] = ()
     lighting_enabled: bool = True
+    _ordered_items_cache: tuple[RenderItem, ...] | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "items", tuple(self.items))
@@ -720,16 +723,22 @@ class RenderFrame:
             raise TypeError("lighting_enabled must be a bool")
 
     def ordered_items(self) -> tuple[RenderItem, ...]:
-        return tuple(
-            item
-            for _, item in sorted(
-                enumerate(self.items),
-                key=lambda pair: render_item_order_key(pair[1], pair[0]),
+        cached = self._ordered_items_cache
+        if cached is None:
+            cached = tuple(
+                item
+                for _, item in sorted(
+                    enumerate(self.items),
+                    key=lambda pair: render_item_order_key(pair[1], pair[0]),
+                )
             )
-        )
+            object.__setattr__(self, "_ordered_items_cache", cached)
+        return cached
 
     def visible_items(self, context: RenderContext) -> tuple[RenderItem, ...]:
-        return tuple(item for item in self.ordered_items() if item.is_visible(context))
+        from expra_engine.runtime.render_math import visible_items
+
+        return visible_items(self.ordered_items(), context)
 
     def visible_lights(self, context: RenderContext) -> tuple[LightDescriptor, ...]:
         if not self.lighting_enabled:

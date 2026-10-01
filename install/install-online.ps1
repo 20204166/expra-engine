@@ -3,26 +3,37 @@
 param([switch]$System)
 
 $ErrorActionPreference = "Stop"
-$base = "https://raw.githubusercontent.com/20204166/expra-engine/main/dist"
+$base = "https://github.com/20204166/expra-engine/releases/latest/download"
 $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("expra-engine-" + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $tmp | Out-Null
 
 try {
     $sumsPath = Join-Path $tmp "SHA256SUMS"
     Invoke-WebRequest "$base/SHA256SUMS" -OutFile $sumsPath
-    $line = Get-Content $sumsPath | Where-Object { $_.Trim() } | Select-Object -Last 1
-    $parts = $line -split "\s+"
-    if ($parts.Count -lt 2) { throw "SHA256SUMS has no wheel entry" }
-    $expected = $parts[0]
-    $wheel = [System.IO.Path]::GetFileName($parts[1])
-    if ($wheel -notmatch "^expra_engine-(\d+\.\d+\.\d+\.\d+)-py3-none-any\.whl$") {
-        throw "Unexpected wheel filename: $wheel"
+    $lines = @(Get-Content $sumsPath | Where-Object { $_.Trim() })
+    if ($lines.Count -eq 0) { throw "SHA256SUMS has no wheel entries" }
+    $firstParts = $lines[0] -split "\s+"
+    if ($firstParts.Count -lt 2) { throw "Malformed SHA256SUMS wheel entry" }
+    $firstWheel = [System.IO.Path]::GetFileName($firstParts[1])
+    if ($firstWheel -notmatch "^expra_engine-(\d+\.\d+\.\d+\.\d+)-[^-]+-[^-]+-[^-]+\.whl$") {
+        throw "Unexpected wheel filename: $firstWheel"
     }
     $expectedVersion = $matches[1]
-    $wheelPath = Join-Path $tmp $wheel
-    Invoke-WebRequest "$base/$wheel" -OutFile $wheelPath
-    $actual = (Get-FileHash $wheelPath -Algorithm SHA256).Hash.ToLowerInvariant()
-    if ($actual -ne $expected.ToLowerInvariant()) { throw "Wheel checksum mismatch" }
+    $wheelPattern = "^expra_engine-$([regex]::Escape($expectedVersion))-[^-]+-[^-]+-[^-]+\.whl$"
+    $wheelCount = 0
+    foreach ($line in $lines) {
+        $parts = $line -split "\s+"
+        if ($parts.Count -lt 2) { throw "Malformed SHA256SUMS wheel entry" }
+        $wheel = [System.IO.Path]::GetFileName($parts[1])
+        if ($wheel -notmatch $wheelPattern) { continue }
+        if ($parts[0] -notmatch "^[0-9a-fA-F]{64}$") { throw "Invalid wheel checksum" }
+        $wheelPath = Join-Path $tmp $wheel
+        Invoke-WebRequest "$base/$wheel" -OutFile $wheelPath
+        $actual = (Get-FileHash $wheelPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($actual -ne $parts[0].ToLowerInvariant()) { throw "Wheel checksum mismatch: $wheel" }
+        $wheelCount++
+    }
+    if ($wheelCount -eq 0) { throw "No wheels found for Expra $expectedVersion" }
 
     function New-PythonCandidate {
         param(
@@ -74,9 +85,31 @@ try {
     }
     if (-not $py) { throw "No usable Python 3.12+ interpreter was found." }
 
+    $selectionReport = Join-Path $tmp "pip-selection.json"
+    $selectionArgs = @(
+        "-m", "pip", "install", "--dry-run", "--ignore-installed", "--no-deps",
+        "--no-index", "--find-links", $tmp, "--report", $selectionReport,
+        "expra-engine==$expectedVersion"
+    )
+    Invoke-Python $py $selectionArgs
+    if ($LASTEXITCODE -ne 0) { throw "pip could not select a compatible verified Expra wheel" }
+    $selection = Get-Content $selectionReport -Raw | ConvertFrom-Json
+    if ($selection.install.Count -ne 1) { throw "pip did not select exactly one Expra wheel" }
+    $selectedUri = [System.Uri]$selection.install[0].download_info.url
+    if ($selectedUri.Scheme -ne "file") { throw "pip selected a non-local Expra wheel" }
+    $selectedWheelPath = [System.IO.Path]::GetFullPath($selectedUri.LocalPath)
+    $wheelhouseRoot = [System.IO.Path]::GetFullPath($tmp).TrimEnd('\') + '\'
+    if (-not $selectedWheelPath.StartsWith($wheelhouseRoot, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "pip selected a wheel outside the verified wheelhouse"
+    }
+    $selectedWheel = [System.IO.Path]::GetFileName($selectedWheelPath)
+    if ($selectedWheel -notmatch "^expra_engine-$([regex]::Escape($expectedVersion))-[^-]+-[^-]+-[^-]+\.whl$") {
+        throw "pip selected a wheel with an unexpected version"
+    }
+
     $pipArgs = @("-m", "pip", "install", "--upgrade", "--force-reinstall")
     if (-not $System) { $pipArgs += "--user" }
-    $pipArgs += @("--break-system-packages", $wheelPath)
+    $pipArgs += @("--break-system-packages", $selectedWheelPath)
     Invoke-Python $py $pipArgs
     if ($LASTEXITCODE -ne 0) { throw "pip install failed (exit $LASTEXITCODE)" }
 

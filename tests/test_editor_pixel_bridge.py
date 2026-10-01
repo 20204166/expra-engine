@@ -13,13 +13,15 @@ from types import SimpleNamespace
 import pytest
 
 from expra_engine.core.component import TransformComponent
+from expra_engine.core.scene import Scene
 from expra_engine.runtime.render_extractor import extract_render_frame
-from expra_engine.runtime.rendering import RenderContext, Viewport
+from expra_engine.runtime.rendering import RenderContext, RenderItem, Viewport
 from expra_engine.runtime.visual_components import PrimitiveComponent
 from expra_engine.ui.editor_pixel_renderer import (
     EditorPixelRenderer,
     render_editor_frame_to_pixel_image,
 )
+from expra_engine.ui.viewport_render_target import build_editor_render_target
 from tests.support.qt_app import ensure_qt_app
 from tests.support.texture_project import make_texture_project
 
@@ -78,6 +80,46 @@ def test_pixel_layer_holds_the_rendered_pixels(tmp_path) -> None:
         assert green[1] > green[0] and green[1] > green[2]
         assert blue[2] > blue[0] and blue[2] > blue[1]
         assert yellow[0] > yellow[2] and yellow[1] > yellow[2]
+    finally:
+        pygame.quit()
+
+
+def test_editor_pixel_bridge_culls_each_item_once(monkeypatch) -> None:
+    pygame = pytest.importorskip("pygame")
+    from expra_engine.runtime import render_math
+
+    monkeypatch.setattr(render_math, "_native_module", None)
+
+    scene = Scene("single cull")
+    entity = scene.create_entity("marker", entity_id="marker")
+    entity.add_component(TransformComponent())
+    entity.add_component(PrimitiveComponent("rectangle"))
+    calls = 0
+    original = RenderItem.is_visible
+
+    def counted_is_visible(item, context):
+        nonlocal calls
+        calls += 1
+        return original(item, context)
+
+    monkeypatch.setattr(RenderItem, "is_visible", counted_is_visible)
+    pygame.init()
+    try:
+        target = build_editor_render_target(scene, viewport=(64, 48))
+        image = render_editor_frame_to_pixel_image(
+            target.frame,
+            RenderContext(Viewport(0, 0, 64, 48)),
+            width=64,
+            height=48,
+            visible_items=target.items,
+            resource_service=None,
+            resource_provider=lambda _resource: None,
+            pygame_module=pygame,
+            image_factory=lambda image: image,
+        )
+
+        assert image is not None
+        assert calls == 1
     finally:
         pygame.quit()
 

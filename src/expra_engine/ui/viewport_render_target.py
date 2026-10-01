@@ -25,7 +25,12 @@ from expra_engine.runtime.rendering import (
 )
 from expra_engine.runtime.screen_texture import RenderEffect
 
-__all__ = ("ColliderOutline", "EditorRenderTarget", "build_editor_render_target")
+__all__ = (
+    "ColliderOutline",
+    "EditorRenderTarget",
+    "build_editor_render_target",
+    "reproject_editor_render_target",
+)
 
 
 @dataclass(frozen=True)
@@ -46,6 +51,58 @@ class EditorRenderTarget:
     colliders: tuple[ColliderOutline, ...] = ()
     unsupported_effects: tuple[str, ...] = ()
     render_context: RenderContext | None = None
+
+
+def _render_context(
+    scene: Scene,
+    viewport: tuple[int, int],
+    camera: Any | None,
+    resolved_camera: OrthographicCamera | None,
+) -> RenderContext | None:
+    width, height = viewport
+    if width <= 0 or height <= 0:
+        return None
+    if resolved_camera is not None:
+        preview_camera = resolved_camera
+    else:
+        if camera is not None:
+            cam_width = camera._camera.width
+            cam_height = cam_width * height / width
+        else:
+            cam_width = 20.0
+            cam_height = 20.0 * height / width
+        preview_camera = OrthographicCamera(width=cam_width, height=cam_height)
+        preview_camera.apply_dict(scene.camera)
+        if camera is not None:
+            preview_camera.position = camera.position
+            preview_camera.rotation = camera._camera.rotation
+    return RenderContext(Viewport(0, 0, width, height), preview_camera)
+
+
+def reproject_editor_render_target(
+    target: EditorRenderTarget,
+    scene: Scene | None,
+    *,
+    viewport: tuple[int, int] = (400, 300),
+    camera: Any | None = None,
+    resolved_camera: OrthographicCamera | None = None,
+    observer: ObservabilityWatcher | None = None,
+) -> EditorRenderTarget:
+    """Refresh view-dependent clipping while reusing scene-derived frame data."""
+    if scene is None:
+        return target
+    context = _render_context(scene, viewport, camera, resolved_camera)
+    if context is None:
+        return replace(target, items=(), selected_id=None, render_context=None)
+    plan_token = observer.begin("render:plan") if observer is not None else None
+    try:
+        items = target.frame.visible_items(context)
+    finally:
+        if observer is not None and plan_token is not None:
+            observer.finish(plan_token)
+    if observer is not None:
+        observer.increment("render:plan", "items_visible", len(items))
+    return replace(target, items=items, render_context=context)
 
 
 def build_editor_render_target(
@@ -89,24 +146,9 @@ def build_editor_render_target(
     unsupported_effects = tuple(
         effect.request.entity_id for effect in frame.submissions if isinstance(effect, RenderEffect)
     )
-    width, height = viewport
-    if width <= 0 or height <= 0:
+    context = _render_context(scene, viewport, camera, resolved_camera)
+    if context is None:
         return EditorRenderTarget(frame, (), None, unsupported_effects=unsupported_effects)
-    if resolved_camera is not None:
-        preview_camera = resolved_camera
-    elif camera is not None:
-        cam_width = camera._camera.width
-        cam_height = cam_width * height / width
-    else:
-        cam_width = 20.0
-        cam_height = 20.0 * height / width
-    if resolved_camera is None:
-        preview_camera = OrthographicCamera(width=cam_width, height=cam_height)
-        preview_camera.apply_dict(scene.camera)
-        if camera is not None:
-            preview_camera.position = camera.position
-            preview_camera.rotation = camera._camera.rotation
-    context = RenderContext(Viewport(0, 0, width, height), preview_camera)
     plan_token = observer.begin("render:plan") if observer is not None else None
     try:
         items = frame.visible_items(context)

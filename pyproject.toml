@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=68", "setuptools-rust>=1.12,<2", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -38,7 +38,7 @@ version = { attr = "expra_engine._version.__version__" }
 where = ["src"]
 
 [tool.setuptools.package-data]
-expra_engine = ["py.typed"]
+expra_engine = ["py.typed", "_native_source_manifest.json"]
 
 [tool.ruff]
 target-version = "py312"

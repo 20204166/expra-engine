@@ -71,3 +71,42 @@ def test_install_online_verifies_checksum_before_installing() -> None:
     assert "sha256sum" in script
     assert "install-common.sh" in script
     assert "install_wheel" in script
+    assert "wheel_count" in script
+    assert 'wheel="$(select_compatible_wheel "$py" "$tmp" "$expected_version")"' in script
+    assert 'install_wheel "$wheel" "$mode"' in script
+    assert "https://github.com/20204166/expra-engine/releases/latest/download" in script
+    powershell = (ROOT / "install" / "install-online.ps1").read_text(encoding="utf-8")
+    assert "https://github.com/20204166/expra-engine/releases/latest/download" in powershell
+
+
+def test_installers_let_pip_select_a_compatible_native_or_fallback_wheel() -> None:
+    common = INSTALL_COMMON.read_text(encoding="utf-8")
+    online = INSTALL_ONLINE.read_text(encoding="utf-8")
+    powershell = (ROOT / "install" / "install-online.ps1").read_text(encoding="utf-8")
+
+    assert "--find-links" in common
+    assert 'f"expra-engine=={version}"' in common
+    assert "while read -r expected path" in online
+    assert "$wheelCount++" in powershell
+    assert '"--find-links", $tmp' in powershell
+
+
+def test_installers_bind_installation_to_the_checksum_verified_wheel() -> None:
+    common = INSTALL_COMMON.read_text(encoding="utf-8")
+    online = INSTALL_ONLINE.read_text(encoding="utf-8")
+    powershell = (ROOT / "install" / "install-online.ps1").read_text(encoding="utf-8")
+
+    assert "select_compatible_wheel" in common
+    assert "--no-index" in common
+    assert 'install_wheel "$wheel" "$mode"' in online
+    assert 'install_wheel "$tmp" "$mode" "$expected_version"' not in online
+    assert '"--no-index"' in powershell
+    assert "$selectedWheelPath" in powershell
+
+
+def test_piped_online_installer_fetches_its_version_matched_common_helper() -> None:
+    script = INSTALL_ONLINE.read_text(encoding="utf-8")
+
+    assert 'BASH_SOURCE[0]:-' in script
+    assert 'v${expected_version}/scripts/install-common.sh' in script
+    assert 'source "$common_script"' in script

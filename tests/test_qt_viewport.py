@@ -15,6 +15,7 @@ import pytest
 from expra_engine.core.component import TransformComponent
 from expra_engine.core.scene import Scene
 from expra_engine.core.world import LevelDescriptor, World
+from expra_engine.observability import ObservabilityWatcher
 from expra_engine.runtime.visual_components import PrimitiveComponent, TextComponent
 from tests.support.qt_app import ensure_qt_app, pump_qt
 
@@ -219,7 +220,7 @@ def test_play_canvas_fallback_uses_resolved_camera_for_viewport_mount() -> None:
     hud.add_component(CameraMountComponent("top_left", x=16.0, y=-16.0))
     marker = scene.create_entity("Marker", parent_id=hud.entity_id)
     marker.add_component(PrimitiveComponent("rectangle", width=8.0, height=8.0))
-    runtime_camera = OrthographicCamera(position=(25.0, 10.0), width=20.0, height=10.0)
+    runtime_camera = OrthographicCamera(position=(25.0, 10.0, 0.0), width=20.0, height=10.0)
     harness = QtHarness()
     try:
         harness.panel._pixel_renderer.render = lambda *_args, **_kwargs: None
@@ -369,6 +370,117 @@ def test_box_select_wheel_pan_and_camera_keys(make_harness) -> None:
     h.key("r")
     assert h.panel._camera.to_dict()["rotation"] == 0.0
     assert cameras, "camera changes must be reported through on_camera_change"
+
+
+def test_camera_motion_reprojects_cached_frame_without_reextracting_scene(make_harness) -> None:
+    scene = _roles_scene()
+    watcher = ObservabilityWatcher()
+    h = make_harness(observer=watcher)
+    h.panel.render(scene, None)
+    h.pump()
+    frame = h.panel._target.frame
+    previous_camera_position = h.panel._target.render_context.camera.position
+    watcher.reset()
+
+    h.press(200, 200, button=2)
+    h.motion(260, 230, button=2)
+    h.release(260, 230, button=2)
+
+    metrics = {metric.target: metric for metric in watcher.snapshot().metrics}
+    assert h.panel._target.frame is frame
+    assert h.panel._target.render_context.camera.position != previous_camera_position
+    assert metrics.get("render:extract") is None
+
+
+def test_camera_motion_moves_retained_markers_without_restyling_them(
+    make_harness, monkeypatch
+) -> None:
+    scene = Scene("Marker motion")
+    entity = scene.create_entity("Offscreen", entity_id="offscreen")
+    entity.add_component(TransformComponent(x=0.0, y=0.0))
+    h = make_harness()
+    h.panel.render(scene)
+    h.pump()
+    entry = h.panel._marker_entries[entity.entity_id]
+    previous_coords = tuple(h.canvas.coords(entry.ids[0]))
+    style_calls = []
+    original_itemconfig = h.canvas.itemconfig
+
+    def counted_itemconfig(*args, **kwargs):
+        style_calls.append(args[0] if args else None)
+        return original_itemconfig(*args, **kwargs)
+
+    monkeypatch.setattr(h.canvas, "itemconfig", counted_itemconfig)
+
+    h.press(200, 200, button=2)
+    h.motion(260, 230, button=2)
+    h.release(260, 230, button=2)
+
+    assert tuple(h.canvas.coords(entry.ids[0])) != previous_coords
+    assert style_calls == []
+
+
+def test_offscreen_marker_skips_moves_until_it_can_enter_the_view(make_harness) -> None:
+    scene = Scene("Offscreen marker")
+    entity = scene.create_entity("Far Away", entity_id="far-away")
+    entity.add_component(TransformComponent(x=100.0, y=0.0))
+    h = make_harness()
+    h.panel.render(scene)
+    h.pump()
+    entry = h.panel._marker_entries[entity.entity_id]
+    previous_coords = tuple(h.canvas.coords(entry.ids[0]))
+
+    h.panel.pan(1.0, 0.0)
+    still_offscreen_coords = tuple(h.canvas.coords(entry.ids[0]))
+    h.panel.pan(89.0, 0.0)
+    visible_coords = tuple(h.canvas.coords(entry.ids[0]))
+
+    assert still_offscreen_coords == previous_coords
+    assert visible_coords != previous_coords
+    assert (visible_coords[0] + visible_coords[2]) / 2 == pytest.approx(WIDTH)
+
+
+def test_offscreen_marker_restyles_when_selection_changes(make_harness) -> None:
+    scene = Scene("Offscreen selection")
+    entity = scene.create_entity("Far Away", entity_id="far-away")
+    entity.add_component(TransformComponent(x=100.0, y=0.0))
+    h = make_harness()
+    h.panel.render(scene)
+    h.pump()
+    entry = h.panel._marker_entries[entity.entity_id]
+    previous_fill = h.canvas.itemcget(entry.ids[0], "fill")
+
+    h.panel.render(scene, entity.entity_id)
+    h.pump()
+
+    assert h.canvas.itemcget(entry.ids[0], "fill") != previous_fill
+
+
+def test_camera_motion_updates_retained_visual_geometry_without_restyling(make_harness, monkeypatch) -> None:
+    scene = Scene("Visual motion")
+    entity = scene.create_entity("Player", entity_id="player")
+    entity.add_component(TransformComponent())
+    entity.add_component(PrimitiveComponent("rectangle"))
+    h = make_harness()
+    h.panel.render(scene)
+    h.pump()
+    entry = h.panel._canvas_items[entity.entity_id]
+    previous_coords = tuple(h.canvas.coords(entry.body))
+    style_calls = []
+    original_itemconfig = h.canvas.itemconfig
+
+    def counted_itemconfig(*args, **kwargs):
+        style_calls.append(args[0] if args else None)
+        return original_itemconfig(*args, **kwargs)
+
+    monkeypatch.setattr(h.canvas, "itemconfig", counted_itemconfig)
+
+    h.press(200, 200, button=2)
+    h.motion(260, 230, button=2)
+    h.release(260, 230, button=2)
+
+    assert tuple(h.canvas.coords(entry.body)) != previous_coords
+    assert style_calls == []
 
 
 def test_resize_keeps_camera_and_reflows_grid(make_harness) -> None:

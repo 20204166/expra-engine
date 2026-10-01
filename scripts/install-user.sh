@@ -25,18 +25,21 @@ else
     exit 1
 fi
 
-wheel="$($py -c 'from pathlib import Path; import re, sys
+wheel_version="$(PYTHONPATH="$here/src${PYTHONPATH:+:$PYTHONPATH}" "$py" -c 'from pathlib import Path; import sys
+from expra_engine._release import _matching_wheels, _format_version
 dist = Path(sys.argv[1]); requested = sys.argv[2]
-pattern = re.compile(r"^expra_engine-(\d+\.\d+\.\d+\.\d+)-py3-none-any\.whl$")
-wheels = [(tuple(map(int, m.group(1).split("."))), p) for p in dist.glob("expra_engine-*.whl") if (m := pattern.match(p.name))]
+wheels = _matching_wheels(dist)
 if requested:
-    wheels = [item for item in wheels if ".".join(map(str, item[0])) == requested]
+    wheels = [item for item in wheels if _format_version(item[0]) == requested]
 if not wheels:
     raise SystemExit("no matching Expra wheel found")
-print(max(wheels)[1].resolve())' "$here/dist" "$version")"
+print(_format_version(max(version for version, _path in wheels)))' "$here/dist" "$version")"
 
-echo "Verifying wheel: $(basename "$wheel")"
-PYTHONPATH="$here/src${PYTHONPATH:+:$PYTHONPATH}" "$py" -m expra_engine._release verify-wheel "$wheel"
+for wheel in "$here"/dist/expra_engine-"$wheel_version"-*.whl; do
+    echo "Verifying wheel: $(basename "$wheel")"
+    PYTHONPATH="$here/src${PYTHONPATH:+:$PYTHONPATH}" "$py" -m expra_engine._release verify-wheel "$wheel"
+done
 
 source "$here/scripts/install-common.sh"
+wheel="$(select_compatible_wheel "$py" "$here/dist" "$wheel_version")"
 install_wheel "$wheel" "$mode"

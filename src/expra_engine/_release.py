@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import re
 import zipfile
 from collections.abc import Mapping
@@ -24,7 +25,9 @@ from typing import Literal
 VersionBump = Literal["none", "patch", "feature", "minor"]
 
 _VERSION_RE = re.compile(r'(__version__\s*=\s*")(?P<value>\d+\.\d+\.\d+\.\d+)(")')
-_WHEEL_NAME_RE = re.compile(r"^expra_engine-(\d+\.\d+\.\d+\.\d+)-py3-none-any\.whl$")
+_WHEEL_NAME_RE = re.compile(
+    r"^expra_engine-(\d+\.\d+\.\d+\.\d+)-([^-]+)-([^-]+)-([^-]+)\.whl$"
+)
 
 _VERSION_MODULE = Path("src") / "expra_engine" / "_version.py"
 _PACKAGE_ROOT = "expra_engine"
@@ -48,6 +51,7 @@ _REQUIRED_PACKAGE_MEMBERS = (
     "expra_engine/runtime/system.py",
     "expra_engine/design/__init__.py",
     "expra_engine/design/tokens.py",
+    "expra_engine/_native_source_manifest.json",
 )
 _REQUIRED_PACKAGE_DATA = ("expra_engine/py.typed",)
 _SYSTEM_ANALYZER_MARKERS = (
@@ -133,6 +137,27 @@ def _skip_source_path(path: Path) -> bool:
     return "__pycache__" in parts or path.suffix == ".pyc"
 
 
+def native_source_manifest(package_dir: Path) -> bytes:
+    """Return deterministic hashes for build-system and optional Rust inputs."""
+    candidates = [
+        package_dir / "pyproject.toml",
+        package_dir / "setup.cfg",
+        package_dir / "setup.py",
+        package_dir / "native" / "expra_render_math" / "Cargo.toml",
+        package_dir / "native" / "expra_render_math" / "Cargo.lock",
+        package_dir / "native" / "expra_render_math" / "pyproject.toml",
+    ]
+    rust_src = package_dir / "native" / "expra_render_math" / "src"
+    if rust_src.exists():
+        candidates.extend(rust_src.rglob("*.rs"))
+    inputs = {
+        path.relative_to(package_dir).as_posix(): _sha256_bytes(path.read_bytes())
+        for path in sorted(candidates)
+        if path.is_file()
+    }
+    return json.dumps(inputs, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
 def _collect_package_inputs(package_dir: Path) -> dict[str, str]:
     """Hash every package build input exactly as the wheel stores it.
 
@@ -155,6 +180,9 @@ def _collect_package_inputs(package_dir: Path) -> dict[str, str]:
     for name in _TOP_LEVEL_MODULES:
         path = package_dir / name
         manifest[name] = _sha256_bytes(path.read_bytes())
+    manifest[f"{_PACKAGE_ROOT}/_native_source_manifest.json"] = _sha256_bytes(
+        native_source_manifest(package_dir)
+    )
     return manifest
 
 
@@ -166,6 +194,12 @@ def _read_manifest_from_wheel(wheel_path: Path) -> dict[str, str]:
         for name in archive.namelist():
             if name.endswith("/") or ".dist-info/" in name:
                 continue
+            if name.startswith("expra_render_math") and Path(name).suffix.lower() in {
+                ".so",
+                ".pyd",
+                ".dylib",
+            }:
+                continue
             payload = archive.read(name)
             if name == f"{_PACKAGE_ROOT}/{_VERSION_MODULE.name}":
                 payload = _version_normalized(payload)
@@ -173,17 +207,29 @@ def _read_manifest_from_wheel(wheel_path: Path) -> dict[str, str]:
     return build_inputs
 
 
-def _newest_wheel(dist_dir: Path) -> Path | None:
+def _matching_wheels(dist_dir: Path) -> list[tuple[tuple[int, int, int, int], Path]]:
     wheels: list[tuple[tuple[int, int, int, int], Path]] = []
     for path in dist_dir.glob("expra_engine-*.whl"):
         match = _WHEEL_NAME_RE.match(path.name)
         if match is None:
             continue
         wheels.append((_parse_version(match.group(1)), path))
+    return wheels
+
+
+def _newest_wheels(dist_dir: Path) -> tuple[Path, ...]:
+    wheels = _matching_wheels(dist_dir)
     if not wheels:
-        return None
-    wheels.sort()
-    return wheels[-1][1]
+        return ()
+    newest_version = max(version for version, _path in wheels)
+    return tuple(
+        sorted(path for version, path in wheels if version == newest_version)
+    )
+
+
+def _newest_wheel(dist_dir: Path) -> Path | None:
+    wheels = _newest_wheels(dist_dir)
+    return wheels[-1] if wheels else None
 
 
 def _wheel_version(path: Path) -> str:
@@ -191,6 +237,13 @@ def _wheel_version(path: Path) -> str:
     if match is None:
         raise ValueError(f"unexpected wheel filename: {path.name}")
     return match.group(1)
+
+
+def _wheel_tags(path: Path) -> tuple[str, str, str]:
+    match = _WHEEL_NAME_RE.match(path.name)
+    if match is None:
+        raise ValueError(f"unexpected wheel filename: {path.name}")
+    return match.group(2), match.group(3), match.group(4)
 
 
 def diff_manifests(previous: Mapping[str, str], current: Mapping[str, str]) -> DiffSummary:
@@ -275,8 +328,10 @@ def write_current_version(package_dir: Path, version: str) -> None:
 
 
 def rewrite_sha256sums(dist_dir: Path) -> None:
-    wheel = _newest_wheel(dist_dir)
-    lines = [f"{_sha256_bytes(wheel.read_bytes())}  {wheel.name}"] if wheel is not None else []
+    lines = [
+        f"{_sha256_bytes(wheel.read_bytes())}  {wheel.name}"
+        for wheel in _newest_wheels(dist_dir)
+    ]
     (dist_dir / "SHA256SUMS").write_text(
         "\n".join(lines) + ("\n" if lines else ""), encoding="utf-8"
     )
@@ -342,14 +397,36 @@ def verify_wheel(wheel_path: Path) -> None:
             raise ValueError(f"missing wheel members: {missing}")
         metadata_names = [name for name in names if name.endswith(".dist-info/METADATA")]
         entry_point_names = [name for name in names if name.endswith(".dist-info/entry_points.txt")]
+        wheel_metadata_names = [name for name in names if name.endswith(".dist-info/WHEEL")]
         if len(metadata_names) != 1:
             raise ValueError("wheel must contain exactly one dist-info/METADATA")
         if len(entry_point_names) != 1:
             raise ValueError("wheel must contain exactly one dist-info/entry_points.txt")
+        if len(wheel_metadata_names) != 1:
+            raise ValueError("wheel must contain exactly one dist-info/WHEEL")
         metadata = archive.read(metadata_names[0]).decode("utf-8")
         entry_points = archive.read(entry_point_names[0]).decode("utf-8")
+        wheel_metadata = archive.read(wheel_metadata_names[0]).decode("utf-8")
         version_payload = archive.read("expra_engine/_version.py").decode("utf-8")
     wheel_version = _wheel_version(wheel_path)
+    python_tag, abi_tag, platform_tag = _wheel_tags(wheel_path)
+    expected_tag = f"Tag: {python_tag}-{abi_tag}-{platform_tag}"
+    if expected_tag not in wheel_metadata.splitlines():
+        raise ValueError("wheel filename tags do not match its dist-info/WHEEL tags")
+    native_modules = [
+        name
+        for name in names
+        if "/" not in name
+        and name.startswith("expra_render_math")
+        and Path(name).suffix.lower() in {".so", ".pyd", ".dylib"}
+    ]
+    is_universal = (python_tag, abi_tag, platform_tag) == ("py3", "none", "any")
+    if not is_universal and (python_tag, abi_tag) != ("cp312", "abi3"):
+        raise ValueError("native Expra wheels must use the cp312-abi3 compatibility tag")
+    if is_universal and native_modules:
+        raise ValueError("universal Python wheel must not contain a compiled native module")
+    if not is_universal and not native_modules:
+        raise ValueError("platform wheel is missing the expra_render_math extension")
     metadata_match = re.search(r"^Version:\s*(\S+)\s*$", metadata, re.MULTILINE)
     source_match = _VERSION_RE.search(version_payload)
     if metadata_match is None or metadata_match.group(1) != wheel_version:

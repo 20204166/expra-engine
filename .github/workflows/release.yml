@@ -9,24 +9,84 @@ permissions:
   contents: write
 
 jobs:
-  release:
+  build-native-wheels:
+    name: Native wheel (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@stable
+      - run: python -m pip install --upgrade build
+      - name: Build platform wheel with Rust acceleration
+        env:
+          EXPRA_BUILD_RUST: "1"
+        run: python -m build --wheel --outdir wheelhouse .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-wheels-${{ matrix.os }}
+          path: wheelhouse/*.whl
+          if-no-files-found: error
+
+  build-python-fallback:
+    name: Universal Python fallback wheel
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Build and verify wheel
+      - run: python -m pip install --upgrade build
+      - name: Build Python-only wheel
+        env:
+          EXPRA_BUILD_RUST: "0"
+        run: python -m build --wheel --outdir wheelhouse .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-fallback-wheel
+          path: wheelhouse/*.whl
+          if-no-files-found: error
+
+  publish-release:
+    name: Verify and publish wheels
+    needs: [build-native-wheels, build-python-fallback]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade build
+      - name: Prepare clean release wheelhouse
+        run: python -c 'import shutil; from pathlib import Path; shutil.rmtree("dist", ignore_errors=True); Path("dist").mkdir()'
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: "*-wheel*"
+          merge-multiple: true
+      - name: Verify release version, wheel contents, and checksums
         env:
           PYTHONPATH: src
         run: |
-          python -m pip install --upgrade build
           tag_version="${GITHUB_REF_NAME#v}"
           source_version="$(python -c 'from expra_engine._release import read_current_version; from pathlib import Path; print(read_current_version(Path(".")))')"
           test "$tag_version" = "$source_version"
-          python -m build --wheel --outdir dist .
           python -m expra_engine._release sync-artifacts --package-dir .
-          python -m expra_engine._release verify-wheel "dist/expra_engine-${source_version}-py3-none-any.whl"
+          python - <<'PY'
+          from pathlib import Path
+          from expra_engine._release import _newest_wheels, verify_wheel
+
+          wheels = _newest_wheels(Path("dist"))
+          if not wheels:
+              raise SystemExit("release wheelhouse is empty")
+          for wheel in wheels:
+              verify_wheel(wheel)
+          PY
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}

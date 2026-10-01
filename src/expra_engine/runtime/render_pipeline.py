@@ -21,6 +21,7 @@ import math
 from dataclasses import dataclass, field
 from typing import Iterable, TypeAlias
 
+from expra_engine.runtime.render_math import visible_items as filter_visible_items
 from expra_engine.runtime.rendering import (
     RenderContext,
     RenderFrame,
@@ -203,13 +204,26 @@ class RenderPlanBuilder:
         cls,
         frame: RenderFrame,
         context: RenderContext | None = None,
+        *,
+        visible_items: tuple[RenderItem, ...] | None = None,
     ) -> RenderPlan:
         """Convert a frame's ordered neutral submissions into a render plan."""
         builder = cls()
         submissions = frame.submissions or frame.items
+        if visible_items is None and context is not None:
+            candidates = list(frame.items)
+            candidate_ids = {id(item) for item in candidates}
+            for submission in submissions:
+                if isinstance(submission, RenderItem) and id(submission) not in candidate_ids:
+                    candidates.append(submission)
+                    candidate_ids.add(id(submission))
+            visible_items = filter_visible_items(candidates, context)
+        visible_item_ids = (
+            frozenset(map(id, visible_items)) if visible_items is not None else None
+        )
         for insertion_index, submission in enumerate(submissions):
             if isinstance(submission, RenderItem):
-                if context is not None and not submission.is_visible(context):
+                if visible_item_ids is not None and id(submission) not in visible_item_ids:
                     continue
                 builder.add_item(submission, insertion_index=insertion_index)
                 continue

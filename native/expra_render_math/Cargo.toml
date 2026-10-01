@@ -1,0 +1,16 @@
+[package]
+name = "expra_render_math"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "expra_render_math"
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = ["python-extension"]
+python-extension = ["pyo3/extension-module"]
+abi3-py312 = ["pyo3/abi3-py312"]
+
+[dependencies]
+pyo3 = { version = "0.29.0" }

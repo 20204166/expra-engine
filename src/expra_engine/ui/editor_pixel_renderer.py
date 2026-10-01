@@ -167,11 +167,14 @@ def frame_textures_available(
     *,
     diagnostics: RenderDiagnostics | None = None,
     entity_names: Mapping[str, str] | None = None,
+    visible_items: tuple[RenderItem, ...] | None = None,
 ) -> bool:
     """Return whether every visible texture can participate in pixel rendering."""
     diagnostics = diagnostics or RenderDiagnostics(_LOGGER)
     try:
-        items = frame.visible_items(context)
+        items = frame.visible_items(context) if visible_items is None else visible_items
+        if any(not isinstance(item, RenderItem) for item in items):
+            raise TypeError("visible_items must contain RenderItem values")
         available = True
         for item in items:
             texture_id = _texture_id_for_item(item)
@@ -250,6 +253,7 @@ def frame_textures_available(
 def _render_pillow_bridge(
     frame: RenderFrame,
     context: RenderContext,
+    visible_items: tuple[RenderItem, ...],
     *,
     surface_factory: Callable[[tuple[int, int]], Any],
     renderer_factory: Callable[[Any], Any],
@@ -276,7 +280,11 @@ def _render_pillow_bridge(
         renderer = renderer_factory(surface)
         render_token = observer.begin("editor.pixelbridge.render") if observer is not None else None
         renderer.start(context)
-        renderer.render(frame)
+        render_previsible = getattr(renderer, "render_previsible", None)
+        if callable(render_previsible):
+            render_previsible(frame, visible_items)
+        else:
+            renderer.render(frame)
         if render_token is not None:
             assert observer is not None
             observer.finish(render_token)
@@ -340,6 +348,7 @@ def render_editor_frame_to_pixel_image(
     *,
     width: int,
     height: int,
+    visible_items: tuple[RenderItem, ...] | None = None,
     resource_service: Any | None,
     resource_provider: Callable[[str], Any | None] | None,
     pygame_module: Any,
@@ -362,9 +371,12 @@ def render_editor_frame_to_pixel_image(
     need, not a live editor image).
     """
     diagnostics = diagnostics or RenderDiagnostics(_LOGGER)
+    visible_items = frame.visible_items(context) if visible_items is None else visible_items
+    if any(not isinstance(item, RenderItem) for item in visible_items):
+        raise TypeError("visible_items must contain RenderItem values")
     provider = resource_provider
     if provider is None:
-        if any(_texture_id_for_item(item) is not None for item in frame.visible_items(context)):
+        if any(_texture_id_for_item(item) is not None for item in visible_items):
             _log_presentation_failure(
                 frame,
                 "renderer has no resource provider",
@@ -378,6 +390,7 @@ def render_editor_frame_to_pixel_image(
         provider,
         diagnostics=diagnostics,
         entity_names=entity_names,
+        visible_items=visible_items,
     ):
         return None
     try:
@@ -416,6 +429,7 @@ def render_editor_frame_to_pixel_image(
         return _render_pillow_bridge(
             frame,
             context,
+            visible_items,
             surface_factory=surface_factory,
             renderer_factory=renderer_factory,
             pygame_module=pygame_module,
@@ -532,6 +546,7 @@ class EditorPixelRenderer:
         height: int,
         *,
         entity_names: Mapping[str, str] | None = None,
+        visible_items: tuple[RenderItem, ...] | None = None,
     ) -> Any | None:
         try:
             import pygame  # type: ignore[reportMissingImports]
@@ -558,6 +573,7 @@ class EditorPixelRenderer:
                 editor_render_context(editor_camera, width, height),
                 width=width,
                 height=height,
+                visible_items=visible_items,
                 resource_service=self._resource_service,
                 resource_provider=self._provider,
                 pygame_module=pygame,

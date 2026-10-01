@@ -215,6 +215,22 @@ class PygameRenderer(PygameLightingRenderMixin, LegacyPygameRenderMixin):
 
     def render(self, frame: ContractRenderFrame) -> None:
         """Render a backend-neutral frame of primitive descriptors."""
+        self._render(frame, visible_items=None)
+
+    def render_previsible(
+        self,
+        frame: ContractRenderFrame,
+        visible_items: tuple[RenderItem, ...],
+    ) -> None:
+        """Render using an editor-preflighted visible-item set for this frame."""
+        self._render(frame, visible_items=visible_items)
+
+    def _render(
+        self,
+        frame: ContractRenderFrame,
+        *,
+        visible_items: tuple[RenderItem, ...] | None,
+    ) -> None:
         self._screen_pipeline.clear()
         self._draw_failed = False
         self._backend_failure_detail = None
@@ -222,7 +238,7 @@ class PygameRenderer(PygameLightingRenderMixin, LegacyPygameRenderMixin):
         observer = self._observer
         token = observer.begin("render:backend") if observer is not None else None
         try:
-            self._render_frame(frame)
+            self._render_frame(frame, visible_items=visible_items)
         finally:
             if observer is not None and token is not None:
                 observer.finish(
@@ -233,7 +249,12 @@ class PygameRenderer(PygameLightingRenderMixin, LegacyPygameRenderMixin):
                     else None,
                 )
 
-    def _render_frame(self, frame: ContractRenderFrame) -> None:
+    def _render_frame(
+        self,
+        frame: ContractRenderFrame,
+        *,
+        visible_items: tuple[RenderItem, ...] | None = None,
+    ) -> None:
         context = self.context
         if context is None:
             self._fail_frame(
@@ -274,13 +295,14 @@ class PygameRenderer(PygameLightingRenderMixin, LegacyPygameRenderMixin):
 
         if frame.submissions:
             self._screen_pipeline.execute(
-                RenderPlanBuilder.from_frame(frame, context),
+                RenderPlanBuilder.from_frame(frame, context, visible_items=visible_items),
                 surface=surface,
                 context=context,
                 draw_item=draw_item,
             )
         else:
-            for item in frame.visible_items(context):
+            items = visible_items if visible_items is not None else frame.visible_items(context)
+            for item in items:
                 draw_item(item, surface)
         if material_lighting and self._observer is not None and frame.items:
             self._observer.increment(

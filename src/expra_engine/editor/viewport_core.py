@@ -53,6 +53,7 @@ from expra_engine.ui.viewport_overlays import draw_collider_overlays
 from expra_engine.ui.viewport_render_target import (
     EditorRenderTarget,
     build_editor_render_target,
+    reproject_editor_render_target,
 )
 from expra_engine.ui.world_overlay import WorldOverlayMixin
 
@@ -64,6 +65,8 @@ class _CanvasEntry:
     shape: str  # "pixels" | "rect" | "circle" | "poly" | "text"
     body: int | None  # main shape canvas item ID, absent for pixel rendering
     label: int | None = None  # name label canvas item ID
+    body_style: tuple[Any, ...] | None = None
+    label_style: tuple[str, str] | None = None
 
 
 class ViewportCore(WorldOverlayMixin):
@@ -449,17 +452,12 @@ class ViewportCore(WorldOverlayMixin):
         viewport = max(1, width), max(1, height)
         self._camera.resize(viewport)
         self._grid_dirty = True
-        self._target = build_editor_render_target(
+        self._target = reproject_editor_render_target(
+            self._target,
             self._scene,
             viewport=viewport,
-            selected_id=self._selected_id,
             camera=self._camera,
-            interpolator=self._interpolator,
-            interpolation_fraction=self._interpolation_fraction,
             observer=self._observer,
-            animated_players=getattr(self, "_animated_players", None),
-            preview_lighting=self._preview_lighting,
-            primary_level_entity_ids=self._primary_level_entity_ids,
             resolved_camera=self._resolved_runtime_camera,
         )
         self._target_dirty = False
@@ -470,17 +468,12 @@ class ViewportCore(WorldOverlayMixin):
         if not self._target_dirty:
             return
         width, height = self._canvas.viewport_size()
-        self._target = build_editor_render_target(
+        self._target = reproject_editor_render_target(
+            self._target,
             self._scene,
             viewport=(max(1, width), max(1, height)),
-            selected_id=self._selected_id,
             camera=self._camera if self._editor_overlays else None,
-            interpolator=self._interpolator,
-            interpolation_fraction=self._interpolation_fraction,
             observer=self._observer,
-            animated_players=getattr(self, "_animated_players", None),
-            preview_lighting=self._preview_lighting,
-            primary_level_entity_ids=self._primary_level_entity_ids,
             resolved_camera=self._resolved_runtime_camera,
         )
         self._items_by_id = {item.key: item for item in self._target.items}
@@ -538,6 +531,7 @@ class ViewportCore(WorldOverlayMixin):
             pixel_camera,
             max(1, int(w)),
             max(1, int(h)),
+            visible_items=self._target.items,
             entity_names={entity_id: entity.name for entity_id, entity in self._entity_map.items()},
         )
         runtime_pixels = pixel_image is not None
@@ -690,6 +684,8 @@ class ViewportCore(WorldOverlayMixin):
             if item.material.outline
             else color
         )
+        text_val = item.text.text if item.text else ""
+        font_val = (item.text.font, round(item.text.size)) if item.text else "default-font"
 
         # Determine which canvas primitive matches the current state.
         if runtime_pixels:
@@ -711,6 +707,11 @@ class ViewportCore(WorldOverlayMixin):
         if entry is not None and entry.shape != new_shape:
             self._delete_canvas_entry(entry)
             entry = None
+        body_style: tuple[Any, ...] | None = (
+            (text_val, color, font_val) if new_shape == "text" else (color, outline)
+        )
+        if new_shape == "pixels":
+            body_style = None
 
         # Update existing item in-place, or create a new one.
         if new_shape == "pixels":
@@ -719,19 +720,19 @@ class ViewportCore(WorldOverlayMixin):
             if entry is not None:
                 assert entry.body is not None
                 self._canvas.coords(entry.body, ex - sx, ey - sy, ex + sx, ey + sy)
-                self._canvas.itemconfig(entry.body, fill=color, outline=outline)
+                if entry.body_style != body_style:
+                    self._canvas.itemconfig(entry.body, fill=color, outline=outline)
                 body_id = entry.body
             else:
                 body_id = self._canvas.create_oval(
                     ex - sx, ey - sy, ex + sx, ey + sy, fill=color, outline=outline, tags=tag
                 )
         elif new_shape == "text":
-            text_val = item.text.text if item.text else ""
-            font_val = (item.text.font, round(item.text.size)) if item.text else "default-font"
             if entry is not None:
                 assert entry.body is not None
                 self._canvas.coords(entry.body, ex, ey)
-                self._canvas.itemconfig(entry.body, text=text_val, fill=color, font=font_val)
+                if entry.body_style != body_style:
+                    self._canvas.itemconfig(entry.body, text=text_val, fill=color, font=font_val)
                 body_id = entry.body
             else:
                 body_id = self._canvas.create_text(
@@ -742,7 +743,8 @@ class ViewportCore(WorldOverlayMixin):
             if entry is not None:
                 assert entry.body is not None
                 self._canvas.coords(entry.body, *corners)
-                self._canvas.itemconfig(entry.body, fill=color, outline=outline)
+                if entry.body_style != body_style:
+                    self._canvas.itemconfig(entry.body, fill=color, outline=outline)
                 body_id = entry.body
             else:
                 body_id = self._canvas.create_polygon(
@@ -752,7 +754,8 @@ class ViewportCore(WorldOverlayMixin):
             if entry is not None:
                 assert entry.body is not None
                 self._canvas.coords(entry.body, ex - sx, ey - sy, ex + sx, ey + sy)
-                self._canvas.itemconfig(entry.body, fill=color, outline=outline)
+                if entry.body_style != body_style:
+                    self._canvas.itemconfig(entry.body, fill=color, outline=outline)
                 body_id = entry.body
             else:
                 body_id = self._canvas.create_rectangle(
@@ -762,15 +765,18 @@ class ViewportCore(WorldOverlayMixin):
         # Name label — update color/text/position in-place.
         entity = self._entity_map.get(item.key)
         label_id: int | None = None
+        label_style: tuple[str, str] | None = None
         if entity is not None and editor_overlays:
             label_color = (
                 self._colors["accent_ink"]
                 if item.key == self._target.selected_id
                 else self._colors["ink_3"]
             )
+            label_style = (entity.name, label_color)
             if entry is not None and entry.label is not None:
                 self._canvas.coords(entry.label, ex, ey + sy + 8)
-                self._canvas.itemconfig(entry.label, text=entity.name, fill=label_color)
+                if entry.label_style != label_style:
+                    self._canvas.itemconfig(entry.label, text=entity.name, fill=label_color)
                 label_id = entry.label
             else:
                 label_id = self._canvas.create_text(
@@ -785,7 +791,13 @@ class ViewportCore(WorldOverlayMixin):
             # Overlays turned off — remove stale label.
             self._canvas.delete(entry.label)
 
-        self._canvas_items[item.key] = _CanvasEntry(shape=new_shape, body=body_id, label=label_id)
+        self._canvas_items[item.key] = _CanvasEntry(
+            shape=new_shape,
+            body=body_id,
+            label=label_id,
+            body_style=body_style,
+            label_style=label_style,
+        )
 
         if item.key == self._target.selected_id and editor_overlays:
             self._draw_selection_outline(item, runtime_context)

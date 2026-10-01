@@ -190,11 +190,19 @@ mypy src tests
 ## Wheel Release
 
 Builds automatically compare package inputs with the newest local wheel, bump
-the Expra version when needed, refresh `dist/SHA256SUMS`, and verify the wheel:
+the Expra version when needed, refresh `dist/SHA256SUMS`, and verify every wheel
+for that version:
 
 ```bash
 EXPRA_VERSION_BUMP=auto ./scripts/build-wheel.sh
 ```
+
+With Cargo on `PATH`, the default `EXPRA_BUILD_RUST=auto` builds both the
+universal Python fallback wheel and a platform wheel containing the optional
+Rust visibility kernel. Use `EXPRA_BUILD_RUST=0` for a Python-only build or
+`EXPRA_BUILD_RUST=1` to require and build the native wheel. Tagged releases
+publish the fallback and native wheels for Linux, macOS, and Windows; installers
+verify the wheel checksums and let pip select the compatible wheel.
 
 Validate the installed editor entry point in a clean virtual environment:
 
@@ -244,7 +252,8 @@ On Windows PowerShell, use the adapted Expra online installer:
 irm https://raw.githubusercontent.com/20204166/expra-engine/main/install/install-online.ps1 | iex
 ```
 
-It downloads the newest wheel named by `dist/SHA256SUMS`, verifies the digest,
+It downloads and verifies the same-version wheel set named by `dist/SHA256SUMS`,
+then lets pip choose the compatible native or universal wheel,
 bootstraps Python 3.12 through `winget` when needed, installs for the current
 user, and verifies the installed version. Use `-System` with a downloaded copy
 for a machine-wide install.

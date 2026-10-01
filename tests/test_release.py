@@ -35,12 +35,15 @@ def _make_package(root: Path, version: str) -> None:
         "design/tokens.py",
     ):
         (pkg / relative).write_text("")
+    (pkg / "_native_source_manifest.json").write_bytes(_release.native_source_manifest(root))
 
 
-def _wheel_from_package(root: Path, version: str) -> Path:
+def _wheel_from_package(
+    root: Path, version: str, tags: str = "py3-none-any"
+) -> Path:
     """Zip the exact source bytes into a wheel so manifests compare equal."""
 
-    wheel = root / "dist" / f"expra_engine-{version}-py3-none-any.whl"
+    wheel = root / "dist" / f"expra_engine-{version}-{tags}.whl"
     wheel.parent.mkdir(exist_ok=True)
     with zipfile.ZipFile(wheel, "w") as archive:
         for path in sorted((root / "src" / "expra_engine").rglob("*")):
@@ -55,6 +58,12 @@ def _wheel_from_package(root: Path, version: str) -> Path:
             f"expra_engine-{version}.dist-info/METADATA",
             f"Metadata-Version: 2.1\nName: expra-engine\nVersion: {version}\n",
         )
+        archive.writestr(
+            f"expra_engine-{version}.dist-info/WHEEL",
+            f"Wheel-Version: 1.0\nTag: {tags}\n",
+        )
+        if tags != "py3-none-any":
+            archive.writestr("expra_render_math.abi3.so", b"native-extension")
     return wheel
 
 
@@ -90,6 +99,10 @@ class VersionHelpersTests(unittest.TestCase):
         self.assertEqual(_release._pick_base_version("1.0.0.0", None), "1.0.0.0")
         self.assertEqual(_release._pick_base_version("1.0.0.0", "1.2.0.0"), "1.2.0.0")
         self.assertEqual(_release._pick_base_version("1.5.0.0", "1.2.0.0"), "1.5.0.0")
+
+    def test_wheel_version_accepts_native_platform_tags(self) -> None:
+        wheel = Path("expra_engine-1.2.3.4-cp312-abi3-linux_x86_64.whl")
+        self.assertEqual(_release._wheel_version(wheel), "1.2.3.4")
 
 
 class ManifestDiffTests(unittest.TestCase):
@@ -166,6 +179,40 @@ class BuildScriptTests(unittest.TestCase):
         clean = script.index('rm -rf "$here/build"')
         build = script.index('"$py" -m build --wheel')
         self.assertLess(clean, build)
+        self.assertIn('EXPRA_BUILD_RUST=0 "$py" -m build --wheel', script)
+        self.assertIn('EXPRA_BUILD_RUST=1 "$py" -m build --wheel', script)
+
+    def test_wheel_build_stages_outputs_before_replacing_same_version_artifacts(self) -> None:
+        script = (Path(__file__).parents[1] / "scripts" / "build-wheel.sh").read_text(
+            encoding="utf-8"
+        )
+        stage = script.index('wheel_stage="$(mktemp -d')
+        pure_build = script.index('EXPRA_BUILD_RUST=0 "$py" -m build --wheel')
+        native_build = script.index('EXPRA_BUILD_RUST=1 "$py" -m build --wheel')
+        replace = script.index('rm -f "${current_wheels[@]}"', script.index("artifact_backup_ready=1"))
+        publish = script.index('mv "${staged_wheels[@]}" "$here/dist/"')
+        self.assertLess(stage, pure_build)
+        self.assertLess(pure_build, native_build)
+        self.assertLess(native_build, replace)
+        self.assertLess(replace, publish)
+
+    def test_wheel_build_keeps_previous_version_artifacts_for_failure_recovery(self) -> None:
+        script = (Path(__file__).parents[1] / "scripts" / "build-wheel.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("artifact_backup", script)
+        self.assertIn("artifact_backup_ready", script)
+        self.assertIn("SHA256SUMS", script)
+
+    def test_release_workflow_cleans_dist_before_downloading_current_wheels(self) -> None:
+        workflow = (
+            Path(__file__).parents[1] / ".github" / "workflows" / "release.yml"
+        ).read_text(encoding="utf-8")
+        clean = workflow.index("clean release wheelhouse")
+        download = workflow.index("actions/download-artifact@v4")
+
+        self.assertLess(clean, download)
+        self.assertIn('shutil.rmtree("dist", ignore_errors=True)', workflow)
 
 
 class WheelManifestTests(unittest.TestCase):
@@ -181,6 +228,30 @@ class WheelManifestTests(unittest.TestCase):
 
             diff = _release.diff_manifests(wheel_manifest, source_manifest)
             self.assertFalse(diff.has_changes, diff)
+
+    def test_native_and_python_wheels_have_the_same_source_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _make_package(root, "1.0.0.0")
+            python_wheel = _wheel_from_package(root, "1.0.0.0")
+            native_wheel = _wheel_from_package(root, "1.0.0.0", "cp312-abi3-linux_x86_64")
+
+            self.assertEqual(
+                _release._read_manifest_from_wheel(python_wheel),
+                _release._read_manifest_from_wheel(native_wheel),
+            )
+
+    def test_native_source_manifest_changes_when_rust_source_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            native_source = root / "native" / "expra_render_math" / "src" / "lib.rs"
+            native_source.parent.mkdir(parents=True)
+            native_source.write_text("fn visible() -> bool { true }\n")
+            before = _release.native_source_manifest(root)
+
+            native_source.write_text("fn visible() -> bool { false }\n")
+
+            self.assertNotEqual(_release.native_source_manifest(root), before)
 
     def test_real_content_change_is_detected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -218,19 +289,24 @@ class WheelManifestTests(unittest.TestCase):
             self.assertEqual(second, version_after_first)
             self.assertEqual(_release.read_current_version(root), version_after_first)
 
-    def test_rewrite_sha256sums_contains_only_newest_wheel(self) -> None:
+    def test_rewrite_sha256sums_contains_all_newest_version_wheels(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             _make_package(root, "1.0.0.0")
             _wheel_from_package(root, "1.0.0.0")
             newer = _wheel_from_package(root, "1.1.0.0")
+            native = _wheel_from_package(root, "1.1.0.0", "cp312-abi3-linux_x86_64")
             _release.rewrite_sha256sums(root / "dist")
             lines = (root / "dist" / "SHA256SUMS").read_text().splitlines()
 
-            self.assertEqual(len(lines), 1)
-            self.assertTrue(lines[0].endswith("expra_engine-1.1.0.0-py3-none-any.whl"), lines[0])
-            expected = hashlib.sha256(newer.read_bytes()).hexdigest()
-            self.assertEqual(lines[0].split()[0], expected)
+            self.assertEqual(len(lines), 2)
+            by_name = {line.split()[1]: line.split()[0] for line in lines}
+            self.assertEqual(
+                by_name[newer.name], hashlib.sha256(newer.read_bytes()).hexdigest()
+            )
+            self.assertEqual(
+                by_name[native.name], hashlib.sha256(native.read_bytes()).hexdigest()
+            )
 
 
 class WheelVerifyTests(unittest.TestCase):
@@ -240,6 +316,45 @@ class WheelVerifyTests(unittest.TestCase):
             _make_package(root, "1.0.0.0")
             wheel = _wheel_from_package(root, "1.0.0.0")
             _release.verify_wheel(wheel)  # must not raise
+
+    def test_verify_accepts_platform_wheel_with_native_module(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _make_package(root, "1.0.0.0")
+            wheel = _wheel_from_package(root, "1.0.0.0", "cp312-abi3-linux_x86_64")
+            _release.verify_wheel(wheel)
+
+    def test_verify_rejects_platform_wheel_without_native_module(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _make_package(root, "1.0.0.0")
+            wheel = _wheel_from_package(root, "1.0.0.0", "cp312-abi3-linux_x86_64")
+            rewritten = root / "dist" / "expra_engine-1.0.0.1-cp312-abi3-linux_x86_64.whl"
+            with zipfile.ZipFile(wheel) as source, zipfile.ZipFile(rewritten, "w") as target:
+                for name in source.namelist():
+                    if name != "expra_render_math.abi3.so":
+                        target.writestr(name, source.read(name))
+            with self.assertRaisesRegex(ValueError, "missing the expra_render_math extension"):
+                _release.verify_wheel(rewritten)
+
+    def test_verify_rejects_native_wheel_without_the_declared_abi3_floor(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _make_package(root, "1.0.0.0")
+            wheel = _wheel_from_package(root, "1.0.0.0", "cp312-cp312-linux_x86_64")
+
+            with self.assertRaisesRegex(ValueError, "cp312-abi3"):
+                _release.verify_wheel(wheel)
+
+    def test_verify_rejects_native_module_in_universal_python_wheel(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _make_package(root, "1.0.0.0")
+            wheel = _wheel_from_package(root, "1.0.0.0")
+            with zipfile.ZipFile(wheel, "a") as archive:
+                archive.writestr("expra_render_math.abi3.so", b"native-extension")
+            with self.assertRaisesRegex(ValueError, "universal Python wheel"):
+                _release.verify_wheel(wheel)
 
     def test_verify_rejects_forbidden_content(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

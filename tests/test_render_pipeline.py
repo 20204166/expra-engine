@@ -2,6 +2,7 @@
 
 import pytest
 
+import expra_engine.runtime.rendering as rendering
 from expra_engine.runtime.render_pipeline import (
     CaptureScreenOp,
     DrawItemOp,
@@ -66,6 +67,26 @@ def test_render_order_key_matches_frame_ordered_items():
     ]
 
     assert plan_order == frame_order
+
+
+def test_immutable_render_frame_reuses_its_ordered_item_tuple(monkeypatch):
+    frame = RenderFrame((item("b", layer=1), item("a", layer=0)))
+    calls = 0
+    original = rendering.render_item_order_key
+
+    def counted_order_key(render_item, insertion_index):
+        nonlocal calls
+        calls += 1
+        return original(render_item, insertion_index)
+
+    monkeypatch.setattr(rendering, "render_item_order_key", counted_order_key)
+
+    first = frame.ordered_items()
+    second = frame.ordered_items()
+
+    assert first is second
+    assert tuple(render_item.key for render_item in first) == ("a", "b")
+    assert calls == len(frame.items)
 
 
 def test_explicit_capture_is_interleaved_between_draws():
