@@ -22,8 +22,9 @@ from expra_engine.runtime.visual_components import PrimitiveComponent
 from tests.test_qt_viewport import QtHarness
 
 
-def _scene(entity_count: int) -> Scene:
+def _scene(entity_count: int, marker_ratio: float = 0.0) -> Scene:
     scene = Scene(f"Viewport motion benchmark ({entity_count})")
+    marker_count = round(entity_count * marker_ratio)
     for index in range(entity_count):
         if entity_count <= 1000:
             x = float(index % 50)
@@ -33,7 +34,8 @@ def _scene(entity_count: int) -> Scene:
             y = float(index // 200 - 25)
         entity = scene.create_entity(f"item-{index}")
         entity.add_component(TransformComponent(x=x, y=y))
-        entity.add_component(PrimitiveComponent("rectangle"))
+        if index >= marker_count:
+            entity.add_component(PrimitiveComponent("rectangle"))
     return scene
 
 
@@ -43,10 +45,24 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--events", type=int, default=30)
     parser.add_argument("--warmups", type=int, default=0)
     parser.add_argument("--gesture", choices=("pan", "zoom"), default="pan")
+    parser.add_argument(
+        "--marker-ratio",
+        type=float,
+        default=0.0,
+        help="fraction of entities without visuals, therefore shown as editor markers",
+    )
     parser.add_argument("--output")
     args = parser.parse_args()
-    if args.entities <= 0 or args.events <= 0 or args.warmups < 0:
-        parser.error("--entities/--events must be positive and --warmups non-negative")
+    if (
+        args.entities <= 0
+        or args.events <= 0
+        or args.warmups < 0
+        or not 0.0 <= args.marker_ratio <= 1.0
+    ):
+        parser.error(
+            "--entities/--events must be positive, --warmups non-negative, "
+            "and --marker-ratio must be in [0, 1]"
+        )
     return args
 
 
@@ -59,7 +75,7 @@ def _summary_ms(samples: tuple[float, ...]) -> dict[str, int | float]:
 
 def main() -> int:
     args = _arguments()
-    scene = _scene(args.entities)
+    scene = _scene(args.entities, args.marker_ratio)
     observer = ObservabilityWatcher(sample_limit=max(args.events, args.warmups, 1))
     harness = QtHarness(observer=observer)
     samples: list[float] = []
@@ -97,6 +113,8 @@ def main() -> int:
             "platform": platform.platform(),
             "gesture": args.gesture,
             "entities": args.entities,
+            "marker_entities": round(args.entities * args.marker_ratio),
+            "marker_ratio": args.marker_ratio,
             "events": args.events,
             "warmups": args.warmups,
             "canvas_items_after_initial_render": canvas_items,
