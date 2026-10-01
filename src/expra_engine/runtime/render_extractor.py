@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 
+from expra_engine.core.component import TransformComponent
 from expra_engine.core.entity import Entity
 from expra_engine.core.scene import Scene
 from expra_engine.runtime.animated_sprite_2d import (
     AnimatedSprite2DComponent,
     AnimatedSpritePlayer2D,
 )
+from expra_engine.runtime.camera_mount import VIEWPORT_ANCHORS, CameraMountComponent
 from expra_engine.runtime.canvas_effects import resolve_canvas_modulation
 from expra_engine.runtime.lighting_2d import Light2DComponent
 from expra_engine.runtime.material_component import MaterialComponent
@@ -24,6 +26,7 @@ from expra_engine.runtime.rendering import (
     RenderFrame,
     RenderItem,
     RenderPhase,
+    RenderSpace,
     TextDescriptor,
     Transform,
 )
@@ -66,6 +69,55 @@ def _transform(
     )
 
 
+def _local_transform(
+    entity: Entity,
+    interpolator: TransformInterpolator | None,
+    interpolation_fraction: float,
+) -> Transform:
+    if interpolator is not None:
+        try:
+            return interpolator.sample_local(entity.entity_id, interpolation_fraction)
+        except KeyError:
+            pass
+    component = entity.get_component(TransformComponent)
+    if component is None or not component.enabled:
+        return Transform()
+    return Transform(
+        position=(component.x, component.y, 0.0),
+        rotation=component.rotation,
+        scale=(component.scale_x, component.scale_y, 1.0),
+    )
+
+
+def _mount_transforms(
+    scene: Scene,
+    interpolator: TransformInterpolator | None,
+    interpolation_fraction: float,
+) -> dict[str, tuple[Entity, CameraMountComponent, Transform]]:
+    """Resolve the nearest mount and local Transform in one hierarchy traversal.
+
+    The root's own Transform is deliberately replaced by identity. Each
+    descendant's local pose is composed once and cached for this extraction,
+    preventing a deep HUD tree from repeating all ancestor compositions for
+    every visual descendant.
+    """
+    mounts: dict[str, tuple[Entity, CameraMountComponent, Transform]] = {}
+    for entity in scene.walk_hierarchy():
+        component = entity.get_component(CameraMountComponent)
+        if component is not None and component.enabled:
+            mounts[entity.entity_id] = (entity, component, Transform())
+            continue
+        if entity.parent_id is None:
+            continue
+        parent_mount = mounts.get(entity.parent_id)
+        if parent_mount is None:
+            continue
+        root, mount, parent_transform = parent_mount
+        local = _local_transform(entity, interpolator, interpolation_fraction)
+        mounts[entity.entity_id] = (root, mount, parent_transform.compose(local))
+    return mounts
+
+
 def _item(
     entity: Entity,
     visual: object,
@@ -73,6 +125,10 @@ def _item(
     player: AnimatedSpritePlayer2D | None = None,
     light_response: MaterialLightResponse | None = None,
     normal_map: NormalMapDescriptor | None = None,
+    *,
+    space: RenderSpace = RenderSpace.WORLD,
+    viewport_anchor: tuple[float, float] | None = None,
+    viewport_offset: tuple[float, float] = (0.0, 0.0),
 ) -> RenderItem:
     if isinstance(visual, PrimitiveComponent):
         if visual.kind not in SUPPORTED_PRIMITIVE_KINDS:
@@ -149,7 +205,13 @@ def _item(
         layer = visual.layer
     else:
         raise ValueError("unsupported visual component")
-    phase = RenderPhase.OPAQUE if color.alpha >= 1.0 else RenderPhase.TRANSPARENT
+    phase = (
+        RenderPhase.OVERLAY
+        if space is RenderSpace.VIEWPORT
+        else RenderPhase.OPAQUE
+        if color.alpha >= 1.0
+        else RenderPhase.TRANSPARENT
+    )
     return RenderItem(
         entity.entity_id,
         primitive,
@@ -196,6 +258,9 @@ def _item(
         )
         if isinstance(visual, TextComponent)
         else None,
+        space=space,
+        viewport_anchor=viewport_anchor,
+        viewport_offset=viewport_offset,
     )
 
 
@@ -207,41 +272,75 @@ def extract_render_frame(
     interpolation_fraction: float = 0.0,
     animated_players: Mapping[AnimatedSprite2DComponent, AnimatedSpritePlayer2D] | None = None,
     modulation_entity_ids: Iterable[str] | None = None,
+    primary_level_entity_ids: Iterable[str] | None = None,
 ) -> RenderFrame:
     """Convert registered scene visuals into backend-neutral render data."""
     items: list[RenderItem] = []
     lights: list[LightDescriptor] = []
     submissions: list[object] = []
     any_effect = False
+    mounted_transforms = _mount_transforms(scene, interpolator, interpolation_fraction)
+    primary_entities = (
+        frozenset(primary_level_entity_ids)
+        if primary_level_entity_ids is not None
+        else None
+    )
     camera_lighting_enabled = scene.camera.get("lighting_enabled", True)
     lighting_enabled = camera_lighting_enabled if type(camera_lighting_enabled) is bool else True
     for entity in scene.entities:
         if not entity.enabled:
             continue
-        try:
-            transform = _transform(
-                scene,
-                entity,
-                interpolator,
-                interpolation_fraction,
-            )
-        except (TypeError, ValueError, OverflowError):
-            continue
+        mount = mounted_transforms.get(entity.entity_id)
+        if mount is None:
+            try:
+                world_transform = _transform(
+                    scene,
+                    entity,
+                    interpolator,
+                    interpolation_fraction,
+                )
+            except (TypeError, ValueError, OverflowError):
+                continue
+            render_transform = world_transform
+            render_space = RenderSpace.WORLD
+            viewport_anchor = None
+            viewport_offset = (0.0, 0.0)
+        else:
+            mount_root, mount_component, render_transform = mount
+            if not mount_root.enabled or (
+                primary_entities is not None and mount_root.entity_id not in primary_entities
+            ):
+                continue
+            render_space = RenderSpace.VIEWPORT
+            viewport_anchor = VIEWPORT_ANCHORS[mount_component.mount]
+            viewport_offset = (mount_component.x, mount_component.y)
+            world_transform = None
         for visual in entity.components:
             if isinstance(visual, Light2DComponent):
                 if not visual.enabled or not visual.visible:
                     continue
+                if world_transform is None:
+                    try:
+                        world_transform = _transform(
+                            scene,
+                            entity,
+                            interpolator,
+                            interpolation_fraction,
+                        )
+                    except (TypeError, ValueError, OverflowError):
+                        continue
                 try:
                     lights.append(
                         LightDescriptor(
                             entity.entity_id,
                             visual.kind,
-                            transform.position,
+                            world_transform.position,
                             visual.color,
                             visual.energy,
-                            visual.radius * max(abs(transform.scale[0]), abs(transform.scale[1])),
+                            visual.radius
+                            * max(abs(world_transform.scale[0]), abs(world_transform.scale[1])),
                             visual.falloff,
-                            direction_degrees=transform.rotation,
+                            direction_degrees=world_transform.rotation,
                             cone_angle=visual.cone_angle,
                             height=visual.height,
                         )
@@ -259,7 +358,7 @@ def extract_render_frame(
                     item = _item(
                         entity,
                         visual,
-                        transform,
+                        render_transform,
                         animated_players.get(visual)
                         if animated_players and isinstance(visual, AnimatedSprite2DComponent)
                         else None,
@@ -276,6 +375,9 @@ def extract_render_frame(
                             and isinstance(visual, (SpriteComponent, AnimatedSprite2DComponent))
                             else None
                         ),
+                        space=render_space,
+                        viewport_anchor=viewport_anchor,
+                        viewport_offset=viewport_offset,
                     )
                 except (TypeError, ValueError, OverflowError):
                     continue
@@ -291,6 +393,16 @@ def extract_render_frame(
             ):
                 continue
 
+            if world_transform is None:
+                try:
+                    world_transform = _transform(
+                        scene,
+                        entity,
+                        interpolator,
+                        interpolation_fraction,
+                    )
+                except (TypeError, ValueError, OverflowError):
+                    continue
             try:
                 phase = render_phase_from_value(visual.phase)
                 layer = entity.layer + visual.layer
@@ -299,14 +411,14 @@ def extract_render_frame(
                         entity.entity_id,
                         visual.capture_id,
                         visual.copy_mode,
-                        transform,
+                        world_transform,
                         visual.rect,
                     )
                 else:
                     request = ScreenTextureDrawRequest(
                         entity.entity_id,
                         visual.capture_id,
-                        transform,
+                        world_transform,
                         visual.width,
                         visual.height,
                         visual.uv_rect,

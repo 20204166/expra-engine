@@ -15,6 +15,7 @@ Pygame renderer. The seam is the ``render_scene`` method.
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from typing import Any
 
@@ -28,8 +29,12 @@ from expra_engine.runtime.animated_sprite_2d import (
 )
 from expra_engine.runtime.canvas_effects import modulate_color
 from expra_engine.runtime.rendering import (
+    OrthographicCamera,
+    RenderContext,
     RenderFrame,
     RenderItem,
+    RenderSpace,
+    Viewport,
 )
 from expra_engine.ui.editor_pixel_renderer import EditorPixelRenderer
 from expra_engine.ui.spatial_edit import SpatialEditController, event_extends_selection
@@ -97,6 +102,8 @@ class ViewportCore(WorldOverlayMixin):
         self._interpolation_fraction = 0.0
         self._world_transition_alpha = 0.0
         self._preview_lighting: bool | None = None
+        self._resolved_runtime_camera: OrthographicCamera | None = None
+        self._primary_level_entity_ids: tuple[str, ...] | None = None
         self._observer = observer
         self._pixel_renderer = EditorPixelRenderer(
             resource_service, observer=observer, image_factory=image_factory
@@ -179,6 +186,8 @@ class ViewportCore(WorldOverlayMixin):
         world_transition_alpha: float = 0.0,
         preview_lighting: bool | None = None,
         modulation_entity_ids: Any | None = None,
+        primary_level_entity_ids: Iterable[str] | None = None,
+        resolved_camera: OrthographicCamera | None = None,
     ) -> None:
         """Redraw the viewport for ``scene``. Called on the main thread."""
         if self._world is not None:
@@ -202,9 +211,13 @@ class ViewportCore(WorldOverlayMixin):
         self._interpolation_fraction = interpolation_fraction
         self._world_transition_alpha = max(0.0, min(1.0, float(world_transition_alpha)))
         self._preview_lighting = preview_lighting
+        self._resolved_runtime_camera = resolved_camera
+        self._primary_level_entity_ids = (
+            tuple(primary_level_entity_ids) if primary_level_entity_ids is not None else None
+        )
         self._animated_players = animated_players
 
-        if scene_changed and scene is not None:
+        if scene_changed and scene is not None and editor_overlays:
             self._camera.apply_dict(scene.camera)
             self._grid_dirty = True
             self._clear_all_items()
@@ -229,12 +242,14 @@ class ViewportCore(WorldOverlayMixin):
             # the Edit viewport at. Stop never touches self._camera, so the
             # authoring camera is implicitly preserved/restored for free.
             camera=self._camera if editor_overlays else None,
+            resolved_camera=resolved_camera,
             interpolator=interpolator,
             interpolation_fraction=interpolation_fraction,
             animated_players=animated_players,
             observer=self._observer,
             preview_lighting=self._preview_lighting,
             modulation_entity_ids=modulation_entity_ids,
+            primary_level_entity_ids=self._primary_level_entity_ids,
         )
         self._items_by_id = {item.key: item for item in self._target.items}
         self._target_dirty = False
@@ -444,6 +459,8 @@ class ViewportCore(WorldOverlayMixin):
             observer=self._observer,
             animated_players=getattr(self, "_animated_players", None),
             preview_lighting=self._preview_lighting,
+            primary_level_entity_ids=self._primary_level_entity_ids,
+            resolved_camera=self._resolved_runtime_camera,
         )
         self._target_dirty = False
         self._items_by_id = {item.key: item for item in self._target.items}
@@ -463,6 +480,8 @@ class ViewportCore(WorldOverlayMixin):
             observer=self._observer,
             animated_players=getattr(self, "_animated_players", None),
             preview_lighting=self._preview_lighting,
+            primary_level_entity_ids=self._primary_level_entity_ids,
+            resolved_camera=self._resolved_runtime_camera,
         )
         self._items_by_id = {item.key: item for item in self._target.items}
         self._target_dirty = False
@@ -509,9 +528,14 @@ class ViewportCore(WorldOverlayMixin):
             )
             return
 
+        pixel_camera = (
+            self._resolved_runtime_camera
+            if not self._editor_overlays and self._resolved_runtime_camera is not None
+            else self._camera
+        )
         pixel_image = self._pixel_renderer.render(
             self._target.frame,
-            self._camera,
+            pixel_camera,
             max(1, int(w)),
             max(1, int(h)),
             entity_names={entity_id: entity.name for entity_id, entity in self._entity_map.items()},
@@ -635,11 +659,30 @@ class ViewportCore(WorldOverlayMixin):
         editor_overlays: bool = True,
         runtime_pixels: bool = False,
     ) -> None:
-        transform = item.visual_transform
-        ex, ey = self._camera.project((transform.position[0], transform.position[1]))
-        ppu = self._camera._camera.pixel_ratio
-        sx = abs(item.primitive.size[0] * transform.scale[0]) * ppu / 2
-        sy = abs(item.primitive.size[1] * transform.scale[1]) * ppu / 2
+        runtime_context = (
+            self._target.render_context
+            if item.space is RenderSpace.VIEWPORT
+            else None
+        )
+        if runtime_context is None and not editor_overlays and self._resolved_runtime_camera is not None:
+            width, height = self._canvas.viewport_size()
+            runtime_context = RenderContext(
+                Viewport(0, 0, max(1, width), max(1, height)),
+                self._resolved_runtime_camera,
+            )
+        if runtime_context is not None:
+            transform = item.resolved_transform(runtime_context)
+            ex, ey = item.project_point(runtime_context)
+            ppu_x = runtime_context.viewport.width / runtime_context.camera.width
+            ppu_y = runtime_context.viewport.height / runtime_context.camera.height
+            screen_rotation = transform.rotation - math.degrees(runtime_context.camera.rotation)
+        else:
+            transform = item.visual_transform
+            ex, ey = self._camera.project((transform.position[0], transform.position[1]))
+            ppu_x = ppu_y = self._camera._camera.pixel_ratio
+            screen_rotation = transform.rotation - math.degrees(self._camera._camera.rotation)
+        sx = abs(item.primitive.size[0] * transform.scale[0]) * ppu_x / 2
+        sy = abs(item.primitive.size[1] * transform.scale[1]) * ppu_y / 2
         tag = f"entity:{item.key}"
         color = self._tk_color(modulate_color(item.material.color, self._target.frame.modulation))
         outline = (
@@ -654,12 +697,12 @@ class ViewportCore(WorldOverlayMixin):
         elif item.material.texture_id is not None:
             # Keep the failure path explicit: the placeholder is only used
             # after EditorPixelRenderer has logged the texture error.
-            new_shape = "poly" if transform.rotation or self._camera._camera.rotation else "rect"
+            new_shape = "poly" if screen_rotation else "rect"
         elif item.primitive.kind == "circle":
             new_shape = "circle"
         elif item.primitive.kind == "text":
             new_shape = "text"
-        elif transform.rotation or self._camera._camera.rotation:
+        elif screen_rotation:
             new_shape = "poly"
         else:
             new_shape = "rect"
@@ -695,7 +738,7 @@ class ViewportCore(WorldOverlayMixin):
                     ex, ey, text=text_val, fill=color, font=font_val, tags=tag
                 )
         elif new_shape == "poly":
-            corners = self._projected_corners(item)
+            corners = self._projected_corners(item, runtime_context)
             if entry is not None:
                 assert entry.body is not None
                 self._canvas.coords(entry.body, *corners)
@@ -745,14 +788,22 @@ class ViewportCore(WorldOverlayMixin):
         self._canvas_items[item.key] = _CanvasEntry(shape=new_shape, body=body_id, label=label_id)
 
         if item.key == self._target.selected_id and editor_overlays:
-            self._draw_selection_outline(item)
+            self._draw_selection_outline(item, runtime_context)
 
-    def _draw_selection_outline(self, item: RenderItem) -> None:
-        transform = item.visual_transform
-        ex, ey = self._camera.project((transform.position[0], transform.position[1]))
-        ppu = self._camera._camera.pixel_ratio
-        sx = abs(item.primitive.size[0] * transform.scale[0]) * ppu / 2
-        sy = abs(item.primitive.size[1] * transform.scale[1]) * ppu / 2
+    def _draw_selection_outline(
+        self, item: RenderItem, context: RenderContext | None = None
+    ) -> None:
+        if context is not None:
+            transform = item.resolved_transform(context)
+            ex, ey = context.camera.project(transform.position[:2], context.viewport)
+            ppu_x = context.viewport.width / context.camera.width
+            ppu_y = context.viewport.height / context.camera.height
+        else:
+            transform = item.visual_transform
+            ex, ey = self._camera.project((transform.position[0], transform.position[1]))
+            ppu_x = ppu_y = self._camera._camera.pixel_ratio
+        sx = abs(item.primitive.size[0] * transform.scale[0]) * ppu_x / 2
+        sy = abs(item.primitive.size[1] * transform.scale[1]) * ppu_y / 2
         self._canvas.create_rectangle(
             ex - sx - 4,
             ey - sy - 4,
@@ -763,8 +814,10 @@ class ViewportCore(WorldOverlayMixin):
             tags="selection",
         )
 
-    def _projected_corners(self, item: RenderItem) -> tuple[float, ...]:
-        transform = item.visual_transform
+    def _projected_corners(
+        self, item: RenderItem, context: RenderContext | None = None
+    ) -> tuple[float, ...]:
+        transform = item.resolved_transform(context) if context is not None else item.visual_transform
         half_width = abs(item.primitive.size[0] * transform.scale[0]) / 2
         half_height = abs(item.primitive.size[1] * transform.scale[1]) / 2
         angle = math.radians(transform.rotation)
@@ -776,9 +829,12 @@ class ViewportCore(WorldOverlayMixin):
             (half_width, half_height),
             (half_width, -half_height),
         ):
-            world_x = transform.position[0] + local_x * cos_angle - local_y * sin_angle
-            world_y = transform.position[1] + local_x * sin_angle + local_y * cos_angle
-            projected = self._camera.project((world_x, world_y))
+            if context is not None:
+                projected = item.project_point(context, (local_x, local_y))
+            else:
+                world_x = transform.position[0] + local_x * cos_angle - local_y * sin_angle
+                world_y = transform.position[1] + local_x * sin_angle + local_y * cos_angle
+                projected = self._camera.project((world_x, world_y))
             points.extend(projected)
         return tuple(points)
 

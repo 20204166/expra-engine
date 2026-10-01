@@ -45,6 +45,7 @@ class EditorRenderTarget:
     selected_id: str | None
     colliders: tuple[ColliderOutline, ...] = ()
     unsupported_effects: tuple[str, ...] = ()
+    render_context: RenderContext | None = None
 
 
 def build_editor_render_target(
@@ -53,12 +54,14 @@ def build_editor_render_target(
     viewport: tuple[int, int] = (400, 300),
     selected_id: str | None = None,
     camera: Any | None = None,
+    resolved_camera: OrthographicCamera | None = None,
     interpolator: Any | None = None,
     interpolation_fraction: float = 0.0,
     animated_players: dict[AnimatedSprite2DComponent, AnimatedSpritePlayer2D] | None = None,
     observer: ObservabilityWatcher | None = None,
     preview_lighting: bool | None = None,
     modulation_entity_ids: Iterable[str] | None = None,
+    primary_level_entity_ids: Iterable[str] | None = None,
 ) -> EditorRenderTarget:
     """Extract the runtime frame once and apply editor preview clipping."""
     if scene is None:
@@ -71,6 +74,7 @@ def build_editor_render_target(
             interpolation_fraction=interpolation_fraction,
             animated_players=animated_players,
             modulation_entity_ids=modulation_entity_ids,
+            primary_level_entity_ids=primary_level_entity_ids,
         )
     finally:
         if observer is not None and extract_token is not None:
@@ -88,17 +92,20 @@ def build_editor_render_target(
     width, height = viewport
     if width <= 0 or height <= 0:
         return EditorRenderTarget(frame, (), None, unsupported_effects=unsupported_effects)
-    if camera is not None:
+    if resolved_camera is not None:
+        preview_camera = resolved_camera
+    elif camera is not None:
         cam_width = camera._camera.width
         cam_height = cam_width * height / width
     else:
         cam_width = 20.0
         cam_height = 20.0 * height / width
-    preview_camera = OrthographicCamera(width=cam_width, height=cam_height)
-    preview_camera.apply_dict(scene.camera)
-    if camera is not None:
-        preview_camera.position = camera.position
-        preview_camera.rotation = camera._camera.rotation
+    if resolved_camera is None:
+        preview_camera = OrthographicCamera(width=cam_width, height=cam_height)
+        preview_camera.apply_dict(scene.camera)
+        if camera is not None:
+            preview_camera.position = camera.position
+            preview_camera.rotation = camera._camera.rotation
     context = RenderContext(Viewport(0, 0, width, height), preview_camera)
     plan_token = observer.begin("render:plan") if observer is not None else None
     try:
@@ -128,4 +135,5 @@ def build_editor_render_target(
         selected_id if selected_id in entity_ids else None,
         tuple(colliders),
         unsupported_effects,
+        context,
     )

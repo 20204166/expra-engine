@@ -189,12 +189,30 @@ def _register_builtin_components() -> None:
     if _BUILTINS_REGISTERED:
         return
     _register_visual_components()
+    _register_camera_mount_component()
     _register_physics_components()
     _register_audio_components()
     _register_screen_components()
     _register_composition_components()
     _register_world_components()
     _BUILTINS_REGISTERED = True
+
+
+def _register_camera_mount_component() -> None:
+    if has_component_spec("camera_mount"):
+        return
+    from expra_engine.runtime.camera_mount import VIEWPORT_MOUNTS, CameraMountComponent
+
+    _register_component(
+        CameraMountComponent.component_type,
+        CameraMountComponent,
+        (
+            PropertyDescriptor("mount", "Mount", str, "top_left", enum_values=VIEWPORT_MOUNTS),
+            PropertyDescriptor("x", "Offset X", float, 0.0),
+            PropertyDescriptor("y", "Offset Y", float, 0.0),
+            PropertyDescriptor("enabled", "Enabled", bool, True),
+        ),
+    )
 
 
 def _register_world_components() -> None:

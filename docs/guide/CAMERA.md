@@ -51,10 +51,18 @@ fields) and applies via `apply_to(camera)`.
 
 ## Gameplay vs editor camera
 
-- **Runtime** uses the scene's configured camera (`scene.camera`).
-- **Editor** uses a pannable/zoomable `ViewportCamera`; the scene camera's frame
-  is drawn as an overlay. In Play mode the editor viewport switches to the
-  scene camera.
+- **Runtime** resolves the scene's configured camera (`scene.camera`), target
+  following, smoothing, drag margins, and limits through the shared
+  `RuntimeCameraResolver`.
+- **Editor Edit** uses a pannable/zoomable `ViewportCamera`; the scene camera's
+  frame is drawn as an overlay. **Editor Play** creates a separate runtime
+  camera and uses the same resolver as standalone Pygame runtime. Stopping Play
+  discards that camera state and preserves Edit navigation.
+
+`CameraMountComponent` HUD items render in the current viewport using the live
+resolved camera and viewport dimensions; their screen pixels remain fixed while
+the World camera moves or changes zoom/rotation. See [UI](UI.md) for mount
+anchors and resize semantics.
 
 ## Camera ≠ streaming anchor
 

@@ -209,6 +209,41 @@ def test_item_stream_for_roles_selection_and_overlays_off() -> None:
     ]
 
 
+def test_play_canvas_fallback_uses_resolved_camera_for_viewport_mount() -> None:
+    from expra_engine.runtime.camera_mount import CameraMountComponent
+    from expra_engine.runtime.rendering import OrthographicCamera
+
+    scene = Scene("HUD fallback", camera={"position": [500.0, 500.0], "width": 100.0})
+    hud = scene.create_entity("HUD")
+    hud.add_component(TransformComponent(x=900.0, y=300.0))
+    hud.add_component(CameraMountComponent("top_left", x=16.0, y=-16.0))
+    marker = scene.create_entity("Marker", parent_id=hud.entity_id)
+    marker.add_component(PrimitiveComponent("rectangle", width=8.0, height=8.0))
+    runtime_camera = OrthographicCamera(position=(25.0, 10.0), width=20.0, height=10.0)
+    harness = QtHarness()
+    try:
+        harness.panel._pixel_renderer.render = lambda *_args, **_kwargs: None
+
+        harness.panel.render(
+            scene,
+            None,
+            editor_overlays=False,
+            resolved_camera=runtime_camera,
+        )
+        harness.pump()
+
+        marker_items = [
+            entry
+            for entry in harness.item_stream()
+            if entry[-1] == (f"entity:{marker.entity_id}",)
+        ]
+        assert marker_items
+        x0, y0, x1, y1 = marker_items[0][1]
+        assert (x0, y0, x1, y1) == pytest.approx((12.0, 12.0, 20.0, 20.0))
+    finally:
+        harness.close()
+
+
 def test_canvas_uses_a_semantic_idle_scheduler_instead_of_tk_after_idle() -> None:
     from expra_engine.editor.qt.canvas import QtCanvas
 

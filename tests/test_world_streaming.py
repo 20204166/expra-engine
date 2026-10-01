@@ -18,10 +18,11 @@ from expra_engine.runtime.audio_2d import (
 )
 from expra_engine.runtime.collider import ColliderComponent
 from expra_engine.runtime.physics_world import PhysicsWorld2D
-from expra_engine.runtime.pygame_runtime import PygameRuntime
 from expra_engine.runtime.render_extractor import extract_render_frame
 from expra_engine.runtime.rendering import OrthographicCamera
+from expra_engine.runtime.runtime_camera import RuntimeCameraResolver
 from expra_engine.runtime.visual_components import PrimitiveComponent
+from tests.support.pixel_surface import color_bounds
 
 
 def test_world_streaming_has_one_runtime_owner_module() -> None:
@@ -1070,18 +1071,12 @@ def test_declared_seamless_connection_preloads_hands_over_and_unloads_without_ac
     executor.complete(0)
     system.update()
     camera = OrthographicCamera(width=10.0, height=10.0)
-    camera_runtime = SimpleNamespace(
-        engine=SimpleNamespace(
-            active_scene=system.runtime_scene,
-            world_streaming_system=system,
-        ),
-        camera=camera,
-        camera_target_id=None,
-        _camera_scene_id=None,
-        _camera_settings_fingerprint=None,
-        _world_camera_bounds=None,
+    camera_engine = SimpleNamespace(
+        active_scene=system.runtime_scene,
+        world_streaming_system=system,
     )
-    PygameRuntime._sync_camera_target(camera_runtime)
+    camera_resolver = RuntimeCameraResolver(camera)
+    camera_resolver.sync(camera_engine)
     camera.zoom = 1.5
     camera.rotation = 0.25
     camera.position_smoothing_enabled = True
@@ -1121,8 +1116,8 @@ def test_declared_seamless_connection_preloads_hands_over_and_unloads_without_ac
     assert Audio2DWorld(system.runtime_scene).mix_for(
         forest_entry.entity_id, viewport_width=100.0
     ).distance == 1.0
-    PygameRuntime._sync_camera_target(camera_runtime)
-    assert camera_runtime.camera is camera
+    camera_resolver.sync(camera_engine)
+    assert camera_resolver.camera is camera
     assert camera.target_position == (99.0, 0.0)
     assert camera.zoom == 1.5
     assert camera.rotation == 0.25
@@ -1138,8 +1133,8 @@ def test_declared_seamless_connection_preloads_hands_over_and_unloads_without_ac
     assert authored["town"].find_entity("courier").get_component(TransformComponent).x == 0.0
     camera.position = (150.0, 50.0)
     system.report_camera_view(camera.position[:2], (camera.width, camera.height))
-    PygameRuntime._sync_camera_target(camera_runtime)
-    assert camera_runtime.camera is camera
+    camera_resolver.sync(camera_engine)
+    assert camera_resolver.camera is camera
     assert camera.rotation == 0.25
     assert camera.zoom == 1.5
     assert (camera.limit_left, camera.limit_bottom, camera.limit_right, camera.limit_top) == (
@@ -1778,3 +1773,140 @@ def test_scene_instance_pose_composes_with_world_origin_without_source_rewrite(t
     assert system.runtime_scene.world_transform(runtime_marker.entity_id).position == (107.0, 53.0)
     assert project.document_file("levels/town.level.pb").read_bytes() == source_bytes
     system.close()
+
+
+def test_primary_level_camera_mount_owns_world_hud_during_overlap() -> None:
+    from dataclasses import replace
+
+    import pygame
+
+    from expra_engine.core.world import TransitionMode
+    from expra_engine.runtime.camera_mount import CameraMountComponent
+    from expra_engine.runtime.level_anchor import (
+        LevelAnchorComponent,
+        StreamingAnchorComponent,
+        WorldPersistentActorComponent,
+    )
+    from expra_engine.runtime.pygame_renderer import PygameRenderer
+    from expra_engine.runtime.rendering import (
+        OrthographicCamera,
+        RenderContext,
+        RenderSpace,
+        Viewport,
+    )
+
+    _Manager, _State, _CapacityError, System = _residency_types()
+    executor = ManualExecutor(max_workers=2)
+    town, forest = Level("Town"), Level("Forest")
+    courier = town.create_entity("Courier", entity_id="courier")
+    courier.add_component(TransformComponent())
+    courier.add_component(WorldPersistentActorComponent("courier"))
+    courier.add_component(StreamingAnchorComponent("party"))
+    courier.add_component(
+        PrimitiveComponent("rectangle", width=4.0, height=4.0, fill=(0.0, 0.0, 1.0))
+    )
+    exit_entity = town.create_entity("East Gate")
+    exit_entity.add_component(TransformComponent(x=100.0))
+    exit_entity.add_component(LevelAnchorComponent("east", kind="exit", size=(4.0, 4.0)))
+    town_hud = town.create_entity("Town HUD")
+    town_hud.add_component(TransformComponent(x=900.0, y=300.0))
+    town_hud.add_component(CameraMountComponent("top_left", x=16.0, y=-16.0))
+    town_marker = town.create_entity("Town HUD Marker", parent_id=town_hud.entity_id)
+    town_marker.add_component(
+        PrimitiveComponent("rectangle", width=8.0, height=8.0, fill=(1.0, 0.0, 0.0))
+    )
+    entry = forest.create_entity("West Entry")
+    entry.add_component(TransformComponent(x=1.0))
+    entry.add_component(LevelAnchorComponent("west", kind="entrance", size=(4.0, 4.0)))
+    forest_hud = forest.create_entity("Forest HUD")
+    forest_hud.add_component(CameraMountComponent("top_left", x=16.0, y=-16.0))
+    forest_marker = forest.create_entity("Forest HUD Marker", parent_id=forest_hud.entity_id)
+    forest_marker.add_component(
+        PrimitiveComponent("rectangle", width=8.0, height=8.0, fill=(0.0, 1.0, 0.0))
+    )
+    world = _seamless_world()
+    world = replace(
+        world,
+        connections=(replace(world.connections[0], transition=TransitionMode.INSTANT),),
+    )
+    authored = {"town": town, "forest": forest}
+    system = System(
+        None,
+        world,
+        loader=lambda descriptor: authored[descriptor.instance_id],
+        executor_factory=lambda workers: executor,
+    )
+    pygame.init()
+    try:
+        system.start(object())
+        executor.complete(0)
+        system.update()
+        courier_runtime = next(
+            entity for entity in system.runtime_scene.entities
+            if entity.get_component(WorldPersistentActorComponent) is not None
+        )
+        courier_runtime.get_component(TransformComponent).x = 90.0
+        system.update()
+        executor.complete(1)
+        system.update()
+        courier_runtime.get_component(TransformComponent).x = 99.0
+        system.update()
+        assert system.current_level("party") == "forest"
+        # Keep both Level document hierarchies resident/active to prove HUD
+        # filtering does not accidentally draw the source HUD as World content.
+        system.request_load("town")
+        executor.complete(2)
+        system.update()
+        assert system.state("town").state is _State.ACTIVE, system.snapshot()
+        assert system.state("forest").state.value == "active"
+        town_marker_id = next(
+            entity.entity_id
+            for entity in system.runtime_scene.entities
+            if entity.name == "Town HUD Marker"
+        )
+        forest_marker_id = next(
+            entity.entity_id
+            for entity in system.runtime_scene.entities
+            if entity.name == "Forest HUD Marker"
+        )
+        before = system.runtime_scene.world_transform(town_marker_id)
+        viewport = Viewport(0, 0, 200, 100)
+        camera = OrthographicCamera(position=(100.0, 0.0), width=20.0, height=10.0)
+        camera.position_smoothing_enabled = False
+        def draw():
+            frame = extract_render_frame(
+                system.runtime_scene,
+                primary_level_entity_ids=system.primary_level_entity_ids(),
+            )
+            surface = pygame.Surface((200, 100), flags=pygame.SRCALPHA)
+            renderer = PygameRenderer(pygame, surface, clear_color=None)
+            renderer.start(RenderContext(viewport, camera))
+            renderer.render(frame)
+            assert not renderer.draw_failed
+            mounted_ids = {
+                item.key for item in frame.items if item.space is RenderSpace.VIEWPORT
+            }
+            assert town_marker_id not in mounted_ids
+            assert forest_marker_id in mounted_ids
+            return surface
+
+        initial = draw()
+        hud_bounds = color_bounds(initial, (0, 255, 0))
+        courier_bounds = color_bounds(initial, (0, 0, 255))
+        assert tuple(initial.get_at((16, 16))) == (0, 255, 0, 255)
+        courier_runtime.get_component(TransformComponent).x = 105.0
+        actor_moved = draw()
+        assert color_bounds(actor_moved, (0, 255, 0)) == hud_bounds
+        assert color_bounds(actor_moved, (0, 0, 255)) != courier_bounds
+        camera.position = (104.0, 2.0)
+        camera.zoom = 1.5
+        camera.rotation = 0.25
+        camera_moved = draw()
+        assert color_bounds(camera_moved, (0, 255, 0)) == hud_bounds
+        assert color_bounds(camera_moved, (0, 0, 255)) != color_bounds(
+            actor_moved, (0, 0, 255)
+        )
+        assert system.runtime_scene.world_transform(town_marker_id) == before
+    finally:
+        system.close()
+        pygame.quit()

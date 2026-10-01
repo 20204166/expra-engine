@@ -196,6 +196,7 @@ class WorldStreamingSystem(
         self._completions: queue.SimpleQueue[_LoadCompletion] = queue.SimpleQueue()
         self._stale_results_discarded = 0
         self._startup_level_id = world.initial_level_id
+        self._startup_fallback_active = True
         self._persistent_bootstrap_level_ids: set[str] = set()
 
     def start(self, engine: Any) -> None:
@@ -215,6 +216,7 @@ class WorldStreamingSystem(
             else None
         )
         self._startup_level_id = saved_primary or self.world.initial_level_id
+        self._startup_fallback_active = True
         self._persistent_bootstrap_level_ids = {
             str(snapshot["source_level_id"])
             for snapshot in self._session_state.persistent_actors.values()
@@ -389,7 +391,9 @@ class WorldStreamingSystem(
         persistent_candidates = self._prepare_persistent_entities(level_id, runtime_level)
         added: list[str] = []
         persistent_added: list[str] = []
-        initialize_camera = not self._camera_initialized
+        initialize_camera = not self._camera_initialized and (
+            self._startup_level_id is None or level_id == self._startup_level_id
+        )
         previous_camera = copy.deepcopy(self.runtime_scene.camera)
         _obs = self._observer
         _at = _obs.begin("world:level:activate") if _obs is not None else None

@@ -70,6 +70,9 @@ def run_project(project_dir: Path | str = ".") -> None:
                 modulation_entity_ids=(
                     world_system.environment_entity_ids if world_system is not None else None
                 ),
+                primary_level_entity_ids=(
+                    world_system.primary_level_entity_ids() if world_system is not None else None
+                ),
             )
             if current_engine.active_scene is not None
             else RenderFrame(elapsed=dt)

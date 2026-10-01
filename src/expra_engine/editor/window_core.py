@@ -62,6 +62,8 @@ from expra_engine.editor.script_actions import ScriptEditorActionsMixin
 from expra_engine.editor.world_authoring import WorldEditorActionsMixin
 from expra_engine.observability import ObservabilityWatcher
 from expra_engine.runtime.input import PhysicalInput
+from expra_engine.runtime.rendering import OrthographicCamera
+from expra_engine.runtime.runtime_camera import RuntimeCameraResolver
 from expra_engine.runtime.script_component import ScriptComponent
 
 LOGGER = logging.getLogger(__name__)
@@ -125,6 +127,8 @@ class EditorWindowCore(
         self._render_targets = RenderTargetRegistry()
         self._render_generations: dict[str, int] = {"inspector": 0}
         self._render_owners: dict[str, str | None] = {"inspector": None}
+        self._runtime_camera: OrthographicCamera | None = None
+        self._runtime_camera_resolver: RuntimeCameraResolver | None = None
         self._project_workflow = ProjectWorkflow(self, dialog_provider=self._dialog_provider)
         self._runtime_preview = runtime_preview_class(
             self._root,
@@ -133,6 +137,7 @@ class EditorWindowCore(
                 "viewport", (self._engine.active_scene, None), priority=20
             ),
             observer=self._observer,
+            camera_step=self._step_runtime_camera,
             on_world_startup_diagnostic=lambda message: self._console.log(
                 f"[World] {message}", level="error"
             ),
@@ -146,6 +151,17 @@ class EditorWindowCore(
 
     def _set_window_title(self, title: str) -> None:
         raise NotImplementedError
+
+    def _start_runtime_camera(self) -> None:
+        """Start Editor Play with a fresh runtime camera, separate from Edit pan/zoom."""
+        camera = OrthographicCamera()
+        self._runtime_camera = camera
+        self._runtime_camera_resolver = RuntimeCameraResolver(camera)
+
+    def _step_runtime_camera(self, dt: float) -> None:
+        resolver = self._runtime_camera_resolver
+        if resolver is not None:
+            resolver.step(self._engine, dt)
 
     def _after(self, delay_ms: int, callback: Callable[[], None]) -> Any:
         raise NotImplementedError
@@ -244,6 +260,7 @@ class EditorWindowCore(
 
     def _act_play(self) -> None:
         if self._engine.play():
+            self._start_runtime_camera()
             self._console.log("[Engine] Play", level="info")
             self._runtime_preview.start()
         self._update_play_pause_state()
@@ -260,6 +277,8 @@ class EditorWindowCore(
         self._project_workflow.stop_project()
         if self._engine.stop():
             self._console.log("[Engine] Stopped — scene restored", level="info")
+        self._runtime_camera_resolver = None
+        self._runtime_camera = None
         self._project_workflow.restore_after_run_project()
         self._update_play_pause_state()
         self._present_all()
@@ -685,6 +704,10 @@ class EditorWindowCore(
                 if world_system is not None and _ws_active
                 else None
             ),
+            primary_level_entity_ids=(
+                world_system.primary_level_entity_ids() if _ws_active else None
+            ),
+            resolved_camera=(getattr(self, "_runtime_camera", None) if runtime_preview else None),
         )
 
     def _present_selection(self, scene: Scene | None, entity: Any) -> None:

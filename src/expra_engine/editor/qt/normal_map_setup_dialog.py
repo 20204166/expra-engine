@@ -82,6 +82,7 @@ class NormalMapSetupDialog(NormalMapSetupDialogCore, QDialog):
             strength=self._strength_spin.value(),
             y_convention=self._convention_combo.currentData(),
             bevel_width=self._smoothness_spin.value(),
+            target_size=self._size_combo.currentData(),
         )
 
     def _refresh_rows(self) -> None:
@@ -168,6 +169,13 @@ class NormalMapSetupDialog(NormalMapSetupDialogCore, QDialog):
         self._convention_combo.addItem("OpenGL Y+", "opengl")
         self._convention_combo.addItem("DirectX Y-", "directx")
         generation.addWidget(self._convention_combo)
+        generation.addWidget(QLabel("Size:"))
+        self._size_combo = QComboBox()
+        self._size_combo.addItem("Source", None)
+        self._size_combo.addItem("128", (128, 128))
+        self._size_combo.addItem("64", (64, 64))
+        self._size_combo.addItem("32", (32, 32))
+        generation.addWidget(self._size_combo)
         generation.addStretch(1)
         layout.addLayout(generation)
 

@@ -6,8 +6,8 @@ from types import SimpleNamespace
 
 from expra_engine.core.component import TransformComponent
 from expra_engine.core.scene import Scene
-from expra_engine.runtime.pygame_runtime import PygameRuntime
 from expra_engine.runtime.rendering import OrthographicCamera
+from expra_engine.runtime.runtime_camera import RuntimeCameraResolver
 from expra_engine.runtime.world_streaming import WorldCameraContext
 
 
@@ -17,33 +17,25 @@ def test_camera_follows_parent_composed_world_position() -> None:
     root.add_component(TransformComponent(x=2000.0, y=40.0))
     target = scene.create_entity("Streaming Anchor", entity_id="anchor", parent_id=root.entity_id)
     target.add_component(TransformComponent(x=12.0, y=3.0))
-    runtime = SimpleNamespace(
-        engine=SimpleNamespace(active_scene=scene),
-        camera=OrthographicCamera(),
-        camera_target_id="anchor",
-        _camera_scene_id=None,
-    )
+    camera = OrthographicCamera()
+    resolver = RuntimeCameraResolver(camera, camera_target_id="anchor")
 
-    PygameRuntime._sync_camera_target(runtime)
+    resolver.sync(SimpleNamespace(active_scene=scene, world_streaming_system=None))
 
-    assert runtime.camera.target_position == (2012.0, 43.0)
+    assert camera.target_position == (2012.0, 43.0)
 
 
 def test_camera_applies_late_initial_level_context_without_recreating_camera() -> None:
     scene = Scene("World")
     camera = OrthographicCamera()
-    runtime = SimpleNamespace(
-        engine=SimpleNamespace(active_scene=scene),
-        camera=camera,
-        camera_target_id=None,
-        _camera_scene_id=None,
-    )
+    resolver = RuntimeCameraResolver(camera)
+    engine = SimpleNamespace(active_scene=scene, world_streaming_system=None)
 
-    PygameRuntime._sync_camera_target(runtime)
+    resolver.sync(engine)
     scene.camera = {"position": [50.0, 60.0], "zoom": 2.0}
-    PygameRuntime._sync_camera_target(runtime)
+    resolver.sync(engine)
 
-    assert runtime.camera is camera
+    assert resolver.camera is camera
     assert camera.position == (50.0, 60.0, 0.0)
     assert camera.zoom == 2.0
 
@@ -65,16 +57,10 @@ def test_world_camera_context_updates_bounds_and_follow_target_without_replaceme
         ("town",),
     )
     world_streaming = SimpleNamespace(camera_context=context)
-    runtime = SimpleNamespace(
-        engine=SimpleNamespace(active_scene=scene, world_streaming_system=world_streaming),
-        camera=camera,
-        camera_target_id=None,
-        _camera_scene_id=None,
-        _camera_settings_fingerprint=None,
-        _world_camera_bounds=None,
-    )
+    resolver = RuntimeCameraResolver(camera)
+    engine = SimpleNamespace(active_scene=scene, world_streaming_system=world_streaming)
 
-    PygameRuntime._sync_camera_target(runtime)
+    resolver.sync(engine)
 
     assert camera.target_position == (205.0, 32.0)
     assert (camera.limit_left, camera.limit_bottom, camera.limit_right, camera.limit_top) == (
@@ -94,9 +80,9 @@ def test_world_camera_context_updates_bounds_and_follow_target_without_replaceme
     world_streaming.camera_context = context
     camera.position = (900.0, 700.0, 0.0)
 
-    PygameRuntime._sync_camera_target(runtime)
+    resolver.sync(engine)
 
-    assert runtime.camera is camera
+    assert resolver.camera is camera
     assert camera.zoom == 2.0
     assert camera.target_position == (205.0, 32.0)
     assert camera.limit_right == 500.0

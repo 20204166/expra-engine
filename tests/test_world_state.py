@@ -262,13 +262,16 @@ def test_world_save_restores_persistent_actor_transform_before_level_activation(
     second.close()
 
 
+@pytest.mark.parametrize(
+    "source_level_first", [False, True], ids=["startup-first", "source-first"]
+)
 def test_world_startup_uses_saved_primary_level_instead_of_authored_initial_level(
-    tmp_path: Path,
+    tmp_path: Path, source_level_first: bool
 ) -> None:
     from expra_engine.core.world import TransitionMode, WorldConnection
     from expra_engine.runtime.level_anchor import LevelAnchorComponent
 
-    town = Level("Town")
+    town = Level("Town", camera={"camera_id": "town"})
     courier = town.create_entity("Courier", entity_id="courier")
     courier.add_component(TransformComponent())
     courier.add_component(WorldPersistentActorComponent("player"))
@@ -276,7 +279,7 @@ def test_world_startup_uses_saved_primary_level_instead_of_authored_initial_leve
     gate = town.create_entity("East Gate")
     gate.add_component(TransformComponent(x=100.0))
     gate.add_component(LevelAnchorComponent("east", kind="exit", size=(4.0, 4.0)))
-    forest = Level("Forest")
+    forest = Level("Forest", camera={"camera_id": "forest"})
     entry = forest.create_entity("West Entry")
     entry.add_component(LevelAnchorComponent("west", kind="entrance", size=(4.0, 4.0)))
     world = World(
@@ -335,13 +338,23 @@ def test_world_startup_uses_saved_primary_level_instead_of_authored_initial_leve
     )
     second.load_session(store, slot="quick")
     second.start(object())
-    second_executor.complete(0)
-    second.update()
-    second_executor.complete(1)
+    if source_level_first:
+        # The persistent actor must first be materialized from Town, even
+        # though its saved primary-anchor location points to Forest.
+        second_executor.complete(0)
+        second.update()
+        assert second.startup_level_id == "forest"
+        second_executor.complete(1)
+    else:
+        second_executor.complete(1)
+        second_executor.complete(0)
     second.update()
 
+    assert second.startup_level_id == "forest"
     assert second.current_level("party") == "forest"
     assert second.state("forest").state.value == "active"
+    assert second.runtime_scene.camera == forest.camera
+    assert second.camera_context.camera_context_level_id == "forest"
     assert second.world.initial_level_id == "town"
     second.close()
 

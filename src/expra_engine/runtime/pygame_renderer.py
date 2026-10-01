@@ -308,10 +308,8 @@ class PygameRenderer(PygameLightingRenderMixin, LegacyPygameRenderMixin):
         modulation: Color,
         context: RenderContext,
     ) -> None:
-        transform = item.visual_transform
-        center = context.camera.project(
-            (transform.position[0], transform.position[1]), context.viewport
-        )
+        transform = item.resolved_transform(context)
+        center = item.project_point(context)
         position = (round(center[0]), round(center[1]))
         color = self._color(
             modulate_color(
@@ -441,7 +439,8 @@ class PygameRenderer(PygameLightingRenderMixin, LegacyPygameRenderMixin):
                 )
                 return
             if item.primitive.kind in ("rectangle", "rect"):
-                if transform.rotation or context.camera.rotation:
+                screen_rotation = transform.rotation - math.degrees(context.camera.rotation)
+                if screen_rotation:
                     polygon = getattr(draw, "polygon", None)
                     if not callable(polygon):
                         raise RuntimeError("Pygame backend cannot draw transformed rectangles")

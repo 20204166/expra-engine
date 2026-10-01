@@ -23,6 +23,9 @@ does not do, from the source.
 - **Captures/restores session state** — `WorldSessionState` handles opt-in
   entity state across unload/reload.
 - **Tracks camera context** — which Level the camera is inside.
+- **Selects the mounted HUD owner** — when active Levels overlap, only visuals
+  mounted by the Level containing the World primary anchor are shown in viewport
+  space.
 - **Unloads according to policy** — Levels beyond `unload_distance` (and not
   pinned/always-loaded) are unloaded.
 - **Supports transition modes** — `seamless` / `fade` / `instant` / `loading`
@@ -40,6 +43,10 @@ does not do, from the source.
 - It does **not** auto-save game state on unload — `save_session()` is explicit.
 - It does **not** make the camera equal to the streaming anchor — camera context
   is separate from residency anchors.
+- It does **not** draw every active Level's mounted HUD simultaneously. The
+  primary-anchor Level owns the single visible mounted HUD hierarchy; ownership
+  switches at transition commit, even if the source Level remains resident for
+  a handover frame.
 - It does **not** replace Scene Instances.
 - It does **not** make the World a giant entity tree.
 - It does **not** automatically create entrances/exits — anchors are authored.

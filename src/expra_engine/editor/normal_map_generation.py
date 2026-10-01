@@ -41,6 +41,8 @@ __all__ = (
 
 _FLAT_NORMAL = (128, 128, 255)
 
+_RESAMPLE_MODES = {"nearest": Image.Resampling.NEAREST, "bilinear": Image.Resampling.BILINEAR}
+
 
 class NormalMapGenerationPreset(StrEnum):
     FLAT = "flat"
@@ -65,6 +67,10 @@ class NormalMapGenerationSettings:
     invert_height: bool = False
     # Shared gradient border behavior (see height_field_to_normal_rgb)
     edge_mode: str = "clamp"
+    # Output resolution (None = source size). Pixel-art assets typically use
+    # ``resample="nearest"`` so the normal map stays on the same crisp grid.
+    target_size: tuple[int, int] | None = None
+    resample: str = "nearest"
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "preset", NormalMapGenerationPreset(self.preset))
@@ -76,6 +82,13 @@ class NormalMapGenerationSettings:
             object.__setattr__(self, name, float(value))
         if self.edge_mode not in {"clamp", "wrap", "mirror"}:
             raise ValueError("edge_mode must be 'clamp', 'wrap' or 'mirror'")
+        if self.target_size is not None:
+            size = tuple(self.target_size)
+            if len(size) != 2 or any(type(value) is not int or value <= 0 for value in size):
+                raise ValueError("target_size must be a pair of positive integers")
+            object.__setattr__(self, "target_size", size)
+        if self.resample not in {"nearest", "bilinear"}:
+            raise ValueError("resample must be 'nearest' or 'bilinear'")
 
 
 def _grayscale_luma(image: Image.Image) -> Image.Image:
@@ -241,7 +254,17 @@ def generate_normal_map(
     Transparent albedo padding is forced to the flat normal ``(128, 128, 255)``
     so filtered sampling near sprite borders never picks up garbage (albedo
     alpha remains the coverage mask).
+
+    When ``settings.target_size`` is set, the albedo (and any height source) is
+    resized to that resolution before the height field is derived, so the
+    generated normal map lands exactly on that pixel grid. ``resample="nearest"``
+    keeps pixel-art edges crisp.
     """
+    if settings.target_size is not None:
+        resample = _RESAMPLE_MODES[settings.resample]
+        albedo = albedo.resize(settings.target_size, resample)
+        if height_source is not None:
+            height_source = height_source.resize(settings.target_size, resample)
     height = derive_height_field(albedo, settings, height_source=height_source)
     rgb = height_field_to_normal_rgb(
         height,

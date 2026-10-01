@@ -165,10 +165,10 @@ class WorldAnchorPolicyMixin:
 
     def _reconcile_streaming_policy_inner(self) -> None:
         anchors = self.streaming_anchors()
-        if self._startup_level_id is not None and any(
+        if self._startup_fallback_active and self._startup_level_id is not None and any(
             anchor.level_id == self._startup_level_id for anchor in anchors
         ):
-            self._startup_level_id = None
+            self._startup_fallback_active = False
         self._request_policy_residency(anchors)
         self._advance_seamless_connections(anchors)
         anchors = self.streaming_anchors()
@@ -273,7 +273,9 @@ class WorldAnchorPolicyMixin:
                     | pending_destinations
                     | self._persistent_bootstrap_level_ids
                 ),
-                initial_level_id=self._startup_level_id,
+                initial_level_id=(
+                    self._startup_level_id if self._startup_fallback_active else None
+                ),
             )
         except ResidencyCapacityError as error:
             if pending_destinations:
@@ -290,7 +292,9 @@ class WorldAnchorPolicyMixin:
                         | self._manual_requests
                         | self._persistent_bootstrap_level_ids
                     ),
-                    initial_level_id=self._startup_level_id,
+                    initial_level_id=(
+                        self._startup_level_id if self._startup_fallback_active else None
+                    ),
                 )
             raise
 

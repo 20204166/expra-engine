@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from enum import IntEnum
+from enum import IntEnum, StrEnum
 from numbers import Real
 from typing import Protocol, cast, runtime_checkable
 
@@ -37,6 +37,7 @@ __all__ = (
     "RenderFrame",
     "RenderItem",
     "RenderPhase",
+    "RenderSpace",
     "Renderer",
     "RendererCapabilities",
     "TextDescriptor",
@@ -460,6 +461,13 @@ class RenderPhase(IntEnum):
     OVERLAY = 2
 
 
+class RenderSpace(StrEnum):
+    """Coordinate space consumed by a renderer-neutral item."""
+
+    WORLD = "world"
+    VIEWPORT = "viewport"
+
+
 @dataclass(frozen=True)
 class RenderItem:
     key: str
@@ -477,6 +485,24 @@ class RenderItem:
     sprite_centered: bool = True
     sprite_flip_h: bool = False
     sprite_flip_v: bool = False
+    space: RenderSpace = RenderSpace.WORLD
+    viewport_anchor: Vec2 | None = None
+    viewport_offset: Vec2 = (0.0, 0.0)
+
+    def __post_init__(self) -> None:
+        space = self.space if isinstance(self.space, RenderSpace) else RenderSpace(self.space)
+        object.__setattr__(self, "space", space)
+        if space is RenderSpace.VIEWPORT:
+            if self.viewport_anchor is None:
+                raise ValueError("viewport-space RenderItem requires a viewport_anchor")
+            anchor = _tuple(self.viewport_anchor, 2, "viewport_anchor")
+            if any(value < 0.0 or value > 1.0 for value in anchor):
+                raise ValueError("viewport_anchor coordinates must be in [0, 1]")
+            object.__setattr__(self, "viewport_anchor", (anchor[0], anchor[1]))
+            offset = _tuple(self.viewport_offset, 2, "viewport_offset")
+            object.__setattr__(self, "viewport_offset", (offset[0], offset[1]))
+        elif self.viewport_anchor is not None:
+            raise ValueError("world-space RenderItem cannot carry a viewport_anchor")
 
     @property
     def world_transform(self) -> Transform:
@@ -510,26 +536,82 @@ class RenderItem:
             self.sprite_transform if self.material.texture_id is not None else self.world_transform
         )
 
-    def _projected_bounds(self, context: RenderContext) -> tuple[float, float, float, float]:
+    def resolved_transform(self, context: RenderContext) -> Transform:
+        """Return a render-only world pose for the current RenderContext.
+
+        World-space items retain their existing transform. Viewport items keep
+        pixel-based layout metadata in the frame contract and resolve that
+        position/size through the actual camera pose without mutating Scene data.
+        """
         transform = self.visual_transform
+        if self.space is RenderSpace.WORLD:
+            return transform
+
+        assert self.viewport_anchor is not None
+        viewport = context.viewport
+        anchor_x, anchor_y = self.viewport_anchor
+        offset_x, offset_y = self.viewport_offset
+        screen_point = (
+            viewport.x
+            + anchor_x * viewport.width
+            + offset_x
+            + transform.position[0],
+            viewport.y
+            + (1.0 - anchor_y) * viewport.height
+            - offset_y
+            - transform.position[1],
+        )
+        world_x, world_y = context.camera.unproject(screen_point, viewport)
+        return Transform(
+            position=(world_x, world_y, transform.position[2]),
+            rotation=transform.rotation + math.degrees(context.camera.rotation),
+            scale=(
+                transform.scale[0] * context.camera.width / viewport.width,
+                transform.scale[1] * context.camera.height / viewport.height,
+                transform.scale[2],
+            ),
+        )
+
+    def project_point(
+        self,
+        context: RenderContext,
+        local_point: Vec2 = (0.0, 0.0),
+    ) -> tuple[float, float]:
+        """Project one visual-local point to pixels without moving scene data."""
+        transform = self.visual_transform
+        if self.space is RenderSpace.WORLD:
+            if local_point == (0.0, 0.0):
+                return context.camera.project(transform.position[:2], context.viewport)
+            world_point = transform.transform_point((local_point[0], local_point[1], 0.0))
+            return context.camera.project(world_point[:2], context.viewport)
+
+        assert self.viewport_anchor is not None
+        local_x = local_point[0] * transform.scale[0]
+        local_y = local_point[1] * transform.scale[1]
+        angle = math.radians(transform.rotation)
+        offset_x = local_x * math.cos(angle) - local_y * math.sin(angle)
+        offset_y = local_x * math.sin(angle) + local_y * math.cos(angle)
+        return (
+            context.viewport.x
+            + self.viewport_anchor[0] * context.viewport.width
+            + self.viewport_offset[0]
+            + transform.position[0]
+            + offset_x,
+            context.viewport.y
+            + (1.0 - self.viewport_anchor[1]) * context.viewport.height
+            - self.viewport_offset[1]
+            - transform.position[1]
+            - offset_y,
+        )
+
+    def _projected_bounds(
+        self,
+        context: RenderContext,
+        transform: Transform | None = None,
+    ) -> tuple[float, float, float, float]:
+        transform = transform or self.resolved_transform(context)
         if self.primitive.kind in ("polygon", "line") and self.primitive.points:
-            angle = math.radians(transform.rotation)
-            cos_angle = math.cos(angle)
-            sin_angle = math.sin(angle)
-            projected = tuple(
-                context.camera.project(
-                    (
-                        transform.position[0]
-                        + local_x * transform.scale[0] * cos_angle
-                        - local_y * transform.scale[1] * sin_angle,
-                        transform.position[1]
-                        + local_x * transform.scale[0] * sin_angle
-                        + local_y * transform.scale[1] * cos_angle,
-                    ),
-                    context.viewport,
-                )
-                for local_x, local_y in self.primitive.points
-            )
+            projected = tuple(self.project_point(context, point) for point in self.primitive.points)
             xs = tuple(point[0] for point in projected)
             ys = tuple(point[1] for point in projected)
             if self.primitive.kind == "line":
@@ -548,9 +630,7 @@ class RenderItem:
                 max(xs) + padding,
                 max(ys) + padding,
             )
-        center = context.camera.project(
-            (transform.position[0], transform.position[1]), context.viewport
-        )
+        center = self.project_point(context)
         # ``radius`` is overloaded: for circle/point it is the full extent of
         # the shape, but for rounded_rectangle it is only a corner radius --
         # the shape's actual extent is still ``size``. Treating a rounded
@@ -559,28 +639,17 @@ class RenderItem:
         radius_is_extent = (
             self.primitive.kind in ("circle", "point") and self.primitive.radius is not None
         )
-        if not radius_is_extent and (transform.rotation or context.camera.rotation):
+        screen_rotation = transform.rotation - math.degrees(context.camera.rotation)
+        if not radius_is_extent and screen_rotation:
             half_width = abs(self.primitive.size[0] * transform.scale[0]) / 2
             half_height = abs(self.primitive.size[1] * transform.scale[1]) / 2
-            angle = math.radians(transform.rotation)
-            cos_angle = math.cos(angle)
-            sin_angle = math.sin(angle)
             corners = (
                 (-half_width, -half_height),
                 (-half_width, half_height),
                 (half_width, -half_height),
                 (half_width, half_height),
             )
-            projected = tuple(
-                context.camera.project(
-                    (
-                        transform.position[0] + local_x * cos_angle - local_y * sin_angle,
-                        transform.position[1] + local_x * sin_angle + local_y * cos_angle,
-                    ),
-                    context.viewport,
-                )
-                for local_x, local_y in corners
-            )
+            projected = tuple(self.project_point(context, point) for point in corners)
             xs = tuple(point[0] for point in projected)
             ys = tuple(point[1] for point in projected)
             return min(xs), min(ys), max(xs), max(ys)
@@ -599,10 +668,11 @@ class RenderItem:
     def is_visible(self, context: RenderContext) -> bool:
         if not self.visible:
             return False
-        depth = self.world_transform.position[2]
+        transform = self.resolved_transform(context)
+        depth = transform.position[2]
         if not context.camera.near <= depth <= context.camera.far:
             return False
-        left, top, right, bottom = self._projected_bounds(context)
+        left, top, right, bottom = self._projected_bounds(context, transform)
         return (
             right >= context.viewport.x
             and left <= context.viewport.right

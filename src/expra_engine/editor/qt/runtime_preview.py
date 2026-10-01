@@ -28,6 +28,7 @@ class QtRuntimePreviewLoop:
         render: Callable[[], None],
         *,
         observer: ObservabilityWatcher | None = None,
+        camera_step: Callable[[float], None] | None = None,
         on_world_startup_diagnostic: Callable[[str], None] | None = None,
         on_world_startup_error: Callable[[], None] | None = None,
         on_runtime_error: Callable[[str], None] | None = None,
@@ -35,6 +36,7 @@ class QtRuntimePreviewLoop:
         self._widget = widget
         self._engine = engine
         self._render = render
+        self._camera_step = camera_step
         self._timer: Any = None  # QTimer | None
         self._observer = observer
         self._on_world_startup_diagnostic = on_world_startup_diagnostic
@@ -84,7 +86,9 @@ class QtRuntimePreviewLoop:
             token = observer.begin("editor:preview:tick") if observer is not None else None
             outcome: Literal["success", "failure"] = "success"
             try:
-                self._engine.tick()
+                dt = self._engine.tick()
+                if self._camera_step is not None:
+                    self._camera_step(dt)
                 if self._report_world_startup_state():
                     return
                 self._render()

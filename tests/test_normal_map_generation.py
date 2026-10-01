@@ -179,3 +179,58 @@ def test_write_generated_normal_leaves_existing_asset_untouched_on_bad_input(
     with pytest.raises(ValueError):
         write_generated_normal(project, "assets://tiles/stone.png", b"not an image")
     assert (project.assets_dir / "tiles" / "stone_normal.png").read_bytes() == b"existing"
+
+
+def test_target_size_resizes_output() -> None:
+    albedo = Image.new("RGBA", (8, 8), (0, 0, 0, 0))
+    albedo.paste((255, 0, 0, 255), (2, 2, 6, 6))
+    settings = NormalMapGenerationSettings(
+        preset=NormalMapGenerationPreset.ALPHA_BEVEL, target_size=(128, 128)
+    )
+    image = generate_normal_map(albedo, settings)
+    assert image.size == (128, 128)
+    assert image.mode == "RGB"
+
+
+def test_target_size_none_keeps_source_size() -> None:
+    albedo = Image.new("RGBA", (6, 4), (255, 0, 0, 255))
+    settings = NormalMapGenerationSettings(preset=NormalMapGenerationPreset.FLAT)
+    assert generate_normal_map(albedo, settings).size == (6, 4)
+
+
+def test_resample_nearest_and_bilinear_produce_target_size() -> None:
+    albedo = Image.new("RGBA", (4, 4), (255, 255, 255, 255))
+    for resample in ("nearest", "bilinear"):
+        settings = NormalMapGenerationSettings(
+            preset=NormalMapGenerationPreset.ALPHA_BEVEL,
+            target_size=(64, 64),
+            resample=resample,
+        )
+        assert generate_normal_map(albedo, settings).size == (64, 64)
+
+
+def test_target_size_and_resample_validation_rejects_invalid() -> None:
+    for bad in [(0, 128), (-1, 128), (128,), (128, 128, 128), (128.0, 128)]:
+        with pytest.raises(ValueError):
+            NormalMapGenerationSettings(target_size=bad)
+    with pytest.raises(ValueError):
+        NormalMapGenerationSettings(target_size=(128, 128), resample="lanczos")
+
+
+def test_pixel_art_fixture_generates_normal_maps_at_target_sizes() -> None:
+    albedo = Image.open(Path(__file__).parent / "fixtures" / "pixel_art_sprite.png")
+    for target, expected in [
+        (None, (16, 16)),
+        ((32, 32), (32, 32)),
+        ((64, 64), (64, 64)),
+        ((128, 128), (128, 128)),
+    ]:
+        settings = NormalMapGenerationSettings(
+            preset=NormalMapGenerationPreset.ALPHA_BEVEL,
+            target_size=target,
+            resample="nearest",
+        )
+        image = generate_normal_map(albedo, settings)
+        assert image.size == expected
+        assert any(pixel != (128, 128, 255) for pixel in _rgb(image))
+        assert image.convert("RGB").getpixel((0, 0)) == (128, 128, 255)

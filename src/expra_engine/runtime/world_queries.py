@@ -23,6 +23,7 @@ __all__ = ("WorldStreamingQueriesMixin",)
 class _WorldStreamingQueryHost(Protocol):
     world: World
     _residency: LevelResidencyManager
+    _runtime_entity_ids: dict[str, tuple[str, ...]]
     _started: bool
     _pending: dict[str, Any]
     _futures: dict[str, Any]
@@ -38,6 +39,8 @@ class _WorldStreamingQueryHost(Protocol):
     _startup_diagnostic: str | None
 
     def streaming_anchors(self) -> tuple[StreamingAnchor, ...]: ...
+
+    def primary_level(self) -> str | None: ...
 
     @property
     def camera_context(self) -> WorldCameraContext: ...
@@ -70,6 +73,16 @@ class WorldStreamingQueriesMixin:
             for item in self._residency.snapshots()
             if item.state is LevelResidencyState.ACTIVE
         )
+
+    def primary_level_entity_ids(self: _WorldStreamingQueryHost) -> tuple[str, ...]:
+        """Return materialized Entity IDs owned by the current primary World Level.
+
+        Before the primary anchor is materialized, the selected startup Level
+        supplies the initial render owner. IDs come from Level ownership
+        bookkeeping, not from their namespaced values.
+        """
+        level_id = self.primary_level() or self._startup_level_id
+        return self._runtime_entity_ids.get(level_id, ()) if level_id is not None else ()
 
     def snapshot(self: _WorldStreamingQueryHost) -> WorldStreamingSnapshot:
         anchors = self.streaming_anchors() if self._started else ()

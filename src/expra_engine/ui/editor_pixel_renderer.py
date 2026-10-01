@@ -439,6 +439,8 @@ def render_editor_frame_to_pixel_image(
 
 
 def editor_render_context(editor_camera: Any, width: int, height: int) -> RenderContext:
+    if isinstance(editor_camera, OrthographicCamera):
+        return RenderContext(Viewport(0, 0, width, height), editor_camera)
     camera_width = editor_camera._camera.width
     camera_height = camera_width * height / width
     camera = OrthographicCamera(width=camera_width, height=camera_height)

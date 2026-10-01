@@ -37,6 +37,7 @@ from expra_engine.runtime.behaviour import (
     exposed,
 )
 from expra_engine.runtime.behaviour_system import BehaviourSystem
+from expra_engine.runtime.camera_mount import CameraMountComponent
 from expra_engine.runtime.canvas_effects import CanvasModulateComponent, CanvasModulation
 from expra_engine.runtime.clock import RuntimeClock
 from expra_engine.runtime.easing import CubicBezier
@@ -81,6 +82,7 @@ from expra_engine.runtime.rendering import (
     RendererCapabilities,
     RenderItem,
     RenderPhase,
+    RenderSpace,
     TextDescriptor,
     Transform,
     Viewport,
@@ -152,6 +154,7 @@ __all__ = [
     "BehaviourContext",
     "BehaviourFactory",
     "BehaviourSystem",
+    "CameraMountComponent",
     "CanvasModulateComponent",
     "CanvasModulation",
     "Color",
@@ -188,6 +191,7 @@ __all__ = [
     "RenderPhase",
     "RenderPlan",
     "RenderPlanBuilder",
+    "RenderSpace",
     "Renderer",
     "RendererCapabilities",
     "Repeater",

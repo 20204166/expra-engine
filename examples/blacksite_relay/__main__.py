@@ -14,7 +14,7 @@ PROJECT_DIR=Path(__file__).resolve().parent
 
 # Per-level scene shorthands for the CLI launcher. The runtime camera itself
 # needs no per-level branching: each scene's own "camera" JSON block is
-# applied automatically by PygameRuntime._sync_camera_target() on load, so
+# applied automatically by RuntimeCameraResolver on load, so
 # the follow/limit/width choices baked into level_02_deepcore.json take
 # effect without any code here reading which level is active.
 LEVEL_SCENES={'main':'levels/main.level.pb','level2':'levels/level_02_deepcore.level.pb','deepcore':'levels/level_02_deepcore.level.pb'}

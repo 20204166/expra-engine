@@ -147,6 +147,37 @@ class _FailingStopRenderer(_RecordingRenderer):
         raise RuntimeError("stop unavailable")
 
 
+def test_pygame_loop_steps_shared_camera_resolver_after_engine_tick() -> None:
+    events: list[str] = []
+    engine = _FakeEngine()
+
+    def tick(_dt: float) -> None:
+        events.append("engine")
+        engine.run_state.value = "edit"
+
+    engine.tick = tick
+
+    class ResolverProbe:
+        def step(self, current_engine, dt: float) -> None:
+            assert current_engine is engine
+            assert dt == 0.016
+            events.append("camera")
+
+    pygame = _FakePygame([[]])
+    runtime = PygameRuntime(
+        engine,
+        renderer=_RecordingRenderer(),
+        pygame_module=pygame,
+        clock=_FakeClock([16]),
+        surface_factory=lambda _size: _FakeSurface(),
+    )
+    runtime._camera_resolver = ResolverProbe()
+
+    runtime.run()
+
+    assert events == ["engine", "camera"]
+
+
 class TestPygameRuntime(unittest.TestCase):
     def test_world_fade_overlay_is_composited_after_render_and_reused(self) -> None:
         class Overlay:

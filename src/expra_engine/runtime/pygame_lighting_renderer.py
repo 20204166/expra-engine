@@ -310,8 +310,8 @@ class PygameLightingRenderMixin:
         strength: float,
     ) -> Any:
         np = __import__("numpy")
-        transform = item.visual_transform
-        center_x, center_y = context.camera.project(transform.position[:2], context.viewport)
+        transform = item.resolved_transform(context)
+        center_x, center_y = item.project_point(context)
         rendered_width = round(
             abs(item.primitive.size[0] * transform.scale[0] / context.camera.width)
             * context.viewport.width
@@ -433,8 +433,7 @@ class PygameLightingRenderMixin:
                     text.align,
                 )
             )
-            transform = item.visual_transform
-            center_x, center_y = context.camera.project(transform.position[:2], context.viewport)
+            center_x, center_y = item.project_point(context)
             text_x = round(center_x)
             if text.align == "center":
                 text_x -= text_size[0] // 2

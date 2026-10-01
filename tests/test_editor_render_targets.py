@@ -6,11 +6,14 @@ import unittest
 from types import SimpleNamespace
 from typing import Any, cast
 
+import pytest
+
 from expra_engine.coordinators.ui_coordinator import RenderIntent, UICoordinator
 from expra_engine.core.component import TransformComponent
 from expra_engine.core.engine import EngineRunState
 from expra_engine.core.scene import Scene
 from expra_engine.editor.render_targets import RenderTargetRegistry
+from expra_engine.editor.window_core import EditorWindowCore
 from expra_engine.runtime.canvas_effects import CanvasModulateComponent
 from expra_engine.runtime.collider import ColliderComponent
 from expra_engine.runtime.rendering import Color
@@ -24,7 +27,6 @@ from expra_engine.runtime.visual_components import (
     SpriteComponent,
     TextComponent,
 )
-from expra_engine.editor.window_core import EditorWindowCore
 from expra_engine.ui.viewport_camera import ViewportCamera
 from expra_engine.ui.viewport_render_target import build_editor_render_target
 
@@ -79,6 +81,139 @@ class _RoutingWindow(EditorWindowCore):
 
 
 class EditorRenderTargetTests(unittest.TestCase):
+    def test_editor_preview_steps_runtime_camera_between_engine_tick_and_render(self) -> None:
+        from expra_engine.editor.qt.runtime_preview import QtRuntimePreviewLoop
+
+        events: list[object] = []
+        engine = SimpleNamespace(
+            run_state=EngineRunState.PLAY,
+            tick=lambda: events.append("engine") or 0.016,
+            world_streaming_system=None,
+        )
+
+        def render() -> None:
+            events.append("render")
+            engine.run_state = EngineRunState.EDIT
+
+        loop = QtRuntimePreviewLoop(
+            SimpleNamespace(objectName=lambda: "viewport"),
+            engine,
+            render,
+            camera_step=lambda dt: events.append(("camera", dt)),
+        )
+
+        loop._tick()
+
+        assert events == ["engine", ("camera", 0.016), "render"]
+
+    def test_editor_play_pixel_layer_uses_live_camera_and_keeps_mounted_hud_fixed(self) -> None:
+        pygame = pytest.importorskip("pygame")
+        from expra_engine.core.engine import Engine
+        from expra_engine.core.scene import Level, SceneInstanceComponent, resolve_scene_instances
+        from expra_engine.editor.qt.image_bridge import QtEditorImage
+        from expra_engine.runtime.camera_mount import CameraMountComponent
+        from expra_engine.runtime.rendering import OrthographicCamera, RenderContext, Viewport
+        from expra_engine.runtime.runtime_camera import RuntimeCameraResolver
+        from expra_engine.runtime.visual_components import PrimitiveComponent
+        from expra_engine.ui.editor_pixel_renderer import render_editor_frame_to_pixel_image
+        from tests.support.qt_app import ensure_qt_app
+
+        ensure_qt_app()
+        pygame.init()
+        engine = Engine()
+        try:
+            source_hud = Scene("Reusable HUD")
+            panel = source_hud.create_entity("HUD marker")
+            panel.add_component(TransformComponent(x=24.0, y=-12.0))
+            panel.add_component(
+                PrimitiveComponent("rectangle", width=8.0, height=8.0, fill=(1.0, 0.0, 0.0))
+            )
+            level = Level("Editor Play", camera={"width": 20.0, "height": 10.0,
+                                                  "target_entity_id": "courier"})
+            hud = level.create_entity("HUD instance")
+            hud.add_component(TransformComponent(x=900.0, y=400.0))
+            hud.add_component(CameraMountComponent("top_left", x=16.0, y=-16.0))
+            hud.add_component(SceneInstanceComponent("scenes/hud.scene.pb"))
+            courier = level.create_entity("Courier", entity_id="courier")
+            courier.add_component(TransformComponent(x=0.0, y=0.0))
+            courier.add_component(
+                PrimitiveComponent("rectangle", width=4.0, height=4.0, fill=(0.0, 0.0, 1.0))
+            )
+            world_marker = level.create_entity("World marker", entity_id="world-marker")
+            world_marker.add_component(TransformComponent(x=-5.0, y=0.0))
+            world_marker.add_component(
+                PrimitiveComponent("rectangle", width=4.0, height=4.0, fill=(0.0, 0.0, 1.0))
+            )
+            resolve_scene_instances(level, resolve_source=lambda _path: source_hud)
+            engine.set_scene(level)
+            assert engine.play()
+            active_courier = engine.active_scene.find_entity("courier")
+            assert active_courier is not None
+            camera = OrthographicCamera(width=20.0, height=10.0)
+            resolver = RuntimeCameraResolver(camera)
+
+            class PixelViewport:
+                def __init__(self) -> None:
+                    self.images = []
+
+                def render(self, scene, _selected_id, **kwargs) -> None:
+                    target = build_editor_render_target(
+                        scene,
+                        viewport=(200, 100),
+                        resolved_camera=kwargs["resolved_camera"],
+                        interpolator=kwargs["interpolator"],
+                        interpolation_fraction=kwargs["interpolation_fraction"],
+                        animated_players=kwargs["animated_players"],
+                        modulation_entity_ids=kwargs["modulation_entity_ids"],
+                        primary_level_entity_ids=kwargs["primary_level_entity_ids"],
+                    )
+                    self.images.append(
+                        render_editor_frame_to_pixel_image(
+                            target.frame,
+                            RenderContext(
+                                Viewport(0, 0, 200, 100), kwargs["resolved_camera"]
+                            ),
+                            width=200,
+                            height=100,
+                            resource_service=None,
+                            resource_provider=lambda _asset: None,
+                            pygame_module=pygame,
+                            image_factory=QtEditorImage,
+                        )
+                    )
+
+            sink = PixelViewport()
+            window = cast(Any, _RoutingWindow.__new__(_RoutingWindow))
+            window._viewport = sink
+            window._runtime_camera = camera
+            window._engine = engine
+            window._active_document = SimpleNamespace(kind=None, document=None)
+
+            def render_play_frame() -> None:
+                window._render_viewport(
+                    RenderIntent(target="viewport", payload=(engine.active_scene, None))
+                )
+                assert sink.images[-1] is not None
+
+            resolver.step(engine, 0.016)
+            render_play_frame()
+            hud_before = sink.images[-1].get(40, 28)
+            assert sink.images[-1].get(50, 50) == (0, 0, 255)
+            active_courier.get_component(TransformComponent).x = 2.0
+            engine.tick(0.016)
+            resolver.step(engine, 0.016)
+            render_play_frame()
+            assert camera.position[:2] == (2.0, 0.0)
+            assert sink.images[-1].get(40, 28) == hud_before
+            assert sink.images[-1].get(50, 50) != (0, 0, 255)
+            camera.position = (8.0, 3.0)
+            render_play_frame()
+            assert sink.images[-1].get(40, 28) == hud_before
+            assert sink.images[-1].get(30, 50) != (0, 0, 255)
+        finally:
+            engine.stop()
+            pygame.quit()
+
     def test_editor_viewport_routes_runtime_interpolation_only_during_play(self) -> None:
         class ViewportSink:
             def __init__(self) -> None:

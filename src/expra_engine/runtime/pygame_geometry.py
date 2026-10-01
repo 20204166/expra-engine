@@ -30,12 +30,9 @@ def projected_rectangle_points(
         (half_width, half_height),
         (half_width, -half_height),
     )
-    world_points = transform.transform_points(
-        tuple((local_x, local_y, 0.0) for local_x, local_y in local_points)
-    )
     points: list[tuple[int, int]] = []
-    for world_point in world_points:
-        projected = context.camera.project(world_point[:2], context.viewport)
+    for local_point in local_points:
+        projected = item.project_point(context, local_point)
         points.append((round(projected[0]), round(projected[1])))
     return tuple(points)
 
@@ -51,12 +48,9 @@ def projected_polygon_points(
     transform (position + rotation + scale) and the camera, matching the
     ``projected_rectangle_points`` convention.
     """
-    world_points = transform.transform_points(
-        tuple((local_x, local_y, 0.0) for local_x, local_y in item.primitive.points)
-    )
     points: list[tuple[int, int]] = []
-    for world_point in world_points:
-        projected = context.camera.project(world_point[:2], context.viewport)
+    for local_point in item.primitive.points:
+        projected = item.project_point(context, local_point)
         points.append((round(projected[0]), round(projected[1])))
     return tuple(points)
 

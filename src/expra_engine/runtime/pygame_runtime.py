@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 import importlib
-import json
 from collections.abc import Callable
 from typing import Any
 
-from expra_engine.core.component import TransformComponent
 from expra_engine.runtime.input import PhysicalInput
 from expra_engine.runtime.pygame_input import (
     keyboard_control_name,
@@ -21,6 +19,7 @@ from expra_engine.runtime.rendering import (
     RenderFrame,
     Viewport,
 )
+from expra_engine.runtime.runtime_camera import RuntimeCameraResolver
 from expra_engine.runtime.ui import GameCanvas, UIEvent
 
 __all__ = ("PygameRuntime",)
@@ -63,11 +62,10 @@ class PygameRuntime:
         self.render_callback = render_callback
         self.frame_factory = frame_factory
         self.camera = camera or OrthographicCamera()
-        self.camera_target_id = camera_target_id
-        self._camera_scene_id: str | None = None
-        self._camera_settings_fingerprint: str | None = None
-        self._world_camera_bounds: tuple[float, float, float, float] | None = None
-        self._camera_recenter_generation = 0
+        self._camera_resolver = RuntimeCameraResolver(
+            self.camera,
+            camera_target_id=camera_target_id,
+        )
         self.ui_root = ui_root
         self.surface: Any | None = None
         self._transition_overlay: Any | None = None
@@ -84,6 +82,15 @@ class PygameRuntime:
     def is_key_down(self, key: Any) -> bool:
         """Return whether *key* is currently held."""
         return key in self._keys
+
+    @property
+    def camera_target_id(self) -> str | None:
+        """Return the resolved runtime camera follow target ID."""
+        return self._camera_resolver.camera_target_id
+
+    @camera_target_id.setter
+    def camera_target_id(self, value: str | None) -> None:
+        self._camera_resolver.camera_target_id = value
 
     def stop(self) -> None:
         """Request that the loop leave after the current event batch."""
@@ -118,15 +125,7 @@ class PygameRuntime:
                 self.engine.tick(dt)
                 if getattr(getattr(self.engine, "run_state", None), "value", None) == "edit":
                     self.stop()
-                self._sync_camera_target()
-                self.camera.update(dt)
-                world_system = getattr(self.engine, "world_streaming_system", None)
-                report_camera_view = getattr(world_system, "report_camera_view", None)
-                if callable(report_camera_view):
-                    report_camera_view(
-                        self.camera.position[:2],
-                        (self.camera.width, self.camera.height),
-                    )
+                self._camera_resolver.step(self.engine, dt)
                 if self.renderer is not None:
                     frame = (
                         self.frame_factory(self.engine, dt)
@@ -173,65 +172,6 @@ class PygameRuntime:
             self._transition_overlay_size = self.size
         self._transition_overlay.set_alpha(round(min(1.0, alpha) * 255))
         self.surface.blit(self._transition_overlay, (0, 0))
-
-    def _sync_camera_target(self) -> None:
-        scene = getattr(self.engine, "active_scene", None)
-        if scene is None:
-            return
-        settings = getattr(scene, "camera", {})
-        try:
-            fingerprint = json.dumps(settings, sort_keys=True, separators=(",", ":"))
-        except (TypeError, ValueError):
-            fingerprint = repr(settings)
-        if (
-            scene.scene_id != self._camera_scene_id
-            or fingerprint != self._camera_settings_fingerprint
-        ):
-            self._camera_scene_id = scene.scene_id
-            self._camera_settings_fingerprint = fingerprint
-            if isinstance(settings, dict):
-                if hasattr(settings, "apply_to"):
-                    settings.apply_to(self.camera)
-                else:
-                    self.camera.apply_dict(settings)
-                self.camera_target_id = (
-                    getattr(settings, "target_entity_id", None) or self.camera_target_id
-                )
-        world_system = getattr(self.engine, "world_streaming_system", None)
-        context = None
-        if world_system is not None:
-            context = getattr(world_system, "camera_context", None)
-            if context is not None:
-                if context.follow_target_entity_id is not None:
-                    self.camera_target_id = context.follow_target_entity_id
-                bounds = context.effective_bounds
-                if bounds != self._world_camera_bounds:
-                    if bounds is None:
-                        self.camera.clear_limits()
-                    else:
-                        self.camera.set_limits(*bounds)
-                    self._world_camera_bounds = bounds
-        elif getattr(self, "_world_camera_bounds", None) is not None:
-            self.camera.clear_limits()
-            self._world_camera_bounds = None
-            self._camera_recenter_generation = 0
-        if self.camera_target_id is None:
-            return
-        target = scene.find_entity(self.camera_target_id)
-        if target is None or not target.enabled:
-            return
-        transform = target.get_component(TransformComponent)
-        if transform is not None and transform.enabled:
-            self.camera.target_position = scene.world_transform(target.entity_id).position
-            recenter_generation = getattr(context, "recenter_generation", 0)
-            if recenter_generation != getattr(self, "_camera_recenter_generation", 0):
-                target_position = self.camera.target_position
-                self.camera.position = (
-                    target_position[0],
-                    target_position[1],
-                    self.camera.position[2],
-                )
-                self._camera_recenter_generation = recenter_generation
 
     def _poll_events(self) -> None:
         for event in self.pygame.event.get():
