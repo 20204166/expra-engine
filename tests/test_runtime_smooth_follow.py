@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from math import inf, nan
 import unittest
+from math import inf, nan
 
 from expra_engine.runtime.smooth_follow import SmoothFollow
 

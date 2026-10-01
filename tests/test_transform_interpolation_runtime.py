@@ -37,7 +37,7 @@ def _engine() -> tuple[Engine, str]:
 
 
 def test_fixed_update_flows_through_interpolation_into_render_extraction() -> None:
-    engine, entity_id = _engine()
+    engine, _entity_id = _engine()
     engine.play()
     engine.tick(1.0 / 60.0 * 1.5)
 

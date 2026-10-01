@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from math import nan
 import unittest
+from math import nan
 
 from expra_engine.runtime.trail import TrailRenderer
 

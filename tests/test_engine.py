@@ -134,14 +134,16 @@ class TestEngineUpdate(unittest.TestCase):
 
 class TestEngineProject(unittest.TestCase):
     def test_set_project(self) -> None:
+        import tempfile
         from pathlib import Path
 
         from expra_engine.core.project import Project
 
-        engine = Engine()
-        project = Project("Test Project", Path("/tmp/test_project"))
-        engine.set_project(project)
-        self.assertIs(engine.project, project)
+        with tempfile.TemporaryDirectory() as directory:
+            engine = Engine()
+            project = Project("Test Project", Path(directory) / "test_project")
+            engine.set_project(project)
+            self.assertIs(engine.project, project)
 
 
 if __name__ == "__main__":

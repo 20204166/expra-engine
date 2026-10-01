@@ -457,22 +457,23 @@ class SecondBehaviour(Behaviour):
                 assert transform is not None
                 transform.x += event.time_delta
 
-        scene = Scene("Level")
-        entity = scene.create_entity("Player")
-        entity.add_component(TransformComponent())
-        entity.add_component(ScriptComponent("project://scripts/missing.py", "Missing"))
-        engine = Engine()
-        engine.set_scene(scene)
-        engine.add_system(DefaultMovement())
-        engine.set_script_registry(ScriptRegistry(Path.cwd()))
-        engine.play()
-        engine.tick(0.25)
-        active_scene = engine.active_scene
-        assert active_scene is not None
-        transform = active_scene.entities[0].get_component(TransformComponent)
-        assert transform is not None
-        self.assertEqual(transform.x, 0.25)
-        self.assertEqual(len(engine.behaviour_system.errors), 1)
+        with tempfile.TemporaryDirectory() as directory:
+            scene = Scene("Level")
+            entity = scene.create_entity("Player")
+            entity.add_component(TransformComponent())
+            entity.add_component(ScriptComponent("project://scripts/missing.py", "Missing"))
+            engine = Engine()
+            engine.set_scene(scene)
+            engine.add_system(DefaultMovement())
+            engine.set_script_registry(ScriptRegistry(Path(directory)))
+            engine.play()
+            engine.tick(0.25)
+            active_scene = engine.active_scene
+            assert active_scene is not None
+            transform = active_scene.entities[0].get_component(TransformComponent)
+            assert transform is not None
+            self.assertEqual(transform.x, 0.25)
+            self.assertEqual(len(engine.behaviour_system.errors), 1)
 
     def test_missing_script_errors_are_bounded(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

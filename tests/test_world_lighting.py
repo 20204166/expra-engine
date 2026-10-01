@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from concurrent.futures import Future
-
 from expra_engine.core.component import TransformComponent, component_from_dict
 from expra_engine.core.project import Project
 from expra_engine.core.scene import Level, Scene, SceneInstanceComponent
@@ -12,16 +10,7 @@ from expra_engine.runtime.render_extractor import extract_render_frame
 from expra_engine.runtime.rendering import Color
 from expra_engine.runtime.world_policy import StreamingAnchor
 from expra_engine.runtime.world_streaming import WorldStreamingSystem
-
-
-class ImmediateExecutor:
-    def submit(self, function, *args):
-        future = Future()
-        future.set_result(function(*args))
-        return future
-
-    def shutdown(self, *, wait: bool = False, cancel_futures: bool = True) -> None:
-        del wait, cancel_futures
+from tests.support.scheduling import ImmediateExecutor
 
 
 def _level(name: str, ambient: tuple[float, float, float, float]) -> Level:

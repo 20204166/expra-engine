@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from concurrent.futures import Executor, Future
 from typing import Any, cast
 
 import pytest
@@ -36,6 +35,7 @@ from expra_engine.runtime.rendering import (
 from expra_engine.runtime.screen_texture import BackBufferCopyComponent
 from expra_engine.runtime.visual_components import PrimitiveComponent, SpriteComponent
 from expra_engine.runtime.world_streaming import WorldStreamingSystem
+from tests.support.scheduling import ImmediateExecutor
 
 
 def test_material_light_response_has_a_validated_neutral_lit_default() -> None:
@@ -337,15 +337,6 @@ def test_standalone_level_and_world_activation_keep_material_responses(tmp_path)
     project = Project.create("materials", tmp_path / "materials")
     project.save_document(town, "levels/town.level.pb")
     project.save_document(forest, "levels/forest.level.pb")
-
-    class ImmediateExecutor(Executor):
-        def submit(self, function, /, *args, **kwargs):
-            future = Future()
-            future.set_result(function(*args, **kwargs))
-            return future
-
-        def shutdown(self, wait=True, *, cancel_futures=False):
-            del wait, cancel_futures
 
     world = World(
         "materials",

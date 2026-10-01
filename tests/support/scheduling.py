@@ -141,3 +141,20 @@ class ManualExecutor(Executor):
         if cancel_futures:
             for future, _ in self.jobs:
                 future.cancel()
+
+
+class ImmediateExecutor(Executor):
+    """``concurrent.futures.Executor`` fake that runs submitted work synchronously.
+
+    For World streaming tests that don't care about load ordering or timing and
+    just want the loader to run inline on ``submit`` (no explicit ``complete()``
+    step, unlike ``ManualExecutor``).
+    """
+
+    def submit(self, function: Callable[[], object]) -> Future[object]:
+        future: Future[object] = Future()
+        future.set_result(function())
+        return future
+
+    def shutdown(self, *, wait: bool = False, cancel_futures: bool = True) -> None:
+        del wait, cancel_futures
