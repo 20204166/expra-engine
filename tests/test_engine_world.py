@@ -2,33 +2,13 @@
 
 from __future__ import annotations
 
-from concurrent.futures import Future
-
 from expra_engine.core.engine import Engine
 from expra_engine.core.scene import Level, Scene
 from expra_engine.core.world import LevelDescriptor, World
 from expra_engine.runtime.script_component import ScriptComponent
 from expra_engine.runtime.script_registry import ScriptRegistry
 from expra_engine.runtime.system import RuntimeSystem
-
-
-class ManualExecutor:
-    def __init__(self, _workers: int) -> None:
-        self.jobs: list[tuple[Future[object], object]] = []
-
-    def submit(self, function):
-        future: Future[object] = Future()
-        self.jobs.append((future, function))
-        return future
-
-    def complete(self) -> None:
-        future, function = self.jobs[0]
-        future.set_running_or_notify_cancel()
-        future.set_result(function())
-
-    def shutdown(self, *, wait: bool = False, cancel_futures: bool = True) -> None:
-        for future, _function in self.jobs:
-            future.cancel()
+from tests.support.scheduling import ManualExecutor
 
 
 def test_engine_play_runs_world_runtime_and_stop_restores_edit_scene() -> None:

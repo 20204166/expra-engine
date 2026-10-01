@@ -5,6 +5,7 @@ from __future__ import annotations
 from expra_engine.core.scene import Level
 from expra_engine.core.world import LevelDescriptor, World, WorldStreamingSettings
 from expra_engine.observability import ObservabilityWatcher
+from tests.support.scheduling import ManualExecutor
 
 
 def _make_watcher() -> ObservabilityWatcher:
@@ -26,36 +27,10 @@ def _simple_world() -> World:
     )
 
 
-class _ManualExecutor:
-    def __init__(self, max_workers: int) -> None:
-        self.max_workers = max_workers
-        self.jobs: list = []
-        self.closed = False
-
-    def submit(self, fn, *args):
-        from concurrent.futures import Future
-
-        f: Future = Future()
-        self.jobs.append((f, fn, args))
-        return f
-
-    def complete(self, index: int = 0) -> None:
-        f, fn, args = self.jobs[index]
-        if not f.running():
-            f.set_running_or_notify_cancel()
-        try:
-            f.set_result(fn(*args))
-        except Exception as e:  # noqa: BLE001 - propagate any loader failure into the Future
-            f.set_exception(e)
-
-    def shutdown(self, *, wait: bool = False, cancel_futures: bool = True) -> None:
-        self.closed = True
-
-
 def _make_system(watcher: ObservabilityWatcher):
     from expra_engine.runtime.world_streaming import WorldStreamingSystem
 
-    executor = _ManualExecutor(max_workers=1)
+    executor = ManualExecutor(max_workers=1)
     system = WorldStreamingSystem(
         None,
         _simple_world(),
@@ -110,7 +85,7 @@ def test_world_level_deactivate_span_is_recorded() -> None:
     from expra_engine.core.world import LevelDescriptor, World, WorldStreamingSettings
     from expra_engine.runtime.world_streaming import WorldStreamingSystem
 
-    executor = _ManualExecutor(max_workers=2)
+    executor = ManualExecutor(max_workers=2)
     world = World(
         "Obs2",
         world_id="obs2",
@@ -149,7 +124,7 @@ def test_world_state_capture_span_is_recorded() -> None:
     from expra_engine.core.world import LevelDescriptor, World, WorldStreamingSettings
     from expra_engine.runtime.world_streaming import WorldStreamingSystem
 
-    executor = _ManualExecutor(max_workers=2)
+    executor = ManualExecutor(max_workers=2)
     world = World(
         "Cap",
         world_id="cap",
@@ -201,7 +176,7 @@ def test_observer_target_count_is_bounded_after_many_load_unload_cycles() -> Non
     from expra_engine.runtime.world_streaming import WorldStreamingSystem
 
     watcher = _make_watcher()
-    executor = _ManualExecutor(max_workers=1)
+    executor = ManualExecutor(max_workers=1)
     world = World(
         "Cycle",
         world_id="cycle",
@@ -289,7 +264,7 @@ def test_world_level_unload_span_is_recorded() -> None:
     from expra_engine.core.world import LevelDescriptor, World, WorldStreamingSettings
     from expra_engine.runtime.world_streaming import WorldStreamingSystem
 
-    executor = _ManualExecutor(max_workers=2)
+    executor = ManualExecutor(max_workers=2)
     world = World(
         "Unload",
         world_id="unload",
@@ -350,7 +325,7 @@ def test_world_transition_counter_is_recorded() -> None:
     )
     from expra_engine.runtime.world_streaming import WorldStreamingSystem
 
-    executor = _ManualExecutor(max_workers=2)
+    executor = ManualExecutor(max_workers=2)
     world = World(
         "Trans",
         world_id="trans",

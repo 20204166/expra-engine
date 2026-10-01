@@ -8,9 +8,9 @@ instance content), never a raw ``scene.to_dict()`` write.
 from __future__ import annotations
 
 import unittest
-from typing import Any
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import Any
 from unittest.mock import patch
 
 from expra_engine.core.component import TransformComponent
@@ -19,7 +19,6 @@ from expra_engine.core.project import Project
 from expra_engine.core.scene import Scene, SceneInstanceComponent
 from expra_engine.core.scene.document_codec import decode_protobuf
 from tests.support.qt_editor import make_editor, pump
-
 
 
 def _make_project(root: Path) -> Project:

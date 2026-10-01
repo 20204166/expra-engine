@@ -1,7 +1,6 @@
 """Versioned World session data and explicit UserDataStore persistence."""
 
 import json
-from concurrent.futures import Future
 from pathlib import Path
 
 import pytest
@@ -18,27 +17,10 @@ from expra_engine.runtime.level_anchor import (
 )
 from expra_engine.runtime.world_state import WorldSessionState, WorldSessionStateComponent
 from expra_engine.runtime.world_streaming import WorldStreamingSystem
+from tests.support.scheduling import ManualExecutor
 
 materialization_session_path = world_materialize_module._world_session_store_path
 persistence_session_path = world_state_module._world_session_store_path
-
-class ManualExecutor:
-    def __init__(self, _workers: int) -> None:
-        self.jobs: list[tuple[Future[object], object]] = []
-
-    def submit(self, function):
-        future: Future[object] = Future()
-        self.jobs.append((future, function))
-        return future
-
-    def complete(self, index: int = 0) -> None:
-        future, function = self.jobs[index]
-        future.set_running_or_notify_cancel()
-        future.set_result(function())
-
-    def shutdown(self, *, wait: bool = False, cancel_futures: bool = True) -> None:
-        for future, _function in self.jobs:
-            future.cancel()
 
 
 def test_world_session_path_has_one_canonical_owner() -> None:

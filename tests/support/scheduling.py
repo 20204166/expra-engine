@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable
-from typing import Any
+from concurrent.futures import Executor, Future
 
 
 class FakeClock:
@@ -101,3 +101,43 @@ class RecordingDelivery:
     @property
     def count(self) -> int:
         return len(self._callbacks)
+
+
+class ManualExecutor(Executor):
+    """Deterministic ``concurrent.futures.Executor`` fake for World streaming tests.
+
+    Jobs queue on ``submit`` and only run when a test calls ``complete(index)``,
+    letting tests control load ordering and interleave world-streaming ``update()``
+    calls between worker completions. Matches real ``Executor`` semantics: a
+    worker exception is captured on the ``Future`` (never raised out of
+    ``complete``), and ``complete`` tolerates a future a test already drove to
+    "running" directly (e.g. to simulate an in-flight load before cancelling it).
+    """
+
+    def __init__(self, max_workers: int) -> None:
+        self.max_workers = max_workers
+        self.jobs: list[tuple[Future[object], Callable[[], object]]] = []
+        self.closed = False
+
+    def submit(self, function: Callable[[], object]) -> Future[object]:
+        future: Future[object] = Future()
+        self.jobs.append((future, function))
+        return future
+
+    def complete(self, index: int = 0) -> None:
+        future, function = self.jobs[index]
+        if not future.running():
+            future.set_running_or_notify_cancel()
+        try:
+            result = function()
+        except Exception as error:  # noqa: BLE001 - propagate worker failures through the Future
+            future.set_exception(error)
+        else:
+            future.set_result(result)
+
+    def shutdown(self, *, wait: bool = False, cancel_futures: bool = True) -> None:
+        del wait
+        self.closed = True
+        if cancel_futures:
+            for future, _ in self.jobs:
+                future.cancel()

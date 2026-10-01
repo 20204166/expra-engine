@@ -63,6 +63,18 @@ class RecordingTimer:
         callback(*args)
 
 
+def _window(**overrides: object) -> SimpleNamespace:
+    """Window stub for ProjectWorkflow unit tests, with the widgets every test stubs."""
+    base: dict[str, object] = {
+        "_root": MagicMock(),
+        "_set_window_title": MagicMock(),
+        "_populate_recent_projects": MagicMock(),
+        "_console": MagicMock(),
+    }
+    base.update(overrides)
+    return SimpleNamespace(**base)
+
+
 class TestProjectWorkflow(unittest.TestCase):
     def test_open_loaded_world_uses_typed_active_document_and_world_play_source(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -77,7 +89,7 @@ class TestProjectWorkflow(unittest.TestCase):
             project.set_entrypoint("worlds/main.world.pb")
             engine = Engine()
             active_document = ActiveDocument()
-            window = SimpleNamespace(
+            window = _window(
                 _engine=engine,
                 _active_document=active_document,
                 _command_stack=active_document.command_stack,
@@ -94,10 +106,6 @@ class TestProjectWorkflow(unittest.TestCase):
                 _assets=MagicMock(),
                 _preferences=EditorPreferences(),
                 _selected_ids=(),
-                _root=MagicMock(),
-                _set_window_title=MagicMock(),
-                _populate_recent_projects=MagicMock(),
-                _console=MagicMock(),
                 _update_project_actions=MagicMock(),
                 _present_all=MagicMock(),
             )
@@ -127,11 +135,10 @@ class TestProjectWorkflow(unittest.TestCase):
             active_document = ActiveDocument()
             active_document.open(document, project.document_file(path))
             active_document.mark_dirty()
-            window = SimpleNamespace(
+            window = _window(
                 _engine=SimpleNamespace(project=project, edit_scene=None),
                 _active_document=active_document,
                 _last_save_path=project.document_file(path),
-                _console=MagicMock(),
             )
             workflow = ProjectWorkflow(window)
 
@@ -162,15 +169,11 @@ class TestProjectWorkflow(unittest.TestCase):
             engine = Engine()
             engine.set_project(project)
             engine.set_scene(None)
-            window = SimpleNamespace(
+            window = _window(
                 _engine=engine,
                 _active_document=active_document,
                 _last_save_path=active_document.path,
                 _selected_ids=(),
-                _root=MagicMock(),
-                _set_window_title=MagicMock(),
-                _populate_recent_projects=MagicMock(),
-                _console=MagicMock(),
                 _present_all=MagicMock(),
             )
 
@@ -201,16 +204,12 @@ class TestProjectWorkflow(unittest.TestCase):
             engine.set_scene(level)
             active_document = ActiveDocument()
             active_document.open(level, project.document_file("scenes/main.scene.pb"))
-            window = SimpleNamespace(
+            window = _window(
                 _engine=engine,
                 _active_document=active_document,
                 _observer=None,
                 _command_stack=active_document.command_stack,
                 _last_save_path=active_document.path,
-                _root=MagicMock(),
-                _set_window_title=MagicMock(),
-                _populate_recent_projects=MagicMock(),
-                _console=MagicMock(),
                 _present_all=MagicMock(),
             )
 
@@ -229,16 +228,12 @@ class TestProjectWorkflow(unittest.TestCase):
             engine = Engine()
             engine.set_project(project)
             active_document = ActiveDocument()
-            window = SimpleNamespace(
+            window = _window(
                 _engine=engine,
                 _active_document=active_document,
                 _command_stack=active_document.command_stack,
                 _last_save_path=None,
                 _selected_ids=(),
-                _root=MagicMock(),
-                _set_window_title=MagicMock(),
-                _populate_recent_projects=MagicMock(),
-                _console=MagicMock(),
                 _present_all=MagicMock(),
             )
 
@@ -258,16 +253,12 @@ class TestProjectWorkflow(unittest.TestCase):
             engine = Engine()
             engine.set_project(project)
             active_document = ActiveDocument()
-            window = SimpleNamespace(
+            window = _window(
                 _engine=engine,
                 _active_document=active_document,
                 _command_stack=active_document.command_stack,
                 _last_save_path=None,
                 _selected_ids=(),
-                _root=MagicMock(),
-                _set_window_title=MagicMock(),
-                _populate_recent_projects=MagicMock(),
-                _console=MagicMock(),
                 _present_all=MagicMock(),
             )
 
@@ -291,16 +282,12 @@ class TestProjectWorkflow(unittest.TestCase):
             engine = Engine()
             engine.set_project(project)
             engine.set_scene(None)
-            window = SimpleNamespace(
+            window = _window(
                 _engine=engine,
                 _active_document=active_document,
                 _command_stack=active_document.command_stack,
                 _last_save_path=active_document.path,
                 _observer=None,
-                _console=MagicMock(),
-                _root=MagicMock(),
-                _set_window_title=MagicMock(),
-                _populate_recent_projects=MagicMock(),
                 _present_all=MagicMock(),
                 _update_undo_redo_state=MagicMock(),
             )
@@ -342,15 +329,11 @@ class TestProjectWorkflow(unittest.TestCase):
             engine = Engine()
             engine.set_project(project)
             engine.set_scene(None)
-            window = SimpleNamespace(
+            window = _window(
                 _engine=engine,
                 _active_document=active_document,
                 _command_stack=active_document.command_stack,
                 _last_save_path=active_document.path,
-                _console=MagicMock(),
-                _root=MagicMock(),
-                _set_window_title=MagicMock(),
-                _populate_recent_projects=MagicMock(),
                 _update_undo_redo_state=MagicMock(),
                 _present_all=MagicMock(),
             )
@@ -396,16 +379,12 @@ class TestProjectWorkflow(unittest.TestCase):
             engine = Engine()
             engine.set_project(project)
             engine.set_scene(None)
-            window = SimpleNamespace(
+            window = _window(
                 _engine=engine,
                 _active_document=active_document,
                 _command_stack=active_document.command_stack,
                 _last_save_path=active_document.path,
                 _observer=None,
-                _console=MagicMock(),
-                _root=MagicMock(),
-                _set_window_title=MagicMock(),
-                _populate_recent_projects=MagicMock(),
                 _update_undo_redo_state=MagicMock(),
                 _present_all=MagicMock(),
             )
@@ -440,14 +419,11 @@ class TestProjectWorkflow(unittest.TestCase):
             engine = Engine()
             engine.set_project(project)
             engine.set_scene(None)
-            window = SimpleNamespace(
+            window = _window(
                 _engine=engine,
                 _active_document=active_document,
                 _command_stack=active_document.command_stack,
                 _last_save_path=active_document.path,
-                _root=MagicMock(),
-                _set_window_title=MagicMock(),
-                _populate_recent_projects=MagicMock(),
                 _update_undo_redo_state=MagicMock(),
                 _present_all=MagicMock(),
             )
@@ -485,14 +461,11 @@ class TestProjectWorkflow(unittest.TestCase):
             engine = Engine()
             engine.set_project(project)
             engine.set_scene(None)
-            window = SimpleNamespace(
+            window = _window(
                 _engine=engine,
                 _active_document=active_document,
                 _command_stack=active_document.command_stack,
                 _last_save_path=None,
-                _root=MagicMock(),
-                _set_window_title=MagicMock(),
-                _populate_recent_projects=MagicMock(),
                 _update_undo_redo_state=MagicMock(),
                 _present_all=MagicMock(),
             )
@@ -511,12 +484,8 @@ class TestProjectWorkflow(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             project = Project.create("Runtime", Path(tmp) / "runtime")
             engine = SimpleNamespace(project=project)
-            window = SimpleNamespace(
+            window = _window(
                 _engine=engine,
-                _console=MagicMock(),
-                _root=MagicMock(),
-                _set_window_title=MagicMock(),
-                _populate_recent_projects=MagicMock(),
                 _timer=RecordingTimer(),
             )
             workflow = ProjectWorkflow(window)
@@ -540,12 +509,8 @@ class TestProjectWorkflow(unittest.TestCase):
             project = Project.create("Runtime", Path(tmp) / "runtime")
             process = MagicMock()
             process.poll.return_value = None
-            window = SimpleNamespace(
+            window = _window(
                 _engine=SimpleNamespace(project=project),
-                _console=MagicMock(),
-                _root=MagicMock(),
-                _set_window_title=MagicMock(),
-                _populate_recent_projects=MagicMock(),
                 _timer=RecordingTimer(),
             )
             workflow = ProjectWorkflow(window)
@@ -564,12 +529,8 @@ class TestProjectWorkflow(unittest.TestCase):
             project = Project.create("Runtime", Path(tmp) / "runtime")
             process = MagicMock()
             process.poll.return_value = None
-            window = SimpleNamespace(
+            window = _window(
                 _engine=SimpleNamespace(project=project),
-                _console=MagicMock(),
-                _root=MagicMock(),
-                _set_window_title=MagicMock(),
-                _populate_recent_projects=MagicMock(),
                 _timer=RecordingTimer(),
             )
             workflow = ProjectWorkflow(window)
@@ -590,12 +551,8 @@ class TestProjectWorkflow(unittest.TestCase):
             outside.write_text("pass\n", encoding="utf-8")
             project.script_entry_point = "../outside.py"
             dialogs = MagicMock()
-            window = SimpleNamespace(
+            window = _window(
                 _engine=SimpleNamespace(project=project),
-                _console=MagicMock(),
-                _root=MagicMock(),
-                _set_window_title=MagicMock(),
-                _populate_recent_projects=MagicMock(),
                 _timer=RecordingTimer(),
             )
             workflow = ProjectWorkflow(window, dialog_provider=dialogs)
@@ -617,12 +574,8 @@ class TestProjectWorkflow(unittest.TestCase):
             link.symlink_to(outside)
             project.script_entry_point = "linked.py"
             dialogs = MagicMock()
-            window = SimpleNamespace(
+            window = _window(
                 _engine=SimpleNamespace(project=project),
-                _console=MagicMock(),
-                _root=MagicMock(),
-                _set_window_title=MagicMock(),
-                _populate_recent_projects=MagicMock(),
                 _timer=RecordingTimer(),
             )
             workflow = ProjectWorkflow(window, dialog_provider=dialogs)
@@ -639,12 +592,8 @@ class TestProjectWorkflow(unittest.TestCase):
             project = Project.create("Runtime", Path(tmp) / "runtime")
             (project.path / "__main__.py").write_text("raise SystemExit(7)\n", encoding="utf-8")
             timer = RecordingTimer()
-            window = SimpleNamespace(
+            window = _window(
                 _engine=SimpleNamespace(project=project),
-                _console=MagicMock(),
-                _root=MagicMock(),
-                _set_window_title=MagicMock(),
-                _populate_recent_projects=MagicMock(),
                 _timer=timer,
             )
             workflow = ProjectWorkflow(window)
@@ -678,12 +627,8 @@ class TestProjectWorkflow(unittest.TestCase):
                 encoding="utf-8",
             )
             timer = RecordingTimer()
-            window = SimpleNamespace(
+            window = _window(
                 _engine=SimpleNamespace(project=project),
-                _console=MagicMock(),
-                _root=MagicMock(),
-                _set_window_title=MagicMock(),
-                _populate_recent_projects=MagicMock(),
                 _timer=timer,
             )
             workflow = ProjectWorkflow(window)
@@ -713,12 +658,8 @@ class TestProjectWorkflow(unittest.TestCase):
             process = MagicMock()
             process.poll.side_effect = [OSError("poll failed"), None]
             timer = RecordingTimer()
-            window = SimpleNamespace(
+            window = _window(
                 _engine=SimpleNamespace(project=project),
-                _console=MagicMock(),
-                _root=MagicMock(),
-                _set_window_title=MagicMock(),
-                _populate_recent_projects=MagicMock(),
                 _timer=timer,
             )
             workflow = ProjectWorkflow(window)
@@ -743,12 +684,8 @@ class TestProjectWorkflow(unittest.TestCase):
             timer = RecordingTimer()
             timer.fail_schedule = True
             dialogs = MagicMock()
-            window = SimpleNamespace(
+            window = _window(
                 _engine=SimpleNamespace(project=project),
-                _console=MagicMock(),
-                _root=MagicMock(),
-                _set_window_title=MagicMock(),
-                _populate_recent_projects=MagicMock(),
                 _timer=timer,
                 _dialogs=dialogs,
             )
@@ -771,12 +708,8 @@ class TestProjectWorkflow(unittest.TestCase):
             process = MagicMock()
             process.poll.return_value = None
             timer = RecordingTimer()
-            window = SimpleNamespace(
+            window = _window(
                 _engine=SimpleNamespace(project=current),
-                _console=MagicMock(),
-                _root=MagicMock(),
-                _set_window_title=MagicMock(),
-                _populate_recent_projects=MagicMock(),
                 _timer=timer,
                 _observer=None,
             )
@@ -825,14 +758,10 @@ class TestProjectWorkflow(unittest.TestCase):
             active_document.open(project.load_scene(), previous_target)
             dialogs = MagicMock()
             dialogs.ask_save_file.return_value = str(root / "outside.scene.pb")
-            window = SimpleNamespace(
+            window = _window(
                 _engine=SimpleNamespace(project=project, edit_scene=project.load_scene()),
                 _active_document=active_document,
                 _last_save_path=previous_target,
-                _console=MagicMock(),
-                _root=MagicMock(),
-                _set_window_title=MagicMock(),
-                _populate_recent_projects=MagicMock(),
             )
             workflow = ProjectWorkflow(window, dialog_provider=dialogs)
             workflow.save_scene_as()
@@ -846,14 +775,10 @@ class TestProjectWorkflow(unittest.TestCase):
             previous_target = project.document_file()
             active_document = ActiveDocument()
             active_document.open(project.load_scene(), previous_target)
-            window = SimpleNamespace(
+            window = _window(
                 _engine=SimpleNamespace(project=project, edit_scene=project.load_scene()),
                 _active_document=active_document,
                 _last_save_path=previous_target,
-                _console=MagicMock(),
-                _root=MagicMock(),
-                _set_window_title=MagicMock(),
-                _populate_recent_projects=MagicMock(),
             )
             dialogs = MagicMock()
             dialogs.ask_save_file.return_value = str(project.scenes_dir / "copy.scene.pb")
@@ -872,13 +797,9 @@ class TestProjectWorkflow(unittest.TestCase):
             previous_target = project.document_file()
             engine = SimpleNamespace(project=project, edit_scene=scene)
             dialogs = MagicMock()
-            window = SimpleNamespace(
+            window = _window(
                 _engine=engine,
                 _last_save_path=previous_target,
-                _console=MagicMock(),
-                _root=MagicMock(),
-                _set_window_title=MagicMock(),
-                _populate_recent_projects=MagicMock(),
                 _timer=RecordingTimer(),
                 _dialogs=dialogs,
             )
@@ -960,12 +881,8 @@ class TestProjectWorkflow(unittest.TestCase):
             second = MagicMock()
             second.poll.return_value = None
             timer = RecordingTimer()
-            window = SimpleNamespace(
+            window = _window(
                 _engine=SimpleNamespace(project=project),
-                _console=MagicMock(),
-                _root=MagicMock(),
-                _set_window_title=MagicMock(),
-                _populate_recent_projects=MagicMock(),
                 _timer=timer,
             )
             workflow = ProjectWorkflow(window)

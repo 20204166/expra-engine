@@ -61,12 +61,13 @@ class TestProjectCreateAndSave(unittest.TestCase):
                 project.document_file("scenes/escape.scene.pb")
 
     def test_asset_path_has_stable_project_relative_logical_id(self) -> None:
-        project = Project("Game", Path("/project"))
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Project("Game", Path(tmp) / "project")
 
-        self.assertEqual(
-            project.asset_id(Path("textures") / "player.png"),
-            ResourceId.parse("assets://textures/player.png"),
-        )
+            self.assertEqual(
+                project.asset_id(Path("textures") / "player.png"),
+                ResourceId.parse("assets://textures/player.png"),
+            )
 
     def test_resource_service_mounts_assets_without_loading_values(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -151,7 +152,7 @@ class TestProjectCreateAndSave(unittest.TestCase):
             second = project.document_file(path).read_bytes()
 
             self.assertEqual(first, second)
-            self.assertEqual(decode_protobuf_document(first).scene_id, "door-1")
+            self.assertEqual(decode_protobuf_document(first).scene_id, "door-1")  # type: ignore[union-attr]
             with self.assertRaisesRegex(ProjectError, "extension"):
                 project.save_document(scene, "levels/wrong.level.pb")
 
@@ -165,7 +166,7 @@ class TestProjectCreateAndSave(unittest.TestCase):
 
             reloaded = Project.load(project.path)
             self.assertIn(path, reloaded.scene_paths())
-            self.assertEqual(reloaded.load_document(path).scene_id, "door-1")
+            self.assertEqual(reloaded.load_document(path).scene_id, "door-1")  # type: ignore[union-attr]
 
     def test_pb_document_save_accepts_case_insensitive_typed_extension(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -241,7 +242,7 @@ class TestProjectCreateAndSave(unittest.TestCase):
             self.assertTrue((project.path / "scenes/main.scene.pb").is_file())
             self.assertEqual(project.entrypoint, "scenes/main.scene.pb")
             migrated = project.load_document("scenes/main.scene.pb")
-            instance = migrated.find_entity("door-instance")
+            instance = migrated.find_entity("door-instance")  # type: ignore[union-attr]
             assert instance is not None
             component = instance.get_component(SceneInstanceComponent)
             assert component is not None
@@ -440,21 +441,23 @@ class TestProjectCreateAndSave(unittest.TestCase):
             loaded = project.load_document("levels/main.level.pb")
 
             self.assertIsInstance(loaded, Level)
-            self.assertIs(loaded.entities[0].__class__, level.entities[0].__class__)
+            self.assertIs(loaded.entities[0].__class__, level.entities[0].__class__)  # type: ignore[union-attr]
             self.assertEqual(loaded.level_metadata.display_name, "Main")  # type: ignore[union-attr]
 
     def test_scene_paths_cannot_escape_project(self) -> None:
-        project = Project("Game", Path("/tmp/game"))
-        with self.assertRaises(ProjectError):
-            project.set_start_scene("scenes/../secret.json")
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Project("Game", Path(tmp) / "game")
+            with self.assertRaises(ProjectError):
+                project.set_start_scene("scenes/../secret.json")
 
     def test_scene_folder_singular_is_supported(self) -> None:
-        project = Project("Game", Path("/tmp/game"))
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Project("Game", Path(tmp) / "game")
 
-        project.set_start_scene("scene/main.json")
+            project.set_start_scene("scene/main.json")
 
-        self.assertEqual(project.start_scene, "scene/main.json")
-        self.assertEqual(project.scenes_dir, project.path / "scene")
+            self.assertEqual(project.start_scene, "scene/main.json")
+            self.assertEqual(project.scenes_dir, project.path / "scene")
 
     def test_project_input_settings_round_trip(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

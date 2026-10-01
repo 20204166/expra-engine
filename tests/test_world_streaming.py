@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import importlib.util
-from concurrent.futures import Future
 from types import SimpleNamespace
 
 import pytest
@@ -23,6 +22,7 @@ from expra_engine.runtime.rendering import OrthographicCamera
 from expra_engine.runtime.runtime_camera import RuntimeCameraResolver
 from expra_engine.runtime.visual_components import PrimitiveComponent
 from tests.support.pixel_surface import color_bounds
+from tests.support.scheduling import ManualExecutor
 
 
 def test_world_streaming_has_one_runtime_owner_module() -> None:
@@ -55,35 +55,6 @@ def _residency_types():
     )
 
     return LevelResidencyManager, LevelResidencyState, ResidencyCapacityError, WorldStreamingSystem
-
-
-class ManualExecutor:
-    def __init__(self, max_workers: int) -> None:
-        self.max_workers = max_workers
-        self.jobs: list[tuple[Future[object], object, tuple[object, ...]]] = []
-        self.closed = False
-
-    def submit(self, function, *args):
-        future: Future[object] = Future()
-        self.jobs.append((future, function, args))
-        return future
-
-    def complete(self, index: int = 0) -> None:
-        future, function, args = self.jobs[index]
-        if not future.running():
-            future.set_running_or_notify_cancel()
-        try:
-            result = function(*args)
-        except Exception as error:  # noqa: BLE001 - propagate arbitrary worker failures through Future
-            future.set_exception(error)
-        else:
-            future.set_result(result)
-
-    def shutdown(self, *, wait: bool = False, cancel_futures: bool = True) -> None:
-        self.closed = True
-        if cancel_futures:
-            for future, _function, _args in self.jobs:
-                future.cancel()
 
 
 def _streaming_world() -> World:
