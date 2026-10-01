@@ -1,8 +1,9 @@
-//! Faithful batch port of Expra's renderer-neutral visibility math.
+//! Batch camera projection and renderer-neutral visibility math for Expra.
 //!
 //! This crate does not render, load assets, traverse Entities, or own cameras.
-//! Python packs the current RenderItem visual poses and actual RenderContext
-//! camera/viewport into one batch. The Python reference remains the fallback.
+//! Python packs Camera2D point batches and RenderItem visual poses with their
+//! RenderContext camera/viewport. Python reference implementations remain the
+//! fallback for both native kernels.
 
 #![cfg_attr(not(feature = "python-extension"), allow(dead_code))]
 

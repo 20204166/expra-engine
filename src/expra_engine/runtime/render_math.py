@@ -1,8 +1,9 @@
-"""Single Python/Rust bridge for renderer-neutral visibility calculations.
+"""Single Python/Rust bridge for renderer-neutral render math.
 
 This module owns optional native-extension discovery, compact input packing,
-native-result validation, and the canonical Python fallback. Renderers should
-consume ``RenderFrame.visible_items`` rather than importing the extension.
+native-result validation, and canonical Python fallbacks for visibility masks
+and batched Camera2D point projection. Consumers should use these public
+operations rather than importing the extension.
 """
 
 from __future__ import annotations
