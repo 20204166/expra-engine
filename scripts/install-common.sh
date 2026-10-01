@@ -119,7 +119,38 @@ install_wheel() {
     fi
 
     local installed_version
-    installed_version="$(env -u PYTHONPATH "$py" -c 'import importlib.metadata as m; print(m.version("expra-engine"))')"
+    installed_version="$(env -u PYTHONPATH "$py" - "$expected_version" <<'PY'
+import importlib.metadata
+import os
+import re
+import sys
+import sysconfig
+
+expected = sys.argv[1]
+schemes = [sysconfig.get_default_scheme()]
+if os.name == "posix":
+    schemes.extend(("posix_local", "posix_prefix"))
+site_paths = set()
+for scheme in schemes:
+    try:
+        paths = sysconfig.get_paths(scheme)
+    except (KeyError, ValueError):
+        continue
+    for key in ("purelib", "platlib"):
+        value = paths.get(key)
+        if value:
+            site_paths.add(value)
+normalize = lambda value: re.sub(r"[-_.]+", "-", value).casefold()
+installed = [
+    distribution.version
+    for distribution in importlib.metadata.distributions(path=sorted(site_paths))
+    if normalize(distribution.metadata.get("Name", "")) == "expra-engine"
+]
+if installed != [expected]:
+    raise SystemExit(f"expected only Expra {expected} in interpreter install paths; found {sorted(installed)}")
+print(expected)
+PY
+)"
     [[ "$installed_version" == "$expected_version" ]] || {
         echo "ERROR: installed $installed_version, expected $expected_version" >&2
         return 1

@@ -36,9 +36,19 @@ def test_install_common_user_mode_uses_version_specific_venv() -> None:
 def test_install_common_verifies_installed_version() -> None:
     script = INSTALL_COMMON.read_text(encoding="utf-8")
 
-    assert "importlib.metadata" in script
+    assert "importlib.metadata.distributions(path=" in script
+    assert "sysconfig.get_paths" in script
     assert "expected_version" in script
     assert "installed_version" in script
+
+
+def test_install_version_check_reads_metadata_from_interpreter_install_paths() -> None:
+    script = INSTALL_COMMON.read_text(encoding="utf-8")
+
+    assert "sysconfig.get_paths" in script
+    assert "metadata.distributions(path=" in script
+    assert "importlib.metadata as m; print(m.version" not in script
+    assert "installed != [expected]" in script
 
 
 def test_install_common_manages_user_launcher_atomically() -> None:
