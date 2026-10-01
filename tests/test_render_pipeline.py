@@ -12,9 +12,7 @@ from expra_engine.runtime.render_pipeline import (
     RenderPlanBuilder,
 )
 from expra_engine.runtime.rendering import (
-    PrimitiveDescriptor,
     RenderFrame,
-    RenderItem,
     RenderPhase,
     Transform,
 )
@@ -24,16 +22,7 @@ from expra_engine.runtime.screen_texture import (
     ScreenTextureDrawRequest,
     ScreenTextureFilter,
 )
-
-
-def item(name, *, layer=0, phase=RenderPhase.OPAQUE, z=0.0):
-    return RenderItem(
-        name,
-        PrimitiveDescriptor("point"),
-        Transform(position=(0.0, 0.0, z)),
-        layer=layer,
-        phase=phase,
-    )
+from tests.test_render_frame_submissions import _item as item
 
 
 def screen_request(name="screen", *, filter=ScreenTextureFilter.LINEAR):
@@ -60,10 +49,10 @@ def test_plan_preserves_existing_draw_order_contract():
 
 def test_render_order_key_matches_frame_ordered_items():
     items = (
-        item("b", phase=RenderPhase.TRANSPARENT, layer=0, z=-1.0),
-        item("a", layer=1, z=2.0),
-        item("c", layer=0, z=0.0),
-        item("d", layer=0, z=0.0),
+        item("b", phase=RenderPhase.TRANSPARENT, layer=0, position=(0.0, 0.0, -1.0)),
+        item("a", layer=1, position=(0.0, 0.0, 2.0)),
+        item("c", layer=0, position=(0.0, 0.0, 0.0)),
+        item("d", layer=0, position=(0.0, 0.0, 0.0)),
     )
 
     frame_order = [it.key for it in RenderFrame(items).ordered_items()]

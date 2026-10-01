@@ -10,12 +10,12 @@ from expra_engine.core.component import TransformComponent, component_from_dict
 from expra_engine.core.scene import Scene
 from expra_engine.observability import ObservabilityWatcher
 from expra_engine.runtime.pygame_lighting import PygameLightingPass
-from expra_engine.runtime.pygame_renderer import PygameRenderer
 from expra_engine.runtime.render_extractor import extract_render_frame
 from expra_engine.runtime.rendering import OrthographicCamera, RenderContext, Viewport
 from expra_engine.ui import editor_pixel_renderer
 from expra_engine.ui.editor_pixel_renderer import EditorPixelRenderer
 from expra_engine.ui.viewport_camera import ViewportCamera
+from tests.support.pygame_renderer import make_renderer
 
 
 def _light_frame(
@@ -47,17 +47,13 @@ def _light_frame(
     return extract_render_frame(scene)
 
 
-def _renderer(observer: ObservabilityWatcher | None = None):
+def _renderer(
+    observer: ObservabilityWatcher | None = None,
+    *,
+    lighting_pass: PygameLightingPass | None = None,
+):
     pygame.font.init()
-    surface = pygame.Surface((101, 101))
-    renderer = PygameRenderer(pygame, surface, clear_color=(0, 0, 0), observer=observer)
-    renderer.start(
-        RenderContext(
-            Viewport(0, 0, 101, 101),
-            OrthographicCamera(width=10.0, height=10.0),
-        )
-    )
-    return renderer, surface
+    return make_renderer(pygame, observer=observer, lighting_pass=lighting_pass)
 
 
 def test_point_light_adds_soft_local_color_and_adapts_to_runtime_capability() -> None:
@@ -72,9 +68,7 @@ def test_point_light_adds_soft_local_color_and_adapts_to_runtime_capability() ->
 
 def test_lights_remain_visible_on_the_editors_transparent_pixel_surface() -> None:
     pygame.font.init()
-    surface = pygame.Surface((101, 101), pygame.SRCALPHA, 32)
-    renderer = PygameRenderer(pygame, surface, clear_color=None)
-    renderer.start(RenderContext(Viewport(0, 0, 101, 101), OrthographicCamera( width=10, height=10)))
+    renderer, surface = make_renderer(pygame, flags=pygame.SRCALPHA, clear_color=None)
 
     renderer.render(_light_frame("point"))
 
@@ -208,19 +202,7 @@ def test_renderer_instances_can_share_a_bounded_lighting_cache_owner() -> None:
     lighting_pass = PygameLightingPass(pygame)
     frame = _light_frame("point")
     for _ in range(2):
-        surface = pygame.Surface((101, 101))
-        renderer = PygameRenderer(
-            pygame,
-            surface,
-            clear_color=(0, 0, 0),
-            lighting_pass=lighting_pass,
-        )
-        renderer.start(
-            RenderContext(
-                Viewport(0, 0, 101, 101),
-                OrthographicCamera(width=10.0, height=10.0),
-            )
-        )
+        renderer, _surface = make_renderer(pygame, lighting_pass=lighting_pass)
         renderer.render(frame)
 
     assert lighting_pass.cache_misses == 1
@@ -249,19 +231,7 @@ def test_editor_pixel_renderer_reuses_its_lighting_pass_across_frames(monkeypatc
 def test_changing_light_energy_reuses_cached_radial_geometry() -> None:
     pygame.font.init()
     lighting_pass = PygameLightingPass(pygame)
-    surface = pygame.Surface((101, 101))
-    renderer = PygameRenderer(
-        pygame,
-        surface,
-        clear_color=(0, 0, 0),
-        lighting_pass=lighting_pass,
-    )
-    renderer.start(
-        RenderContext(
-            Viewport(0, 0, 101, 101),
-            OrthographicCamera(width=10.0, height=10.0),
-        )
-    )
+    renderer, _surface = make_renderer(pygame, lighting_pass=lighting_pass)
     renderer.render(_light_frame("point", energy=0.5))
     renderer.render(_light_frame("point", energy=1.0))
 
@@ -271,19 +241,7 @@ def test_changing_light_energy_reuses_cached_radial_geometry() -> None:
 def test_changing_light_radius_reuses_normalized_radial_shape() -> None:
     pygame.font.init()
     lighting_pass = PygameLightingPass(pygame)
-    surface = pygame.Surface((101, 101))
-    renderer = PygameRenderer(
-        pygame,
-        surface,
-        clear_color=(0, 0, 0),
-        lighting_pass=lighting_pass,
-    )
-    renderer.start(
-        RenderContext(
-            Viewport(0, 0, 101, 101),
-            OrthographicCamera(width=10.0, height=10.0),
-        )
-    )
+    renderer, _surface = make_renderer(pygame, lighting_pass=lighting_pass)
     for radius in (1.0, 2.0, 3.0):
         renderer.render(_light_frame("point", radius=radius))
 

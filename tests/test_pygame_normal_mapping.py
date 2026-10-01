@@ -214,12 +214,8 @@ def test_auto_paired_normal_map_preserves_transparent_sprite_pixels(tmp_path) ->
     from expra_engine.runtime.normal_mapping import NormalMapResolver
     from expra_engine.runtime.pygame_resource_provider import PygameResourceProvider
     from expra_engine.runtime.render_extractor import extract_render_frame
-    from expra_engine.runtime.rendering import (
-        OrthographicCamera,
-        RenderContext,
-        Viewport,
-    )
     from expra_engine.runtime.visual_components import SpriteComponent
+    from tests.support.pygame_renderer import make_renderer
 
     project = Project.create("Alpha normal map", tmp_path / "project")
     asset_dir = project.assets_dir / "oga"
@@ -242,18 +238,16 @@ def test_auto_paired_normal_map_preserves_transparent_sprite_pixels(tmp_path) ->
     entity.add_component(SpriteComponent("assets://oga/sprite.png", width=4, height=4))
     entity.add_component(MaterialComponent(normal_map_mode="auto_pair"))
     resources = project.resource_service()
-    surface = pygame.Surface((64, 64))
     clear = (15, 20, 25)
-    renderer = PygameRenderer(
+    renderer, surface = make_renderer(
         pygame,
-        surface,
+        (64, 64),
         clear_color=clear,
+        camera_width=4.0,
+        camera_height=4.0,
         resource_provider=PygameResourceProvider(pygame, resources),
         normal_map_resolver=NormalMapResolver(resources),
         pixel_art_mode=True,
-    )
-    renderer.start(
-        RenderContext(Viewport(0, 0, 64, 64), OrthographicCamera(width=4, height=4))
     )
     renderer.render(extract_render_frame(scene))
 

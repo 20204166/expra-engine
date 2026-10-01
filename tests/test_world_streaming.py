@@ -1758,13 +1758,8 @@ def test_primary_level_camera_mount_owns_world_hud_during_overlap() -> None:
         StreamingAnchorComponent,
         WorldPersistentActorComponent,
     )
-    from expra_engine.runtime.pygame_renderer import PygameRenderer
-    from expra_engine.runtime.rendering import (
-        OrthographicCamera,
-        RenderContext,
-        RenderSpace,
-        Viewport,
-    )
+    from expra_engine.runtime.rendering import OrthographicCamera, RenderSpace
+    from tests.support.pygame_renderer import make_renderer
 
     _Manager, _State, _CapacityError, System = _residency_types()
     executor = ManualExecutor(max_workers=2)
@@ -1841,7 +1836,6 @@ def test_primary_level_camera_mount_owns_world_hud_during_overlap() -> None:
             if entity.name == "Forest HUD Marker"
         )
         before = system.runtime_scene.world_transform(town_marker_id)
-        viewport = Viewport(0, 0, 200, 100)
         camera = OrthographicCamera(position=(100.0, 0.0), width=20.0, height=10.0)
         camera.position_smoothing_enabled = False
         def draw():
@@ -1849,9 +1843,9 @@ def test_primary_level_camera_mount_owns_world_hud_during_overlap() -> None:
                 system.runtime_scene,
                 primary_level_entity_ids=system.primary_level_entity_ids(),
             )
-            surface = pygame.Surface((200, 100), flags=pygame.SRCALPHA)
-            renderer = PygameRenderer(pygame, surface, clear_color=None)
-            renderer.start(RenderContext(viewport, camera))
+            renderer, surface = make_renderer(
+                pygame, (200, 100), flags=pygame.SRCALPHA, clear_color=None, camera=camera
+            )
             renderer.render(frame)
             assert not renderer.draw_failed
             mounted_ids = {

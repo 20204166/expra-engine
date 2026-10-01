@@ -17,7 +17,6 @@ from expra_engine.core.scene import (
 )
 from expra_engine.core.scene.document_codec import decode_protobuf_document, encode_protobuf
 from expra_engine.runtime.camera_mount import CameraMountComponent
-from expra_engine.runtime.pygame_renderer import PygameRenderer
 from expra_engine.runtime.render_extractor import extract_render_frame
 from expra_engine.runtime.rendering import (
     Color,
@@ -31,6 +30,7 @@ from expra_engine.runtime.rendering import (
 )
 from expra_engine.runtime.visual_components import PrimitiveComponent
 from tests.support.pixel_surface import color_bounds
+from tests.support.pygame_renderer import make_renderer
 
 
 def test_camera_mount_component_round_trips_with_inspector_schema() -> None:
@@ -227,12 +227,11 @@ def test_pygame_hud_pixels_stay_fixed_while_world_camera_and_actor_move() -> Non
         courier.add_component(
             PrimitiveComponent("rectangle", width=4.0, height=4.0, fill=Color(0.0, 0.0, 1.0))
         )
-        viewport = Viewport(0, 0, 200, 100)
 
         def draw(camera: OrthographicCamera):
-            surface = pygame.Surface((200, 100), flags=pygame.SRCALPHA)
-            renderer = PygameRenderer(pygame, surface, clear_color=None)
-            renderer.start(RenderContext(viewport, camera))
+            renderer, surface = make_renderer(
+                pygame, (200, 100), flags=pygame.SRCALPHA, clear_color=None, camera=camera
+            )
             renderer.render(extract_render_frame(scene))
             assert not renderer.draw_failed
             return surface
@@ -276,10 +275,9 @@ def test_viewport_mount_anchor_tracks_resize_without_scaling_content() -> None:
         camera = OrthographicCamera(width=20.0, height=10.0)
 
         def draw(size: tuple[int, int]):
-            width, height = size
-            surface = pygame.Surface(size, flags=pygame.SRCALPHA)
-            renderer = PygameRenderer(pygame, surface, clear_color=None)
-            renderer.start(RenderContext(Viewport(0, 0, width, height), camera))
+            renderer, surface = make_renderer(
+                pygame, size, flags=pygame.SRCALPHA, clear_color=None, camera=camera
+            )
             renderer.render(extract_render_frame(scene))
             return surface
 

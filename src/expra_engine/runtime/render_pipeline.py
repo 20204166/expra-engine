@@ -175,25 +175,7 @@ class RenderPlan:
         return tuple(seen)
 
 
-@dataclass(frozen=True)
-class _PendingDraw:
-    order: RenderOrder
-    item: RenderItem
-
-
-@dataclass(frozen=True)
-class _PendingCapture:
-    order: RenderOrder
-    request: BackBufferCopyRequest
-
-
-@dataclass(frozen=True)
-class _PendingScreenDraw:
-    order: RenderOrder
-    request: ScreenTextureDrawRequest
-
-
-_Pending: TypeAlias = _PendingDraw | _PendingCapture | _PendingScreenDraw
+_PendingOperation: TypeAlias = DrawItemOp | CaptureScreenOp | DrawScreenTextureOp
 
 
 class RenderPlanBuilder:
@@ -214,7 +196,7 @@ class RenderPlanBuilder:
     """
 
     def __init__(self) -> None:
-        self._pending: list[_Pending] = []
+        self._pending: list[_PendingOperation] = []
 
     @classmethod
     def from_frame(
@@ -261,7 +243,7 @@ class RenderPlanBuilder:
 
     def add_item(self, item: RenderItem, *, insertion_index: int) -> None:
         self._pending.append(
-            _PendingDraw(RenderOrder.from_item(item, insertion_index), item)
+            DrawItemOp(RenderOrder.from_item(item, insertion_index), item)
         )
 
     def add_capture(
@@ -275,7 +257,7 @@ class RenderPlanBuilder:
         if request.mode is BackBufferCopyMode.DISABLED:
             return
         self._pending.append(
-            _PendingCapture(
+            CaptureScreenOp(
                 RenderOrder.from_effect(
                     phase,
                     layer,
@@ -295,7 +277,7 @@ class RenderPlanBuilder:
         insertion_index: int,
     ) -> None:
         self._pending.append(
-            _PendingScreenDraw(
+            DrawScreenTextureOp(
                 RenderOrder.from_effect(
                     phase,
                     layer,
@@ -324,12 +306,12 @@ class RenderPlanBuilder:
         needs_mipmaps = False
 
         for entry in pending:
-            if isinstance(entry, _PendingDraw):
-                operations.append(DrawItemOp(entry.order, entry.item))
+            if isinstance(entry, DrawItemOp):
+                operations.append(entry)
                 continue
 
-            if isinstance(entry, _PendingCapture):
-                operations.append(CaptureScreenOp(entry.order, entry.request))
+            if isinstance(entry, CaptureScreenOp):
+                operations.append(entry)
                 capture_has_mipmaps[entry.request.capture_id] = False
                 needs_capture = True
                 continue
@@ -360,7 +342,7 @@ class RenderPlanBuilder:
                 capture_has_mipmaps[request.capture_id] = True
                 needs_mipmaps = True
 
-            operations.append(DrawScreenTextureOp(entry.order, request))
+            operations.append(entry)
 
         return RenderPlan(
             tuple(operations),

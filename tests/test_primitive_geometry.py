@@ -11,7 +11,6 @@ from __future__ import annotations
 import unittest
 
 from expra_engine.core.scene import Scene
-from expra_engine.runtime.pygame_renderer import PygameRenderer
 from expra_engine.runtime.render_extractor import extract_render_frame
 from expra_engine.runtime.rendering import (
     OrthographicCamera,
@@ -22,16 +21,13 @@ from expra_engine.runtime.rendering import (
     Viewport,
 )
 from expra_engine.runtime.visual_components import PrimitiveComponent
+from tests.support.pygame_renderer import make_renderer
 
 
 def _render_scene(scene: Scene, size: tuple[int, int] = (101, 101)):
     import pygame
 
-    surface = pygame.Surface(size)
-    renderer = PygameRenderer(pygame, surface, clear_color=(0, 0, 0))
-    renderer.start(
-        RenderContext(Viewport(0, 0, size[0], size[1]), OrthographicCamera(width=10.0, height=10.0))
-    )
+    renderer, surface = make_renderer(pygame, size)
     renderer.render(extract_render_frame(scene))
     return surface
 

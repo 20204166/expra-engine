@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from numbers import Real
 from pathlib import PurePosixPath
-from typing import Any, cast
+from typing import Any, SupportsFloat, cast
 
 from expra_engine.filesystem import ResourceId, ResourceService
 
@@ -293,9 +293,9 @@ def validate_normal_strength(value: object) -> float:
 
 
 def decode_normal_sample(
-    red: Real,
-    green: Real,
-    blue: Real,
+    red: SupportsFloat,
+    green: SupportsFloat,
+    blue: SupportsFloat,
     *,
     encoding: NormalMapEncoding | str,
     convention: NormalYConvention | str,

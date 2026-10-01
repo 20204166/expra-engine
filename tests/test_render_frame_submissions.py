@@ -1,5 +1,7 @@
 """Tests for the additive RenderFrame submission stream and planner adapter."""
 
+from itertools import pairwise
+
 import pytest
 
 from expra_engine.runtime.render_pipeline import (
@@ -98,7 +100,7 @@ def test_render_frame_defaults_and_preserves_old_positional_construction() -> No
 
 def test_render_frame_normalizes_submissions_to_a_tuple() -> None:
     item = _item("draw")
-    frame = RenderFrame(submissions=[item])
+    frame = RenderFrame(submissions=[item])  # type: ignore[arg-type]
 
     assert frame.submissions == (item,)
     assert isinstance(frame.submissions, tuple)
@@ -147,7 +149,7 @@ def test_plan_builder_preserves_equal_order_submission_order() -> None:
     ] == ["first", "last"]
     assert all(
         earlier.order <= later.order
-        for earlier, later in zip(operations, operations[1:])
+        for earlier, later in pairwise(operations)
     )
 
 

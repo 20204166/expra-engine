@@ -41,6 +41,7 @@ from expra_engine.runtime.ui import Viewport as UIViewport
 from expra_engine.runtime.visual_components import PrimitiveComponent
 from expra_engine.ui_model.geometry import Insets, Rect
 from expra_engine.ui_model.nine_slice import NineSlice
+from tests.support.pygame_renderer import make_renderer
 
 
 class _FakeSurface:
@@ -1346,10 +1347,15 @@ def test_rounded_rectangle_renders_real_pixels_fill_corner_and_outline() -> None
     pygame.init()
     try:
         width, height = 200, 200
-        surface = pygame.Surface((width, height), flags=pygame.SRCALPHA)
-        renderer = PygameRenderer(pygame, surface, clear_color=None)
-        camera = OrthographicCamera(width=20.0, height=20.0)
-        renderer.start(RenderContext(Viewport(0, 0, width, height), camera))
+        renderer, surface = make_renderer(
+            pygame,
+            (width, height),
+            flags=pygame.SRCALPHA,
+            clear_color=None,
+            camera_width=20.0,
+            camera_height=20.0,
+        )
+        camera = renderer.context.camera  # type: ignore[union-attr]
 
         prim = PrimitiveDescriptor("rounded_rectangle", (10.0, 6.0), 1.5)
         material = MaterialDescriptor(
@@ -1386,11 +1392,16 @@ def test_rounded_rectangle_rotation_preserves_visibility_and_sibling_items() -> 
     pygame.init()
     try:
         width, height = 200, 200
-        surface = pygame.Surface((width, height), flags=pygame.SRCALPHA)
-        renderer = PygameRenderer(pygame, surface, clear_color=None)
-        camera = OrthographicCamera(width=20.0, height=20.0)
         viewport = Viewport(0, 0, width, height)
-        renderer.start(RenderContext(viewport, camera))
+        renderer, surface = make_renderer(
+            pygame,
+            (width, height),
+            flags=pygame.SRCALPHA,
+            clear_color=None,
+            camera_width=20.0,
+            camera_height=20.0,
+        )
+        camera = renderer.context.camera  # type: ignore[union-attr]
 
         rounded = RenderItem(
             "paddle",

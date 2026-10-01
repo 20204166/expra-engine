@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import tempfile
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 from types import SimpleNamespace
@@ -60,9 +61,9 @@ def test_diagnose_validates_project_and_asset_id() -> None:
             context=context,
             pygame_module=SimpleNamespace(),
         )
-    with pytest.raises(InvalidResourceIdError):
+    with tempfile.TemporaryDirectory() as directory, pytest.raises(InvalidResourceIdError):
         diagnose_texture(
-            Project("Probe", Path("/tmp/probe")),
+            Project("Probe", Path(directory) / "probe"),
             Scene("probe"),
             "probe.png",
             context=context,
@@ -71,13 +72,14 @@ def test_diagnose_validates_project_and_asset_id() -> None:
 
 
 def test_diagnose_reports_missing_sprite_without_touching_resources() -> None:
-    result = diagnose_texture(
-        Project("Probe", Path("/tmp/probe")),
-        Scene("probe"),
-        "assets://probe.png",
-        context=RenderContext(Viewport(0, 0, 160, 120)),
-        pygame_module=SimpleNamespace(),
-    )
+    with tempfile.TemporaryDirectory() as directory:
+        result = diagnose_texture(
+            Project("Probe", Path(directory) / "probe"),
+            Scene("probe"),
+            "assets://probe.png",
+            context=RenderContext(Viewport(0, 0, 160, 120)),
+            pygame_module=SimpleNamespace(),
+        )
 
     assert not result.ok
     assert result.asset_id == "assets://probe.png"

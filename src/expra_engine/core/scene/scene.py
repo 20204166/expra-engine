@@ -602,7 +602,7 @@ class Scene:
         return False
 
     def walk_hierarchy(self, root_id: str | None = None) -> list[Entity]:
-        """Depth-first traversal of the entity hierarchy.
+        """Breadth-first traversal of the entity hierarchy.
 
         If ``root_id`` is given, traverses the subtree rooted there.
         If ``root_id`` is None, traverses all root-level entities and their
