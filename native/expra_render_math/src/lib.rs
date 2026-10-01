@@ -9,6 +9,7 @@
 const ITEM_STRIDE: usize = 21;
 const CAMERA_STRIDE: usize = 9;
 const VIEWPORT_STRIDE: usize = 4;
+const PROJECTION_CAMERA_STRIDE: usize = 8;
 
 const SPACE_WORLD: u8 = 0;
 const SPACE_VIEWPORT: u8 = 1;
@@ -37,6 +38,18 @@ struct ViewportInput {
     y: f64,
     width: f64,
     height: f64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct ProjectionInput {
+    left: f64,
+    top: f64,
+    pixel_ratio: f64,
+    center_x: f64,
+    center_y: f64,
+    rotation: f64,
+    viewport_width: f64,
+    viewport_height: f64,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -147,6 +160,63 @@ fn viewport_input(values: &[f64]) -> Result<ViewportInput, &'static str> {
         width: values[2],
         height: values[3],
     })
+}
+
+fn projection_input(values: &[f64]) -> Result<ProjectionInput, &'static str> {
+    if values.len() != PROJECTION_CAMERA_STRIDE || !finite(values) {
+        return Err("projection camera record must contain 8 finite values");
+    }
+    if values[2] <= 0.0 || values[6] <= 0.0 || values[7] <= 0.0 {
+        return Err("projection scale and viewport dimensions must be positive");
+    }
+    Ok(ProjectionInput {
+        left: values[0],
+        top: values[1],
+        pixel_ratio: values[2],
+        center_x: values[3],
+        center_y: values[4],
+        rotation: values[5],
+        viewport_width: values[6],
+        viewport_height: values[7],
+    })
+}
+
+fn project_camera_point(x: f64, y: f64, camera: ProjectionInput) -> (f64, f64) {
+    if camera.rotation == 0.0 {
+        return (
+            (x - camera.left) * camera.pixel_ratio,
+            (camera.top - y) * camera.pixel_ratio,
+        );
+    }
+
+    let delta_x = x - camera.center_x;
+    let delta_y = y - camera.center_y;
+    let cosine = camera.rotation.cos();
+    let sine = camera.rotation.sin();
+    let rotated_x = cosine * delta_x + sine * delta_y;
+    let rotated_y = -sine * delta_x + cosine * delta_y;
+    (
+        camera.viewport_width * 0.5 + rotated_x * camera.pixel_ratio,
+        camera.viewport_height * 0.5 - rotated_y * camera.pixel_ratio,
+    )
+}
+
+fn project_points(points: &[f64], camera: ProjectionInput) -> Result<Vec<f64>, &'static str> {
+    if points.len() % 2 != 0 || !finite(points) {
+        return Err("point buffer must contain finite x/y pairs");
+    }
+    let mut projected = Vec::new();
+    projected
+        .try_reserve_exact(points.len())
+        .map_err(|_| "projection result is too large")?;
+    for point in points.chunks_exact(2) {
+        let (x, y) = project_camera_point(point[0], point[1], camera);
+        if !x.is_finite() || !y.is_finite() {
+            return Err("projected coordinates must be finite");
+        }
+        projected.extend([x, y]);
+    }
+    Ok(projected)
 }
 
 fn enum_code(value: f64, maximum: u8) -> Result<u8, &'static str> {
@@ -397,9 +467,18 @@ fn visible_mask_py(
 }
 
 #[cfg(feature = "python-extension")]
+#[pyfunction]
+#[pyo3(name = "project_points")]
+fn project_points_py(points: Vec<f64>, camera_values: Vec<f64>) -> PyResult<Vec<f64>> {
+    let camera = projection_input(&camera_values).map_err(PyValueError::new_err)?;
+    project_points(&points, camera).map_err(PyValueError::new_err)
+}
+
+#[cfg(feature = "python-extension")]
 #[pymodule]
 fn expra_render_math(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(visible_mask_py, module)?)?;
+    module.add_function(wrap_pyfunction!(project_points_py, module)?)?;
     Ok(())
 }
 

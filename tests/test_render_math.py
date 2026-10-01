@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from expra_engine.core.camera import Camera2D
 from expra_engine.runtime.rendering import (
     MaterialDescriptor,
     OrthographicCamera,
@@ -144,3 +145,142 @@ def test_native_visibility_matches_reference_for_supported_primitive_kinds() -> 
     native_mask = render_math.strict_native_visible_mask(items, context)
 
     assert native_mask == render_math.python_visible_mask(items, context)
+
+
+def test_project_camera_points_falls_back_to_the_camera_reference(monkeypatch) -> None:
+    from expra_engine.runtime import render_math
+
+    camera = Camera2D(position=(3.0, -2.0), target_width=16.0, viewport=(800, 600))
+    camera.offset = (0.25, -0.75)
+    camera.rotation = 0.4
+    points = ((-2.0, 3.0), (0.0, 0.0), (9.5, -11.0))
+    monkeypatch.setattr(render_math, "_native_module", None)
+    monkeypatch.setattr(render_math, "_native_disabled", False)
+
+    actual = render_math.project_camera_points(points, camera, (800, 600))
+
+    assert actual == tuple(camera.translate_to_screen(point) for point in points)
+
+
+def test_project_camera_points_calls_native_once_for_the_ordered_batch(monkeypatch) -> None:
+    from expra_engine.runtime import render_math
+
+    camera = Camera2D(position=(3.0, -2.0), target_width=16.0, viewport=(800, 600))
+    calls = []
+
+    def project_points(points, camera_values):
+        calls.append((points, camera_values))
+        return [100.0, 200.0, 300.0, 400.0]
+
+    monkeypatch.setattr(
+        render_math,
+        "_native_module",
+        SimpleNamespace(visible_mask=lambda *_args: [], project_points=project_points),
+    )
+    monkeypatch.setattr(render_math, "_native_disabled", False)
+
+    actual = render_math.project_camera_points(((1.0, 2.0), (-3.0, 4.0)), camera, (800, 600))
+
+    assert len(calls) == 1
+    assert calls[0][0] == [1.0, 2.0, -3.0, 4.0]
+    assert len(calls[0][1]) == 8
+    assert actual == ((100.0, 200.0), (300.0, 400.0))
+
+
+@pytest.mark.parametrize(
+    "points",
+    [
+        ((1.0,),),
+        ((1.0, 2.0, 3.0),),
+        ((float("nan"), 0.0),),
+        ((0.0, float("inf")),),
+        ((True, 0.0),),
+    ],
+)
+def test_project_camera_points_rejects_malformed_or_non_finite_points(points) -> None:
+    from expra_engine.runtime import render_math
+
+    camera = Camera2D(viewport=(800, 600))
+
+    with pytest.raises((TypeError, ValueError)):
+        render_math.project_camera_points(points, camera, (800, 600))
+
+
+def test_project_camera_points_empty_batch_needs_no_native_call(monkeypatch) -> None:
+    from expra_engine.runtime import render_math
+
+    def unexpected_call(*_args):
+        pytest.fail("empty point batches should not cross the native boundary")
+
+    monkeypatch.setattr(
+        render_math,
+        "_native_module",
+        SimpleNamespace(visible_mask=lambda *_args: [], project_points=unexpected_call),
+    )
+    monkeypatch.setattr(render_math, "_native_disabled", False)
+
+    assert render_math.project_camera_points((), Camera2D(), (800, 600)) == ()
+
+
+def test_project_camera_points_bad_native_result_falls_back_and_disables_native(
+    monkeypatch, caplog
+) -> None:
+    from expra_engine.runtime import render_math
+
+    camera = Camera2D(position=(1.0, -1.0), target_width=12.0, viewport=(800, 600))
+    points = ((2.0, 3.0), (-4.0, 5.0))
+
+    def malformed(_points, _camera):
+        return [1.0, 2.0]
+
+    monkeypatch.setattr(
+        render_math,
+        "_native_module",
+        SimpleNamespace(visible_mask=lambda *_args: [], project_points=malformed),
+    )
+    monkeypatch.setattr(render_math, "_native_disabled", False)
+    monkeypatch.setattr(render_math, "_native_failure_reported", False)
+
+    actual = render_math.project_camera_points(points, camera, (800, 600))
+
+    assert actual == tuple(camera.translate_to_screen(point) for point in points)
+    assert render_math.native_available() is True
+    assert render_math.native_projection_available() is False
+    assert "using the Python camera-projection reference" in caplog.text
+
+
+def test_missing_projection_symbol_does_not_disable_visibility_kernel(monkeypatch) -> None:
+    from expra_engine.runtime import render_math
+
+    camera = Camera2D(viewport=(800, 600))
+    monkeypatch.setattr(
+        render_math,
+        "_native_module",
+        SimpleNamespace(visible_mask=lambda *_args: [True]),
+    )
+    monkeypatch.setattr(render_math, "_native_disabled", False)
+    monkeypatch.setattr(render_math, "_native_projection_disabled", False)
+
+    result = render_math.project_camera_points(((1.0, 2.0),), camera, (800, 600))
+
+    assert result == (camera.translate_to_screen((1.0, 2.0)),)
+    assert render_math.native_available() is True
+    assert render_math.native_projection_available() is False
+
+
+def test_native_projection_matches_python_reference_when_available() -> None:
+    from expra_engine.runtime import render_math
+
+    if not render_math.native_projection_available():
+        pytest.skip("optional projection kernel is not installed")
+
+    camera = Camera2D(position=(2.5, -1.75), target_width=17.0, viewport=(801, 603))
+    camera.offset = (-0.5, 0.25)
+    points = ((-5.5, 3.25), (0.0, 0.0), (14.0, -12.75))
+
+    actual = render_math.strict_native_project_camera_points(points, camera, (801, 603))
+    expected = tuple(camera.translate_to_screen(point) for point in points)
+
+    assert len(actual) == len(expected)
+    for actual_point, expected_point in zip(actual, expected, strict=True):
+        assert actual_point == pytest.approx(expected_point, abs=1e-10)

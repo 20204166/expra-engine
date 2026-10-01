@@ -311,3 +311,22 @@ class ApplyDictHonorsSceneWidthTests(unittest.TestCase):
         self.assertAlmostEqual(cam.zoom_level, 1.0, places=6)
         self.assertAlmostEqual(cam._camera.pixel_ratio, VIEWPORT_BASE_PPU, places=4)
         self.assertTrue(math.isfinite(cam.position[1]))
+
+
+class BatchedProjectionTests(unittest.TestCase):
+    def test_project_many_matches_single_point_projection_in_all_camera_states(self) -> None:
+        points = ((-2.0, 3.0), (0.0, 0.0), (9.5, -11.0))
+        for rotation in (0.0, 0.37, -1.2):
+            with self.subTest(rotation=rotation):
+                camera = ViewportCamera(viewport=(801, 603))
+                camera.pan(4.0, -2.0)
+                camera.zoom_at_cursor(1.75, (205.5, 401.25))
+                camera.rotate(math.degrees(rotation))
+
+                self.assertEqual(
+                    camera.project_many(points),
+                    tuple(camera.project(point) for point in points),
+                )
+
+    def test_project_many_supports_empty_input(self) -> None:
+        self.assertEqual(ViewportCamera().project_many(()), ())

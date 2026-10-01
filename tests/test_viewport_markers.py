@@ -24,9 +24,17 @@ class RecordingCanvas:
 
 
 class Camera:
+    def __init__(self) -> None:
+        self.batches: list[tuple[tuple[float, float], ...]] = []
+
     @staticmethod
     def project(point):
         return point
+
+    def project_many(self, points):
+        batch = tuple(points)
+        self.batches.append(batch)
+        return tuple(self.project(point) for point in batch)
 
 
 def test_named_exit_anchor_draws_its_id_and_kind_even_on_a_visual_entity() -> None:
@@ -89,3 +97,38 @@ def test_marker_projection_does_not_scan_components_when_transform_exists(monkey
     )
 
     assert component_reads == 0
+
+
+def test_marker_drawing_projects_all_needed_points_in_one_camera_batch() -> None:
+    scene = Level("Markers")
+    first = scene.create_entity("First")
+    first.add_component(TransformComponent(x=2.0, y=3.0))
+    first.add_component(LevelAnchorComponent("first", kind="entrance"))
+    second = scene.create_entity("Second")
+    second.add_component(TransformComponent(x=-4.0, y=5.0))
+    second.add_component(LevelAnchorComponent("second", kind="exit"))
+    camera = Camera()
+
+    draw_entity_markers(
+        RecordingCanvas(),
+        {
+            "surface": "#fff",
+            "ink_2": "#111",
+            "ink_3": "#333",
+            "accent": "#0ff",
+            "accent_ink": "#000",
+            "warning": "#fa0",
+            "success": "#0a0",
+            "camera": "#08f",
+            "camera_active": "#0ff",
+            "player": "#f00",
+            "player_active": "#0f0",
+        },
+        scene,
+        set(),
+        None,
+        camera,
+        {},
+    )
+
+    assert camera.batches == [((2.0, 3.0), (-4.0, 5.0))]

@@ -66,8 +66,14 @@ def draw_entity_markers(
         canvas.delete(f"entity:{stale}")
         del entries[stale]
 
-    for eid, (entity, kind, transform, anchor) in needed.items():
-        ex, ey = camera.project((transform.x, transform.y) if transform else (0.0, 0.0))
+    marker_items = tuple(needed.items())
+    projected = camera.project_many(
+        (transform.x, transform.y) if transform else (0.0, 0.0)
+        for _eid, (_entity, _kind, transform, _anchor) in marker_items
+    )
+    for (eid, (entity, kind, _transform, anchor)), (ex, ey) in zip(
+        marker_items, projected, strict=True
+    ):
         is_selected = eid == selected_id
         existing = entries.get(eid)
         if existing is not None and existing.kind == kind:

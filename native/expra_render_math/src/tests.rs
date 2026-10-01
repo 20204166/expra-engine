@@ -1,4 +1,7 @@
-use super::{camera_input, camera_project, viewport_input, visible_mask, ITEM_STRIDE};
+use super::{
+    camera_input, camera_project, project_points, projection_input, viewport_input, visible_mask,
+    ITEM_STRIDE,
+};
 
 fn camera_values(rotation: f64) -> Vec<f64> {
     vec![0.0, 0.0, 0.0, 0.0, 20.0, 10.0, rotation, -100.0, 100.0]
@@ -78,5 +81,68 @@ fn a_declared_radius_must_be_positive() {
     assert_eq!(
         visible_mask(&record, &[], camera, viewport),
         Err("item dimensions and outline values are invalid")
+    );
+}
+
+fn projection_camera_values(rotation: f64) -> Vec<f64> {
+    vec![-10.0, 5.0, 40.0, 0.0, 0.0, rotation, 800.0, 600.0]
+}
+
+#[test]
+fn batched_projection_matches_unrotated_camera2d_pixel_order() {
+    let camera = projection_input(&projection_camera_values(0.0)).expect("valid projection camera");
+
+    let projected = project_points(&[2.0, 1.0, -10.0, 5.0], camera).expect("valid points");
+
+    assert_eq!(projected, vec![480.0, 160.0, 0.0, 0.0]);
+}
+
+#[test]
+fn batched_projection_matches_rotated_camera2d_pixel_order() {
+    let camera = projection_input(&projection_camera_values(std::f64::consts::FRAC_PI_2))
+        .expect("valid projection camera");
+
+    let projected = project_points(&[1.0, 0.0, 0.0, 1.0], camera).expect("valid points");
+
+    assert!((projected[0] - 400.0).abs() < 1e-12);
+    assert!((projected[1] - 340.0).abs() < 1e-12);
+    assert!((projected[2] - 440.0).abs() < 1e-12);
+    assert!((projected[3] - 300.0).abs() < 1e-12);
+}
+
+#[test]
+fn batched_projection_accepts_empty_batches() {
+    let camera = projection_input(&projection_camera_values(0.0)).expect("valid projection camera");
+
+    assert_eq!(project_points(&[], camera), Ok(Vec::new()));
+}
+
+#[test]
+fn batched_projection_rejects_malformed_or_non_finite_inputs() {
+    assert_eq!(
+        projection_input(&[0.0; 7]),
+        Err("projection camera record must contain 8 finite values")
+    );
+    assert_eq!(
+        projection_input(&[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 800.0, 600.0]),
+        Err("projection scale and viewport dimensions must be positive")
+    );
+    assert_eq!(
+        projection_input(&[0.0, 0.0, 1.0, 0.0, 0.0, f64::INFINITY, 800.0, 600.0]),
+        Err("projection camera record must contain 8 finite values")
+    );
+
+    let camera = projection_input(&projection_camera_values(0.0)).expect("valid projection camera");
+    assert_eq!(
+        project_points(&[1.0], camera),
+        Err("point buffer must contain finite x/y pairs")
+    );
+    assert_eq!(
+        project_points(&[f64::NAN, 0.0], camera),
+        Err("point buffer must contain finite x/y pairs")
+    );
+    assert_eq!(
+        project_points(&[f64::MAX, -f64::MAX], camera),
+        Err("projected coordinates must be finite")
     );
 }

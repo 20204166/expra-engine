@@ -112,6 +112,14 @@ class ViewportCamera:
     def project(self, point: tuple[float, float]) -> tuple[float, float]:
         return self._camera.translate_to_screen(point)
 
+    def project_many(
+        self, points: Iterable[tuple[float, float]]
+    ) -> tuple[tuple[float, float], ...]:
+        """Project ordered world points through the shared native/Python bridge."""
+        from expra_engine.runtime.render_math import project_camera_points
+
+        return project_camera_points(points, self._camera, self._viewport)
+
     def unproject(self, point: tuple[float, float]) -> tuple[float, float]:
         return self._camera.translate_to_game(point)
 
