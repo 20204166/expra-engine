@@ -352,7 +352,7 @@ class Audio2DWorld:
         fallback_position: tuple[float, float] = (0.0, 0.0),
         fallback_rotation: float = 0.0,
     ) -> Audio2DListener:
-        for entity in self.scene.entities:
+        for entity in self.scene.iter_entities_by_component(AudioListener2DComponent):
             if not entity.enabled:
                 continue
             listener = entity.get_component(AudioListener2DComponent)
@@ -376,7 +376,7 @@ class Audio2DWorld:
         listener = target.get_component(AudioListener2DComponent)
         if listener is None or not listener.enabled:
             raise ValueError("entity does not have an enabled AudioListener2DComponent")
-        for entity in self.scene.entities:
+        for entity in self.scene.iter_entities_by_component(AudioListener2DComponent):
             other = entity.get_component(AudioListener2DComponent)
             if other is not None:
                 other.current = entity is target
@@ -563,7 +563,7 @@ class Audio2DSystem(RuntimeSystem):
             return {}
         return {
             entity.entity_id: state
-            for entity in scene.entities
+            for entity in scene.iter_entities_by_component(AudioStreamPlayer2DComponent)
             for component in entity.get_components(AudioStreamPlayer2DComponent)
             if (state := self._states.get((id(scene), id(component)))) is not None
         }
@@ -575,7 +575,7 @@ class Audio2DSystem(RuntimeSystem):
         if scene is None or world is None:
             return ()
         requests: list[AudioPlaybackRequest2D] = []
-        for entity in scene.entities:
+        for entity in scene.iter_entities_by_component(AudioStreamPlayer2DComponent):
             for component in entity.get_components(AudioStreamPlayer2DComponent):
                 state = self._states.get((id(scene), id(component)))
                 if state is None:
@@ -677,7 +677,7 @@ class Audio2DSystem(RuntimeSystem):
             if scene is None:
                 return
             active_voices = 0
-            for entity in scene.entities:
+            for entity in scene.iter_entities_by_component(AudioStreamPlayer2DComponent):
                 if not entity.enabled:
                     continue
                 for component in entity.get_components(AudioStreamPlayer2DComponent):
@@ -712,7 +712,7 @@ class Audio2DSystem(RuntimeSystem):
                 global_panning_strength=self.global_panning_strength,
             )
         active_keys: set[tuple[int, int]] = set()
-        for entity in scene.entities:
+        for entity in scene.iter_entities_by_component(AudioStreamPlayer2DComponent):
             for component in entity.get_components(AudioStreamPlayer2DComponent):
                 key = (id(scene), id(component))
                 if not entity.enabled or not component.enabled:

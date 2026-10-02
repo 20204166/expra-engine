@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import weakref
 from typing import TYPE_CHECKING, Any
 
 from expra_engine.core.scene import Scene
@@ -10,12 +12,14 @@ from expra_engine.runtime.animated_sprite_2d import (
     AnimatedSprite2DComponent,
     AnimatedSpritePlayer2D,
     SpriteEvent2D,
+    SpriteFrames2D,
 )
 from expra_engine.runtime.events import SceneContinued, SceneStarted, SceneStopped, Update
 from expra_engine.runtime.system import RuntimeSystem
 
 if TYPE_CHECKING:
     from expra_engine.core.engine import Engine
+    from expra_engine.core.entity import Entity
 
 __all__ = ("AnimatedSpriteSystem",)
 
@@ -28,6 +32,9 @@ class AnimatedSpriteSystem(RuntimeSystem):
     def __init__(self) -> None:
         self._engine: Engine | None = None
         self._players: dict[tuple[int, int], AnimatedSpritePlayer2D] = {}
+        self._frame_signatures: weakref.WeakKeyDictionary[SpriteFrames2D, str] = (
+            weakref.WeakKeyDictionary()
+        )
         self._observer: ObservabilityWatcher | None = None
 
     @property
@@ -35,13 +42,14 @@ class AnimatedSpriteSystem(RuntimeSystem):
         scene = self._active_scene()
         if scene is None:
             return {}
-        return {
-            component: player
-            for (scene_key, component_key), player in self._players.items()
-            for entity in scene.entities
-            for component in entity.get_components(AnimatedSprite2DComponent)
-            if scene_key == id(scene) and component_key == id(component)
-        }
+        players: dict[AnimatedSprite2DComponent, AnimatedSpritePlayer2D] = {}
+        scene_key = id(scene)
+        for entity in scene.iter_entities_by_component(AnimatedSprite2DComponent):
+            for component in entity.get_components(AnimatedSprite2DComponent):
+                player = self._players.get((scene_key, id(component)))
+                if player is not None:
+                    players[component] = player
+        return players
 
     def player_for(self, component: AnimatedSprite2DComponent) -> AnimatedSpritePlayer2D | None:
         return self.players.get(component)
@@ -52,6 +60,7 @@ class AnimatedSpriteSystem(RuntimeSystem):
 
     def stop(self) -> None:
         self._players.clear()
+        self._frame_signatures.clear()
         self._engine = None
         self._observer = None
 
@@ -91,19 +100,70 @@ class AnimatedSpriteSystem(RuntimeSystem):
         transitions = 0
         try:
             scene = self._active_scene()
-            self._reconcile(scene, start_autoplay=True, signal=signal)
             if scene is None:
+                self._players.clear()
                 return
-            for entity in scene.entities:
-                if not entity.enabled:
-                    continue
+            scene_key = id(scene)
+            active_keys: set[tuple[int, int]] = set()
+            active_players: list[
+                tuple[Entity, AnimatedSprite2DComponent, AnimatedSpritePlayer2D]
+            ] = []
+            animated_entities = tuple(
+                scene.iter_entities_by_component(AnimatedSprite2DComponent)
+            )
+            for entity in animated_entities:
                 for component in entity.get_components(AnimatedSprite2DComponent):
-                    player = self._players.get((id(scene), id(component)))
-                    if player is None or not component.enabled:
+                    key = (scene_key, id(component))
+                    if not entity.enabled or not component.enabled:
+                        self._players.pop(key, None)
                         continue
-                    events = player.advance(event.time_delta)
-                    advanced += 1
-                    transitions += len(events)
+                    active_keys.add(key)
+                    player = self._players.get(key)
+                    if player is None:
+                        player = self._players[key] = AnimatedSpritePlayer2D(component)
+                        self._record(entity, player.start(), signal)
+                    elif player.frames is not component.frames:
+                        self._record(entity, player.set_frames(component.frames), signal)
+                    active_players.append((entity, component, player))
+            for key in tuple(self._players):
+                if key[0] == scene_key and key not in active_keys:
+                    del self._players[key]
+
+            groups: dict[
+                tuple[object, ...],
+                list[tuple[Entity, AnimatedSprite2DComponent, AnimatedSpritePlayer2D]],
+            ] = {}
+            for entry in active_players:
+                player = entry[2]
+                signature = (
+                    self._frames_signature(player.frames),
+                    player.animation,
+                    player.frame,
+                    player.frame_progress,
+                    player.speed_scale,
+                    player.custom_speed_scale,
+                    player.playing,
+                )
+                groups.setdefault(signature, []).append(entry)
+
+            events_by_component: dict[int, tuple[SpriteEvent2D, ...]] = {}
+            for entries in groups.values():
+                leader = entries[0][2]
+                events = leader.advance(event.time_delta)
+                advanced += len(entries)
+                transitions += len(events) * len(entries)
+                for _entity, component, player in entries:
+                    player.frame_progress = leader.frame_progress
+                    if events:
+                        player.animation = leader.animation
+                        player.frame = leader.frame
+                        player.speed_scale = leader.speed_scale
+                        player.custom_speed_scale = leader.custom_speed_scale
+                        player.playing = leader.playing
+                        events_by_component[id(component)] = events
+
+            for entity, component, _player in active_players:
+                if events := events_by_component.get(id(component)):
                     self._record(entity, events, signal)
         finally:
             if observer is not None:
@@ -125,7 +185,7 @@ class AnimatedSpriteSystem(RuntimeSystem):
             self._players.clear()
             return
         active_keys: set[tuple[int, int]] = set()
-        for entity in scene.entities:
+        for entity in scene.iter_entities_by_component(AnimatedSprite2DComponent):
             for component in entity.get_components(AnimatedSprite2DComponent):
                 key = (id(scene), id(component))
                 if not entity.enabled or not component.enabled:
@@ -148,6 +208,13 @@ class AnimatedSpriteSystem(RuntimeSystem):
         for key in tuple(self._players):
             if key[0] == id(scene):
                 del self._players[key]
+
+    def _frames_signature(self, frames: SpriteFrames2D) -> str:
+        signature = self._frame_signatures.get(frames)
+        if signature is None:
+            signature = json.dumps(frames.to_dict(), sort_keys=True, separators=(",", ":"))
+            self._frame_signatures[frames] = signature
+        return signature
 
     @staticmethod
     def _record(entity: Any, events: tuple[SpriteEvent2D, ...], signal: Any) -> None:

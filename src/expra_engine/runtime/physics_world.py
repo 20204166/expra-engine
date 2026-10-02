@@ -36,14 +36,18 @@ class PhysicsWorld2D:
         self.scene = scene
         self._trigger_pairs: set[tuple[str, str]] = set()
         self._entity_order: dict[str, int] = {}
+        self._collider_cache: dict[str, tuple[int, ColliderComponent, _Collider]] = {}
         self._observer = observer
 
     def _colliders(self, *, include_area_volumes: bool = False) -> tuple[_Collider, ...]:
         result: list[_Collider] = []
-        scene_entities = self.scene.entities
-        scene_entity_ids = {entity.entity_id for entity in scene_entities}
-        for index, entity in enumerate(scene_entities):
-            self._entity_order.setdefault(entity.entity_id, index)
+        active_ids: set[str] = set()
+        for entity in self.scene.iter_entities_by_component(ColliderComponent):
+            entity_id = entity.entity_id
+            active_ids.add(entity_id)
+            self._entity_order.setdefault(
+                entity_id, self.scene.entity_order(entity)
+            )
             if not entity.enabled:
                 continue
             component = entity.get_component(ColliderComponent)
@@ -53,16 +57,21 @@ class PhysicsWorld2D:
                 and not (include_area_volumes and area is not None and area.enabled)
             ):
                 continue
-            pose = self.scene.world_transform(entity.entity_id)
-            angle = math.radians(pose.rotation)
-            offset_x = component.offset[0] * pose.scale[0]
-            offset_y = component.offset[1] * pose.scale[1]
-            center = (
-                pose.position[0] + offset_x * math.cos(angle) - offset_y * math.sin(angle),
-                pose.position[1] + offset_x * math.sin(angle) + offset_y * math.cos(angle),
-            )
-            result.append(
-                _Collider(
+            cached = self._collider_cache.get(entity_id)
+            if (
+                cached is None
+                or cached[0] != entity.physics_revision
+                or cached[1] is not component
+            ):
+                pose = self.scene.world_transform(entity_id)
+                angle = math.radians(pose.rotation)
+                offset_x = component.offset[0] * pose.scale[0]
+                offset_y = component.offset[1] * pose.scale[1]
+                center = (
+                    pose.position[0] + offset_x * math.cos(angle) - offset_y * math.sin(angle),
+                    pose.position[1] + offset_x * math.sin(angle) + offset_y * math.cos(angle),
+                )
+                collider = _Collider(
                     entity,
                     component,
                     center,
@@ -74,8 +83,18 @@ class PhysicsWorld2D:
                     else None,
                     pose,
                 )
-            )
-        retained_ids = scene_entity_ids | {
+                self._collider_cache[entity_id] = (
+                    entity.physics_revision,
+                    component,
+                    collider,
+                )
+            else:
+                collider = cached[2]
+            result.append(collider)
+        for entity_id in tuple(self._collider_cache):
+            if entity_id not in active_ids:
+                del self._collider_cache[entity_id]
+        retained_ids = active_ids | {
             entity_id for pair in self._trigger_pairs for entity_id in pair
         }
         self._entity_order = {

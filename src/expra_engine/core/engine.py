@@ -24,6 +24,7 @@ Runtime event system adapted from ppb/engine.py GameEngine
 from __future__ import annotations
 
 import contextlib
+from collections.abc import Iterator
 from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -879,13 +880,29 @@ class _DispatchRoot:
     def on_update_complete(self, event: object) -> None:
         self._interpolator.capture_scene(self._scene)
 
-    @property
-    def children(self) -> list[object]:
-        items: list[object] = []
-        items.append(self._engine)
+    def event_targets(self, event: object) -> tuple[object, ...] | None:
+        """Return indexed subscribers for frequent runtime update events."""
+        handler_name = {
+            "ActionEvent": "on_action_event",
+            "FrameUpdate": "on_frame_update",
+            "Idle": "on_idle",
+            "Update": "on_update",
+        }.get(type(event).__name__)
+        if handler_name is None:
+            return None
+        targets: list[object] = [self._engine]
         if self._clock is not None:
-            items.append(self._clock)
-        items.extend(self._systems)
+            targets.append(self._clock)
+        targets.extend(self._systems)
         if self._scene is not None:
-            items.extend(self._scene.entities)
-        return items
+            targets.extend(self._scene._entities_for_event(handler_name))
+        return tuple(targets)
+
+    @property
+    def children(self) -> Iterator[object]:
+        yield self._engine
+        if self._clock is not None:
+            yield self._clock
+        yield from self._systems
+        if self._scene is not None:
+            yield from self._scene.iter_entities()

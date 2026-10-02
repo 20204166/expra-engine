@@ -43,13 +43,21 @@ class _FakeSurface:
 
 
 class _FakeClock:
-    def __init__(self, milliseconds: list[int]) -> None:
+    def __init__(self, milliseconds: list[int], *, initial_elapsed_ms: int = 0) -> None:
         self.milliseconds = iter(milliseconds)
         self.limits: list[int] = []
+        self.initial_elapsed_ms = initial_elapsed_ms
+        self.primed = False
 
     def tick(self, frame_rate: int) -> int:
         self.limits.append(frame_rate)
-        return next(self.milliseconds)
+        if frame_rate == 0:
+            self.primed = True
+            return self.initial_elapsed_ms
+        elapsed = next(self.milliseconds)
+        if not self.primed:
+            elapsed += self.initial_elapsed_ms
+        return elapsed
 
 
 class _FakeDisplay:
@@ -613,6 +621,22 @@ class TestPygameRuntime(unittest.TestCase):
         self.assertEqual(runtime.keys, frozenset())
         self.assertEqual(engine.dts, [0.016, 0.020])
 
+    def test_runtime_discards_setup_time_before_the_first_simulation_step(self) -> None:
+        pygame = _FakePygame([[SimpleNamespace(type=_FakePygame.QUIT)]])
+        clock = _FakeClock([16], initial_elapsed_ms=7_500)
+        engine = _FakeEngine()
+        runtime = PygameRuntime(
+            engine,
+            pygame_module=pygame,
+            clock=clock,
+            surface_factory=pygame.display.set_mode,
+        )
+
+        runtime.run()
+
+        self.assertEqual(engine.dts, [0.016])
+        self.assertEqual(clock.limits, [0, 60])
+
     def test_quit_stops_loop_flips_frames_and_cleans_up_once(self) -> None:
         pygame = _FakePygame(
             [
@@ -635,7 +659,7 @@ class TestPygameRuntime(unittest.TestCase):
 
         self.assertEqual(pygame.display.sizes, [(320, 240)])
         self.assertEqual(pygame.display.flips, 2)
-        self.assertEqual(clock.limits, [30, 30])
+        self.assertEqual(clock.limits, [0, 30, 30])
         self.assertEqual(pygame.quit_calls, 1)
         self.assertEqual(pygame.init_calls, 1)
 

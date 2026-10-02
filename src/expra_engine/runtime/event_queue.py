@@ -26,8 +26,9 @@ import contextlib
 import threading
 from collections import deque
 from collections.abc import Callable, Iterable
-from typing import Any
+from typing import Any, cast
 
+from expra_engine.core.entity import Entity
 from expra_engine.core.errors import BadEventHandlerException
 from expra_engine.core.utils import camel_to_snake
 from expra_engine.runtime.events import FrameUpdate, Update
@@ -38,6 +39,12 @@ __all__ = ("EventQueue", "walk")
 Signal = Callable[[Any], None]
 
 _handler_cache: dict[str, str] = {}
+_BASE_EMPTY_ENTITY_HANDLERS = {
+    "on_action_event": Entity.on_action_event,
+    "on_frame_update": Entity.on_frame_update,
+    "on_idle": getattr(Entity, "on_idle", None),
+    "on_update": Entity.on_update,
+}
 
 
 def _handler_name(event_class_name: str) -> str:
@@ -139,7 +146,15 @@ class EventQueue:
             targets: Iterable[Any] = tuple(item.targets)
         else:
             event = item
-            targets = walk(self._root)
+            event_target_provider = getattr(self._root, "event_targets", None)
+            provided_targets = (
+                event_target_provider(event) if callable(event_target_provider) else None
+            )
+            targets = (
+                walk(self._root)
+                if provided_targets is None
+                else cast(Iterable[Any], provided_targets)
+            )
 
         handler_name = getattr(event, "event_handler_name", _handler_name(type(event).__name__))
         for obj in targets:
@@ -147,6 +162,15 @@ class EventQueue:
                 with self._lock:
                     if self._dispatching_targets is not None and id(obj) in self._dispatching_targets:
                         continue
+            if (
+                type(obj) is Entity
+                and not obj._behaviours
+                and handler_name in _BASE_EMPTY_ENTITY_HANDLERS
+                and handler_name not in obj.__dict__
+                and type(obj).__dict__.get(handler_name)
+                is _BASE_EMPTY_ENTITY_HANDLERS[handler_name]
+            ):
+                continue
             method = getattr(obj, handler_name, None)
             if method is not None and callable(method):
                 try:

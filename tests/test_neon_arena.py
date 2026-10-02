@@ -24,6 +24,8 @@ class _FakeClock:
         self.milliseconds = iter(milliseconds)
 
     def tick(self, frame_rate: int) -> int:
+        if frame_rate == 0:
+            return 0
         return next(self.milliseconds)
 
 

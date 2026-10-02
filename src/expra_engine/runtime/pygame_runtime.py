@@ -119,6 +119,12 @@ class PygameRuntime:
                     set_surface(self.surface)
                 self.renderer.start(self._context)
             self._running = True
+            # Reset the clock's elapsed-time origin after Engine.play/setup.
+            # Pygame Clock.tick reports time since the previous tick, and the
+            # Runtime object may have existed throughout a slow scene startup.
+            # That setup interval is not simulation time and must not be
+            # replayed as hundreds of fixed updates on the first frame.
+            self.clock.tick(0)
             dt = self.clock.tick(self.frame_rate) / 1000.0
             while self._running:
                 self._poll_events()

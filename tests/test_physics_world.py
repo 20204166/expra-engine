@@ -64,6 +64,51 @@ def test_overlap_includes_exact_edge_contact_and_filters_layers():
     assert world.overlap(blocked.entity_id) == ()
 
 
+def test_queries_enumerate_indexed_collider_entities_not_the_full_scene():
+    class IndexedOnlyScene(Scene):
+        @property
+        def entities(self):
+            raise AssertionError("physics queries should not snapshot every Scene entity")
+
+    scene = IndexedOnlyScene("physics")
+    first = add_box(scene, "first", 0.0, 0.0)
+    second = add_box(scene, "second", 1.0, 0.0)
+    for index in range(5_000):
+        scene.create_entity(f"decorative-{index}")
+    world = PhysicsWorld2D(scene)
+
+    assert world.overlap(first.entity_id) == (second.entity_id,)
+
+
+def test_static_collider_queries_reuse_cached_world_poses(monkeypatch):
+    scene = make_scene()
+    first = add_box(scene, "first", 0.0, 0.0)
+    second = add_box(scene, "second", 1.0, 0.0)
+    world = PhysicsWorld2D(scene)
+    assert world.overlap(first.entity_id) == (second.entity_id,)
+
+    def unexpected_world_transform(_entity_id):
+        raise AssertionError("unchanged collider poses must be reused")
+
+    monkeypatch.setattr(scene, "world_transform", unexpected_world_transform)
+
+    assert world.overlap(first.entity_id) == (second.entity_id,)
+
+
+def test_collider_pose_cache_refreshes_after_transform_mutation():
+    scene = make_scene()
+    first = add_box(scene, "first", 0.0, 0.0)
+    second = add_box(scene, "second", 10.0, 0.0)
+    world = PhysicsWorld2D(scene)
+    assert world.overlap(first.entity_id) == ()
+
+    transform = second.get_component(TransformComponent)
+    assert transform is not None
+    transform.x = 1.0
+
+    assert world.overlap(first.entity_id) == (second.entity_id,)
+
+
 def test_raycast_returns_nearest_hit_with_stable_tie_order():
     scene = make_scene()
     first = add_box(scene, "first", 5.0, 0.0)

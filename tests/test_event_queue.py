@@ -19,9 +19,13 @@ Tests cover:
 import unittest
 from dataclasses import dataclass
 from typing import Any, ClassVar
+from unittest.mock import PropertyMock, patch
 
+from expra_engine.core.entity import Entity
 from expra_engine.core.errors import BadEventHandlerException
 from expra_engine.runtime.event_queue import EventQueue, walk
+from expra_engine.runtime.events import FrameUpdate, Idle, Update
+from expra_engine.runtime.input import ActionEvent, ActionId, PhysicalInput
 
 
 @dataclass
@@ -75,6 +79,67 @@ class TestEventQueueBasic(unittest.TestCase):
     def test_publish_on_empty_queue_is_safe(self) -> None:
         eq = self._make()
         eq.publish()  # must not raise
+
+    def test_empty_base_entity_behaviour_handlers_are_not_dispatched(self) -> None:
+        entity = Entity("static")
+        root = _Root()
+        root.children.append(entity)
+        events = (
+            Update(1 / 60),
+            FrameUpdate(1 / 60),
+            Idle(1 / 60),
+            ActionEvent(ActionId("jump"), "pressed", PhysicalInput("keyboard", "space")),
+        )
+
+        with patch.object(
+            Entity,
+            "_eligible_behaviours",
+            side_effect=AssertionError("empty entities should not receive these events"),
+        ), patch.object(
+            Entity,
+            "behaviours",
+            new_callable=PropertyMock,
+            side_effect=AssertionError("empty entities should not be traversed for Idle"),
+        ):
+            eq = EventQueue(root)
+            for event in events:
+                eq.signal(event)
+            eq.drain()
+
+    def test_entity_subclass_event_handlers_keep_broadcast_delivery(self) -> None:
+        class ListeningEntity(Entity):
+            def __init__(self) -> None:
+                super().__init__("listener")
+                self.updates = 0
+
+            def on_update(self, event: Update, signal: Any) -> None:
+                self.updates += 1
+
+        entity = ListeningEntity()
+        root = _Root()
+        root.children.append(entity)
+        eq = EventQueue(root)
+        eq.signal(Update(1 / 60))
+        eq.drain()
+
+        self.assertEqual(entity.updates, 1)
+
+    def test_root_event_target_provider_can_replace_tree_broadcast(self) -> None:
+        target = _Root()
+        skipped = _Root()
+
+        class TargetedRoot(_Root):
+            def event_targets(self, _event: object) -> tuple[object, ...]:
+                return (target,)
+
+        root = TargetedRoot()
+        root.children.append(skipped)
+        eq = EventQueue(root)
+        eq.signal(Ping(8))
+        eq.drain()
+
+        self.assertEqual([event.value for event in target.received], [8])
+        self.assertEqual(skipped.received, [])
 
     def test_flush_clears_all(self) -> None:
         eq = self._make()

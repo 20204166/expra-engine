@@ -3,6 +3,8 @@
 import json
 from types import SimpleNamespace
 
+import pytest
+
 from expra_engine.core.component import component_from_dict, registered_component_types
 from expra_engine.core.component_schema import component_type_spec
 from expra_engine.core.engine import Engine
@@ -17,6 +19,7 @@ from expra_engine.runtime.animated_sprite_2d import (
 )
 from expra_engine.runtime.animated_sprite_system import AnimatedSpriteSystem
 from expra_engine.runtime.animation import SpriteRegion
+from expra_engine.runtime.events import Update
 from expra_engine.runtime.pygame_renderer import PygameRenderer
 from expra_engine.runtime.render_extractor import extract_render_frame
 from expra_engine.runtime.rendering import RenderContext, Viewport
@@ -167,6 +170,92 @@ def test_world_level_lifecycle_starts_and_releases_animation_players() -> None:
 
     system.on_world_level_deactivated(world_scene, "town", (entity.entity_id,))
     assert system.player_for(component) is None
+
+
+def test_player_snapshot_scans_only_indexed_animated_entities(monkeypatch) -> None:
+    scene = Scene("animated")
+    for index in range(3):
+        entity = scene.create_entity(f"decorative-{index}")
+        entity.add_component(AnimatedSprite2DComponent(_frames(), autoplay="walk"))
+    engine = Engine()
+    engine.set_scene(scene)
+    assert engine.play()
+    active_scene = engine.active_scene
+    assert active_scene is not None
+    system = engine.animated_sprite_system
+    original_query = active_scene.iter_entities_by_component
+    calls = 0
+
+    def count_query(cls):
+        nonlocal calls
+        calls += 1
+        return original_query(cls)
+
+    monkeypatch.setattr(active_scene, "iter_entities_by_component", count_query)
+
+    snapshot = system.players
+
+    assert len(snapshot) == 3
+    assert calls == 1
+
+
+def test_fixed_animation_update_combines_reconciliation_and_advance_passes(monkeypatch) -> None:
+    scene = Scene("animated")
+    shared_frames = _frames()
+    for index in range(3):
+        entity = scene.create_entity(f"hero-{index}")
+        entity.add_component(AnimatedSprite2DComponent(shared_frames, autoplay="walk"))
+    engine = Engine()
+    engine.set_scene(scene)
+    assert engine.play()
+    active_scene = engine.active_scene
+    assert active_scene is not None
+    system = engine.animated_sprite_system
+    original_query = active_scene.iter_entities_by_component
+    calls = 0
+
+    def count_query(cls):
+        nonlocal calls
+        calls += 1
+        return original_query(cls)
+
+    monkeypatch.setattr(active_scene, "iter_entities_by_component", count_query)
+
+    system.on_update(Update(1 / 60), engine.signal)
+
+    assert calls == 1
+
+
+def test_identical_animation_players_advance_once_as_a_deterministic_batch(monkeypatch) -> None:
+    scene = Scene("animated batch")
+    shared_frames = _frames()
+    for index in range(4):
+        entity = scene.create_entity(f"hero-{index}", entity_id=f"hero-{index}")
+        entity.add_component(AnimatedSprite2DComponent(shared_frames, autoplay="walk"))
+    engine = Engine()
+    engine.set_scene(scene)
+    assert engine.play()
+    system = engine.animated_sprite_system
+    advance_calls = 0
+    original_advance = AnimatedSpritePlayer2D.advance
+
+    def count_advance(player, dt):
+        nonlocal advance_calls
+        advance_calls += 1
+        return original_advance(player, dt)
+
+    monkeypatch.setattr(AnimatedSpritePlayer2D, "advance", count_advance)
+
+    assert engine._eq is not None
+    system.on_update(Update(0.15), engine._eq.signal)
+
+    players = tuple(system.players.values())
+    assert advance_calls == 1
+    assert len(players) == 4
+    for player in players:
+        assert player.frame == 1
+        assert player.frame_progress == pytest.approx(0.5)
+        assert player.playing is True
 
 
 def test_runtime_system_reconciles_changed_frame_collections_without_serializing_player_state() -> (
