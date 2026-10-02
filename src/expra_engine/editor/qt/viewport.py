@@ -40,7 +40,7 @@ class ViewportPanel(ViewportCore, QWidget):
     ) -> None:
         QWidget.__init__(self, parent)
         c = colors or COLORS
-        canvas = QtCanvas(self, bg=c["viewport_bg"])
+        canvas = QtCanvas(self, bg=c["viewport_bg"], observer=observer)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(canvas)

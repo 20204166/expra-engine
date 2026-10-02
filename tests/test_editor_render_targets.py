@@ -375,6 +375,24 @@ class EditorRenderTargetTests(unittest.TestCase):
         self.assertEqual(entity.get_component(TransformComponent).x, 2.0)  # type: ignore[union-attr]
         self.assertFalse(target.colliders[0].is_area)
 
+    def test_target_collider_query_is_spatially_bounded(self) -> None:
+        scene = Scene("large collider field")
+        for index in range(5000):
+            entity = scene.create_entity(f"Collider {index}", entity_id=f"collider-{index}")
+            entity.add_component(
+                TransformComponent(x=float(index % 100) * 4.0, y=float(index // 100) * 4.0)
+            )
+            entity.add_component(ColliderComponent(width=1.0, height=1.0))
+
+        target = build_editor_render_target(scene, viewport=(800, 600))
+        visible = target.visible_colliders()
+
+        assert len(target.colliders) == 5000
+        assert len(visible) < 1000
+        assert {collider.entity_id for collider in visible} <= {
+            collider.entity_id for collider in target.colliders
+        }
+
     def test_area_component_colliders_are_flagged_distinctly_from_plain_colliders(self) -> None:
         from expra_engine.runtime.area import AreaComponent
 

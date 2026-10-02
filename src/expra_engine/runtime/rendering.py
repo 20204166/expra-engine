@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from enum import IntEnum, StrEnum
 from numbers import Real
@@ -11,6 +11,7 @@ from typing import Protocol, cast, runtime_checkable
 
 from expra_engine.core.math_utils import compose_2d_pose, transform_2d_points
 from expra_engine.core.scene.camera import Camera2D
+from expra_engine.core.spatial_index import SpatialIndex2D
 from expra_engine.runtime.animation import SpriteRegion
 from expra_engine.runtime.normal_mapping import (
     NormalMapEncoding,
@@ -159,6 +160,11 @@ class OrthographicCamera(Camera2D):
 class RenderContext:
     viewport: Viewport
     camera: OrthographicCamera = field(default_factory=OrthographicCamera)
+
+
+_WORLD_BOUNDS_CONTEXT = RenderContext(
+    Viewport(0, 0, 1, 1), OrthographicCamera(width=1.0, height=1.0)
+)
 
 
 @dataclass(frozen=True)
@@ -665,6 +671,20 @@ class RenderItem:
             ry *= context.viewport.height / 2
         return (center[0] - rx, center[1] - ry, center[0] + rx, center[1] + ry)
 
+    def world_bounds(self) -> tuple[float, float, float, float] | None:
+        """Return conservative world-space render bounds for broadphase queries.
+
+        Viewport-space items do not occupy world coordinates. World items reuse
+        the canonical projected-bounds rules at one world unit per pixel, then
+        invert that camera's y-down screen convention.
+        """
+        if self.space is RenderSpace.VIEWPORT:
+            return None
+        left, top, right, bottom = self._projected_bounds(
+            _WORLD_BOUNDS_CONTEXT, self.visual_transform
+        )
+        return left - 0.5, 0.5 - bottom, right - 0.5, 0.5 - top
+
     def is_visible(self, context: RenderContext) -> bool:
         if not self.visible:
             return False
@@ -709,6 +729,16 @@ class RenderFrame:
     _ordered_items_cache: tuple[RenderItem, ...] | None = field(
         default=None, init=False, repr=False, compare=False
     )
+    _spatial_index_cache: _RenderFrameSpatialIndex | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
+    _item_positions_cache: dict[int, tuple[tuple[int, RenderItem], ...]] | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
+    _has_normal_maps_cache: bool | None = field(default=None, init=False, repr=False, compare=False)
+    _material_responses_cache: tuple[MaterialLightResponse, ...] | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "items", tuple(self.items))
@@ -735,15 +765,177 @@ class RenderFrame:
             object.__setattr__(self, "_ordered_items_cache", cached)
         return cached
 
+    def _items_for_identities(self, identities: set[int]) -> tuple[tuple[int, RenderItem], ...]:
+        positions = self._item_positions_cache
+        if positions is None:
+            collected: dict[int, list[tuple[int, RenderItem]]] = {}
+            for insertion_index, item in enumerate(self.items):
+                collected.setdefault(id(item), []).append((insertion_index, item))
+            positions = {identity: tuple(indices) for identity, indices in collected.items()}
+            object.__setattr__(self, "_item_positions_cache", positions)
+        return tuple(
+            positioned_item
+            for identity in identities
+            for positioned_item in positions.get(identity, ())
+        )
+
     def visible_items(self, context: RenderContext) -> tuple[RenderItem, ...]:
+        return self._visible_items_with_candidate_count(context)[0]
+
+    def _visible_items_with_candidate_count(
+        self,
+        context: RenderContext,
+        preview_items: Mapping[str, tuple[RenderItem, ...]] | None = None,
+    ) -> tuple[tuple[RenderItem, ...], int]:
         from expra_engine.runtime.render_math import visible_items
 
-        return visible_items(self.ordered_items(), context)
+        candidates = self._spatial_candidates(context, preview_items)
+        return visible_items(candidates, context), len(candidates)
+
+    def _items_for_key(self, item_key: str) -> tuple[RenderItem, ...]:
+        cache = self._spatial_index_cache
+        if cache is None:
+            self._build_spatial_index()
+            cache = self._spatial_index_cache
+        assert cache is not None
+        ordered = self.ordered_items()
+        return tuple(ordered[index] for index in cache.ordinals_by_key.get(item_key, ()))
+
+    def _build_spatial_index(self) -> _RenderFrameSpatialIndex:
+        ordered = self.ordered_items()
+        cache = self._spatial_index_cache
+        if cache is None:
+            world_entries: list[tuple[int, tuple[float, float, float, float]]] = []
+            viewport_ordinals: list[int] = []
+            ordinals_by_key: dict[str, list[int]] = {}
+            max_outline_pixels = 0.0
+            max_line_half_extent = 0.0
+            for ordinal, item in enumerate(ordered):
+                ordinals_by_key.setdefault(item.key, []).append(ordinal)
+                if item.space is RenderSpace.VIEWPORT:
+                    viewport_ordinals.append(ordinal)
+                    continue
+                if item.visible:
+                    bounds = item.world_bounds()
+                    if bounds is not None:
+                        world_entries.append((ordinal, bounds))
+                if item.primitive.kind == "polygon":
+                    max_outline_pixels = max(
+                        max_outline_pixels,
+                        item.material.outline_width / 2.0,
+                        0.5,
+                    )
+                elif item.primitive.kind == "line":
+                    transform = item.visual_transform
+                    max_line_half_extent = max(
+                        max_line_half_extent,
+                        item.primitive.thickness
+                        * max(abs(transform.scale[0]), abs(transform.scale[1]))
+                        / 2.0,
+                    )
+            cache = _RenderFrameSpatialIndex(
+                SpatialIndex2D(world_entries),
+                tuple(viewport_ordinals),
+                max_outline_pixels,
+                max_line_half_extent,
+                {key: tuple(indices) for key, indices in ordinals_by_key.items()},
+            )
+            object.__setattr__(self, "_spatial_index_cache", cache)
+        return cache
+
+    def _spatial_candidates(
+        self,
+        context: RenderContext,
+        preview_items: Mapping[str, tuple[RenderItem, ...]] | None = None,
+    ) -> tuple[RenderItem, ...]:
+        ordered = self.ordered_items()
+        cache = self._build_spatial_index()
+
+        candidates = set(cache.viewport_ordinals)
+        candidates.update(
+            cache.index.query(
+                _world_query_bounds(
+                    context,
+                    cache.max_outline_pixels,
+                    cache.max_line_half_extent,
+                )
+            )
+        )
+        overrides_by_ordinal: dict[int, RenderItem] = {}
+        if preview_items:
+            for key, replacements in preview_items.items():
+                ordinals = cache.ordinals_by_key.get(key, ())
+                for ordinal, replacement in zip(ordinals, replacements, strict=True):
+                    candidates.add(ordinal)
+                    overrides_by_ordinal[ordinal] = replacement
+        return tuple(
+            overrides_by_ordinal.get(ordinal, ordered[ordinal])
+            for ordinal in sorted(candidates)
+        )
 
     def visible_lights(self, context: RenderContext) -> tuple[LightDescriptor, ...]:
         if not self.lighting_enabled:
             return ()
         return tuple(light for light in self.lights if light.is_visible(context))
+
+    @property
+    def has_normal_maps(self) -> bool:
+        cached = self._has_normal_maps_cache
+        if cached is None:
+            cached = any(item.material.normal_map is not None for item in self.items)
+            object.__setattr__(self, "_has_normal_maps_cache", cached)
+        return cached
+
+    @property
+    def material_light_responses(self) -> tuple[MaterialLightResponse, ...]:
+        cached = self._material_responses_cache
+        if cached is None:
+            cached = tuple(
+                item.material.light_response
+                for item in self.items
+                if item.material.light_response is not None
+            )
+            object.__setattr__(self, "_material_responses_cache", cached)
+        return cached
+
+
+@dataclass(frozen=True)
+class _RenderFrameSpatialIndex:
+    index: SpatialIndex2D[int]
+    viewport_ordinals: tuple[int, ...]
+    max_outline_pixels: float
+    max_line_half_extent: float
+    ordinals_by_key: dict[str, tuple[int, ...]]
+
+
+def _world_query_bounds(
+    context: RenderContext, screen_margin: float, line_half_extent: float
+) -> tuple[float, float, float, float]:
+    viewport = context.viewport
+    left = viewport.x - screen_margin
+    top = viewport.y - screen_margin
+    right = viewport.right + screen_margin
+    bottom = viewport.bottom + screen_margin
+    camera = context.camera
+    corners = (
+        camera.unproject((left, top), viewport),
+        camera.unproject((right, top), viewport),
+        camera.unproject((right, bottom), viewport),
+        camera.unproject((left, bottom), viewport),
+    )
+    xs = tuple(point[0] for point in corners)
+    ys = tuple(point[1] for point in corners)
+    camera = context.camera
+    line_margin = line_half_extent * max(
+        1.0,
+        camera.height * viewport.width / (camera.width * viewport.height),
+    )
+    return (
+        min(xs) - line_margin,
+        min(ys) - line_margin,
+        max(xs) + line_margin,
+        max(ys) + line_margin,
+    )
 
 
 @runtime_checkable

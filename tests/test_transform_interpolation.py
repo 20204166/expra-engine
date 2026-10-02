@@ -39,6 +39,21 @@ def test_first_capture_has_no_artificial_motion() -> None:
     assert interpolator.sample_local("player", 0.5) == transform(10.0, 4.0)
 
 
+def test_parentless_unchanged_world_sample_reuses_its_snapshot(monkeypatch) -> None:
+    interpolator = TransformInterpolator()
+    current = transform(10.0, 4.0)
+    capture(interpolator, "static", current)
+
+    def unexpected_interpolation(*_args):
+        raise AssertionError("unchanged snapshots should bypass interpolation")
+
+    monkeypatch.setattr(
+        "expra_engine.runtime.transform_interpolation._interpolate", unexpected_interpolation
+    )
+
+    assert interpolator.sample_world("static", 0.5) is current
+
+
 def test_position_and_scale_interpolate_between_fixed_ticks() -> None:
     interpolator = TransformInterpolator()
     capture(interpolator, "player", transform())

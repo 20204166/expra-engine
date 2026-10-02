@@ -75,7 +75,7 @@ class TransformInterpolator:
     Integration model::
 
         interpolator.begin_tick()
-        for entity in scene.entities:
+        for entity in scene.iter_entities():
             interpolator.capture(
                 entity.entity_id,
                 transform,
@@ -101,6 +101,8 @@ class TransformInterpolator:
         self._tick = 0
         self._tick_open = False
         self._seen: set[Hashable] = set()
+        self._scene: Scene | None = None
+        self._dynamic_entity_ids: set[str] = set()
 
     @property
     def tick(self) -> int:
@@ -113,6 +115,11 @@ class TransformInterpolator:
     @property
     def tracked(self) -> tuple[Hashable, ...]:
         return tuple(self._states)
+
+    @property
+    def dynamic_entity_ids(self) -> frozenset[str]:
+        """Entity IDs whose transform snapshots changed after initial capture."""
+        return frozenset(self._dynamic_entity_ids)
 
     def __contains__(self, key: Hashable) -> bool:
         return key in self._states
@@ -176,13 +183,48 @@ class TransformInterpolator:
         self._seen.add(key)
 
     def capture_scene(self, scene: Scene | None) -> None:
-        """Capture every entity's authoritative local transform for one tick."""
+        """Capture changed authoritative local transforms for one fixed tick."""
         if scene is None:
             self.clear()
             return
+        if scene is not self._scene:
+            self.clear()
+            self._scene = scene
+            scene._mark_all_transform_entities_dirty()
+        changed_entities, removed_entity_ids = scene._take_transform_changes()
+        for entity_id in removed_entity_ids:
+            self._states.pop(entity_id, None)
+            self._dynamic_entity_ids.discard(entity_id)
         self.begin_tick()
-        for entity in scene.entities:
+        for entity in changed_entities:
             component = entity.get_component(TransformComponent)
+            parent = entity.parent_id
+            state = self._states.get(entity.entity_id)
+            if state is not None and not state.reset_requested and state.parent == parent:
+                current = state.current
+                if component is not None and component.enabled:
+                    unchanged = (
+                        state.interpolated
+                        and current.position[0] == component.x
+                        and current.position[1] == component.y
+                        and current.position[2] == 0.0
+                        and current.rotation == component.rotation
+                        and current.scale[0] == component.scale_x
+                        and current.scale[1] == component.scale_y
+                        and current.scale[2] == 1.0
+                    )
+                else:
+                    unchanged = (
+                        not state.interpolated
+                        and current.position == (0.0, 0.0, 0.0)
+                        and current.rotation == 0.0
+                        and current.scale == (1.0, 1.0, 1.0)
+                    )
+                if unchanged:
+                    self._seen.add(entity.entity_id)
+                    continue
+            if state is not None:
+                self._dynamic_entity_ids.add(entity.entity_id)
             transform = (
                 Transform(
                     position=(component.x, component.y, 0.0),
@@ -195,10 +237,10 @@ class TransformInterpolator:
             self.capture(
                 entity.entity_id,
                 transform,
-                parent=entity.parent_id,
+                parent=parent,
                 interpolated=component is not None and component.enabled,
             )
-        self.end_tick(prune=True)
+        self.end_tick()
 
     def end_tick(self, *, prune: bool = False) -> None:
         """Close the current tick.
@@ -218,15 +260,25 @@ class TransformInterpolator:
 
     def prune_scene(self, scene: Scene | None) -> None:
         """Remove snapshots for entities no longer in the active scene."""
-        active = {entity.entity_id for entity in scene.entities} if scene is not None else set()
-        for key in tuple(self._states):
-            if key not in active:
-                del self._states[key]
+        if scene is None:
+            self.clear()
+            return
+        if scene is not self._scene:
+            self.clear()
+            self._scene = scene
+            scene._mark_all_transform_entities_dirty()
+        for entity_id in scene._take_removed_transform_entity_ids():
+            self._states.pop(entity_id, None)
+            self._dynamic_entity_ids.discard(entity_id)
 
     def request_reset(self, key: Hashable) -> None:
         """Snap previous/current together on the key's next capture."""
 
         self._state(key).reset_requested = True
+        if self._scene is not None:
+            entity = self._scene.find_entity(str(key))
+            if entity is not None:
+                self._scene._entity_transform_changed(entity)
 
     def reset(self, key: Hashable, transform: Transform | None = None) -> None:
         """Immediately remove interpolation history for one tracked transform."""
@@ -246,19 +298,24 @@ class TransformInterpolator:
             state.reset_requested = False
 
     def remove(self, key: Hashable) -> bool:
-        return self._states.pop(key, None) is not None
+        removed = self._states.pop(key, None) is not None
+        if isinstance(key, str):
+            self._dynamic_entity_ids.discard(key)
+        return removed
 
     def clear(self) -> None:
         self._states.clear()
         self._seen.clear()
         self._tick_open = False
+        self._scene = None
+        self._dynamic_entity_ids.clear()
 
     def sample_local(self, key: Hashable, fraction: float) -> Transform:
         """Return one local transform sampled between fixed simulation ticks."""
 
         alpha = _fraction(fraction)
         state = self._state(key)
-        if not state.interpolated:
+        if not state.interpolated or state.previous is state.current:
             return state.current
         return _interpolate(state.previous, state.current, alpha)
 
@@ -266,6 +323,11 @@ class TransformInterpolator:
         """Return one sampled transform with tracked parent transforms composed."""
 
         alpha = _fraction(fraction)
+        state = self._state(key)
+        if state.parent is None or state.parent not in self._states:
+            if not state.interpolated or state.previous is state.current:
+                return state.current
+            return _interpolate(state.previous, state.current, alpha)
         resolved: dict[Hashable, Transform] = {}
         visiting: set[Hashable] = set()
 

@@ -17,7 +17,7 @@ from expra_engine.runtime.pygame_renderer import (
     PygameResourceProvider,
 )
 from expra_engine.runtime.pygame_runtime import PygameRuntime
-from expra_engine.runtime.render_extractor import extract_render_frame
+from expra_engine.runtime.render_extractor import RuntimeRenderFrameCache
 from expra_engine.runtime.rendering import RenderFrame
 from expra_engine.runtime.script_registry import ScriptRegistry
 
@@ -52,6 +52,8 @@ def run_project(project_dir: Path | str = ".") -> None:
         observer=observer,
     )
 
+    render_cache = RuntimeRenderFrameCache()
+
     def frame_factory(current_engine: Engine, dt: float) -> RenderFrame:
         world_system = (
             current_engine.world_streaming_system
@@ -61,8 +63,9 @@ def run_project(project_dir: Path | str = ".") -> None:
         if world_system is not None and world_system.startup_error is not None:
             raise RuntimeError(world_system.startup_error)
         extracted = (
-            extract_render_frame(
+            render_cache.extract(
                 current_engine.active_scene,
+                context=getattr(renderer, "context", None),
                 elapsed=dt,
                 interpolator=current_engine.transform_interpolator,
                 interpolation_fraction=current_engine.interpolation_fraction,

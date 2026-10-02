@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import inspect
 import uuid
+import weakref
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any, TypeVar
 
@@ -44,10 +45,12 @@ class Entity:
     ) -> None:
         self.entity_id: str = entity_id or str(uuid.uuid4())
         self.name = name
-        self.enabled = enabled
-        self.layer = layer
-        self.parent_id = parent_id
+        self._enabled = enabled
+        self._layer = layer
+        self._parent_id = parent_id
         self._components: list[Component] = []
+        self._scene_owners: weakref.WeakSet[Any] = weakref.WeakSet()
+        self._physics_revision = 0
         self._behaviours: list[Behaviour] = []
         self._behaviour_factories: list[BehaviourFactory] = []
         self._tags: set[str] = set()
@@ -58,13 +61,84 @@ class Entity:
 
     def add_component(self, component: Component) -> None:
         self._components.append(component)
+        self._bump_physics_revision()
+        component._add_entity_owner(self)
+        for scene in self._scene_owners:
+            scene._entity_component_added(self, component)
 
     def remove_component(self, component: Component) -> bool:
         try:
             self._components.remove(component)
+            if not any(existing is component for existing in self._components):
+                component._remove_entity_owner(self)
+            self._bump_physics_revision()
+            for scene in self._scene_owners:
+                scene._entity_component_removed(self, component)
             return True
         except ValueError:
             return False
+
+    def _add_scene_owner(self, scene: Any) -> None:
+        self._scene_owners.add(scene)
+        for component in self._components:
+            scene._entity_component_added(self, component)
+        scene._refresh_entity_event_targets(self)
+
+    def _remove_scene_owner(self, scene: Any) -> None:
+        scene._remove_entity_event_targets(self)
+        self._scene_owners.discard(scene)
+
+    def _component_changed(self, component: Component) -> None:
+        self._bump_physics_revision()
+        for scene in self._scene_owners:
+            scene._entity_component_changed(self, component)
+
+    @property
+    def physics_revision(self) -> int:
+        return self._physics_revision
+
+    def _bump_physics_revision(self) -> None:
+        self._physics_revision += 1
+
+    def _mark_render_changed(self) -> None:
+        for scene in self._scene_owners:
+            scene._entity_render_changed(self)
+
+    @property
+    def enabled(self) -> bool:
+        return self._enabled
+
+    @enabled.setter
+    def enabled(self, value: bool) -> None:
+        previous = getattr(self, "_enabled", value)
+        self._enabled = value
+        if previous != value:
+            self._bump_physics_revision()
+            self._mark_render_changed()
+
+    @property
+    def layer(self) -> int:
+        return self._layer
+
+    @layer.setter
+    def layer(self, value: int) -> None:
+        previous = getattr(self, "_layer", value)
+        self._layer = value
+        if previous != value:
+            self._mark_render_changed()
+
+    @property
+    def parent_id(self) -> str | None:
+        return self._parent_id
+
+    @parent_id.setter
+    def parent_id(self, value: str | None) -> None:
+        previous = getattr(self, "_parent_id", value)
+        self._parent_id = value
+        if previous != value:
+            self._bump_physics_revision()
+            for scene in getattr(self, "_scene_owners", ()):
+                scene._entity_transform_changed(self)
 
     def get_component(self, cls: type[C]) -> C | None:
         for component in self._components:
@@ -90,6 +164,8 @@ class Entity:
         self._behaviours.append(behaviour)
         self._behaviour_factories.append(runtime_factory)
         behaviour.entity = self
+        for scene in tuple(self._scene_owners):
+            scene._refresh_entity_event_targets(self)
         behaviour.on_attach(self)
 
     def remove_behaviour(self, behaviour: Behaviour) -> bool:
@@ -101,6 +177,8 @@ class Entity:
 
         self._behaviours.pop(index)
         self._behaviour_factories.pop(index)
+        for scene in tuple(self._scene_owners):
+            scene._refresh_entity_event_targets(self)
         try:
             behaviour.on_detach()
         finally:

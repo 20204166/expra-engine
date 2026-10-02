@@ -10,16 +10,21 @@ from __future__ import annotations
 import copy
 import math
 import uuid
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from typing import Any
 
-from expra_engine.core.component import TransformComponent
+from expra_engine.core.component import Component, TransformComponent
 from expra_engine.core.document_kind import DocumentKind
 from expra_engine.core.entity import Entity
 from expra_engine.core.math_utils import compose_2d_pose
 from expra_engine.core.scene.camera import SceneCamera
 from expra_engine.observability import ObservabilityWatcher, observe_stage
+
+_ENTITY_EVENT_HANDLER_NAMES = ("on_action_event", "on_frame_update", "on_idle", "on_update")
+_BASE_ENTITY_EVENT_HANDLERS = {
+    name: getattr(Entity, name, None) for name in _ENTITY_EVENT_HANDLER_NAMES
+}
 
 
 def _clone_components_and_tags(source: Entity, target: Entity) -> None:
@@ -117,6 +122,18 @@ class Scene:
         self.name = name
         self._camera = camera if isinstance(camera, SceneCamera) else SceneCamera(camera)
         self._entities: list[Entity] = []
+        self._component_entities: dict[type[Component], list[Entity]] = {}
+        # Membership sets keep the ordered component lists off the per-entity
+        # linear membership check used during large scene construction.
+        self._component_entity_sets: dict[type[Component], set[Entity]] = {}
+        self._component_entity_order: dict[int, int] = {}
+        self._next_component_entity_order = 0
+        self._pending_transform_entities: dict[str, Entity] = {}
+        self._pending_removed_transform_entity_ids: set[str] = set()
+        self._pending_render_entity_ids: set[str] = set()
+        self._entity_event_targets: dict[str, list[Entity]] = {
+            name: [] for name in _ENTITY_EVENT_HANDLER_NAMES
+        }
         # Instance-root entity_id -> materialized descendant entity_ids. Purely
         # runtime bookkeeping (never serialized): lets Project.save_scene omit
         # resolve-from-source content and lets the editor mark it read-only-ish.
@@ -147,6 +164,21 @@ class Scene:
     def entities(self) -> tuple[Entity, ...]:
         return tuple(self._entities)
 
+    def iter_entities(self) -> Iterator[Entity]:
+        """Iterate entities in insertion order without a snapshot allocation.
+
+        Callers must not add or remove entities while consuming the iterator.
+        Use :attr:`entities` when a stable snapshot is required.
+        """
+        return iter(self._entities)
+
+    def entity_order(self, entity: Entity) -> int:
+        """Return an entity's stable insertion ordinal within this Scene."""
+        try:
+            return self._component_entity_order[id(entity)]
+        except KeyError as exc:
+            raise KeyError(f"entity is not in this Scene: {entity.entity_id!r}") from exc
+
     @property
     def camera(self) -> SceneCamera:
         return self._camera
@@ -168,6 +200,11 @@ class Scene:
             raise ValueError(f"Entity ID already exists in scene: {entity.entity_id!r}")
         self._entities.append(entity)
         index[entity.entity_id] = entity
+        self._component_entity_order[id(entity)] = self._next_component_entity_order
+        self._next_component_entity_order += 1
+        entity._add_scene_owner(self)
+        self._entity_transform_changed(entity)
+        self._entity_render_changed(entity)
         if self._children_index is not None:
             # Keep an already-built children index in sync incrementally rather
             # than discarding it and forcing an O(n) rebuild on the next
@@ -188,6 +225,11 @@ class Scene:
                 return False
             ids_to_remove = {e.entity_id for e in subtree}
             self._entities = [e for e in self._entities if e.entity_id not in ids_to_remove]
+            for entity in subtree:
+                self._entity_removed(entity)
+                self._unindex_entity_components(entity)
+                entity._remove_scene_owner(self)
+                self._component_entity_order.pop(id(entity), None)
             if self._entity_index is not None:
                 for removed_id in ids_to_remove:
                     self._entity_index.pop(removed_id, None)
@@ -197,6 +239,10 @@ class Scene:
         for i, entity in enumerate(self._entities):
             if entity.entity_id == entity_id:
                 self._entities.pop(i)
+                self._entity_removed(entity)
+                self._unindex_entity_components(entity)
+                entity._remove_scene_owner(self)
+                self._component_entity_order.pop(id(entity), None)
                 if self._entity_index is not None:
                     self._entity_index.pop(entity_id, None)
                 self._forget_instance_bookkeeping({entity_id})
@@ -250,8 +296,16 @@ class Scene:
         moved = tuple(entity for entity in self._entities if entity.entity_id in selected_ids)
         self._entities = [entity for entity in self._entities if entity.entity_id not in selected_ids]
         for entity in moved:
+            self._entity_removed(entity)
+            self._unindex_entity_components(entity)
+            entity._remove_scene_owner(self)
+            self._component_entity_order.pop(id(entity), None)
             target._entities.append(entity)
             target_index[entity.entity_id] = entity
+            target._component_entity_order[id(entity)] = target._next_component_entity_order
+            target._next_component_entity_order += 1
+            entity._add_scene_owner(target)
+            target._entity_transform_changed(entity)
             if target._children_index is not None:
                 target._children_index.setdefault(entity.parent_id, []).append(entity)
         for root_id, children in moved_instance_roots.items():
@@ -416,7 +470,8 @@ class Scene:
         descendants (omitted from compact saves and regenerated from their
         source on load).
         """
-        if self.find_entity(entity_id) is None:
+        entity = self.find_entity(entity_id)
+        if entity is None:
             raise KeyError(f"entity not found: {entity_id!r}")
         root_id = self._instance_roots.get(entity_id)
         if root_id is not None:
@@ -430,7 +485,7 @@ class Scene:
             return SceneEntityOrigin("materialized", root_id, source_path)
         from expra_engine.core.scene.scene_instance import SceneInstanceComponent
 
-        if self.find_entity(entity_id).get_component(SceneInstanceComponent) is not None:
+        if entity.get_component(SceneInstanceComponent) is not None:
             return SceneEntityOrigin("instance_root", None, None)
         return SceneEntityOrigin("authored", None, None)
 
@@ -622,9 +677,13 @@ class Scene:
         children_index = self._ensure_children_index()
         queue = list(starts)
         cursor = 0
+        seen: set[str] = set()
         while cursor < len(queue):
             entity = queue[cursor]
             cursor += 1
+            if entity.entity_id in seen:
+                continue
+            seen.add(entity.entity_id)
             result.append(entity)
             queue.extend(children_index.get(entity.entity_id, ()))
         return result
@@ -639,7 +698,174 @@ class Scene:
 
     def get_entities_by_component(self, cls: type) -> tuple[Entity, ...]:
         """Return all entities that have at least one component of type ``cls``."""
-        return tuple(e for e in self._entities if e.get_component(cls) is not None)
+        return tuple(self.iter_entities_by_component(cls))
+
+    def iter_entities_by_component(self, cls: type) -> Iterator[Entity]:
+        """Iterate matching entities in scene order without a result snapshot."""
+        return iter(self._component_entities.get(cls, ()))
+
+    def _entities_for_event(self, handler_name: str) -> tuple[Entity, ...]:
+        if getattr(Entity, handler_name, None) is not _BASE_ENTITY_EVENT_HANDLERS.get(handler_name):
+            return self.entities
+        return tuple(self._entity_event_targets.get(handler_name, ()))
+
+    def _refresh_entity_event_targets(self, entity: Entity) -> None:
+        order = self._component_entity_order.get(id(entity))
+        if order is None:
+            return
+        for handler_name in _ENTITY_EVENT_HANDLER_NAMES:
+            class_handler = getattr(type(entity), handler_name, None)
+            custom_handler = (
+                class_handler is not _BASE_ENTITY_EVENT_HANDLERS[handler_name]
+                or handler_name in entity.__dict__
+            )
+            should_dispatch = bool(entity._behaviours) or custom_handler
+            bucket = self._entity_event_targets[handler_name]
+            present = entity in bucket
+            if should_dispatch == present:
+                continue
+            if should_dispatch:
+                insert_at = next(
+                    (
+                        index
+                        for index, existing in enumerate(bucket)
+                        if self._component_entity_order[id(existing)] > order
+                    ),
+                    len(bucket),
+                )
+                bucket.insert(insert_at, entity)
+            else:
+                bucket.remove(entity)
+
+    def _remove_entity_event_targets(self, entity: Entity) -> None:
+        for bucket in self._entity_event_targets.values():
+            try:
+                bucket.remove(entity)
+            except ValueError:
+                continue
+
+    def _entity_component_added(self, entity: Entity, component: Component) -> None:
+        self._entity_render_changed(entity)
+        if isinstance(component, TransformComponent):
+            self._entity_transform_changed(entity)
+        for component_type in type(component).__mro__:
+            if not isinstance(component_type, type) or not issubclass(component_type, Component):
+                continue
+            self._insert_component_entity(entity, component_type)
+
+    def _insert_component_entity(
+        self, entity: Entity, component_type: type[Component]
+    ) -> None:
+        members = self._component_entity_sets.setdefault(component_type, set())
+        if entity in members:
+            return
+        order = self._component_entity_order[id(entity)]
+        bucket = self._component_entities.setdefault(component_type, [])
+        if not bucket or order > self._component_entity_order[id(bucket[-1])]:
+            bucket.append(entity)
+        else:
+            insert_at = next(
+                index
+                for index, existing in enumerate(bucket)
+                if self._component_entity_order[id(existing)] > order
+            )
+            bucket.insert(insert_at, entity)
+        members.add(entity)
+
+    def _entity_component_removed(self, entity: Entity, component: Component) -> None:
+        self._entity_render_changed(entity)
+        if isinstance(component, TransformComponent):
+            self._entity_transform_changed(entity)
+        for component_type in type(component).__mro__:
+            if not isinstance(component_type, type) or not issubclass(component_type, Component):
+                continue
+            if entity.get_component(component_type) is not None:
+                continue
+            bucket = self._component_entities.get(component_type)
+            if bucket is None:
+                continue
+            self._remove_component_entity(entity, component_type)
+
+    def _remove_component_entity(
+        self, entity: Entity, component_type: type[Component]
+    ) -> None:
+        bucket = self._component_entities.get(component_type)
+        members = self._component_entity_sets.get(component_type)
+        if bucket is None or members is None or entity not in members:
+            return
+        index = next(index for index, existing in enumerate(bucket) if existing is entity)
+        bucket.pop(index)
+        members.remove(entity)
+        if not bucket:
+            del self._component_entities[component_type]
+            del self._component_entity_sets[component_type]
+
+    def _entity_transform_changed(self, entity: Entity) -> None:
+        if id(entity) in self._component_entity_order:
+            self._pending_removed_transform_entity_ids.discard(entity.entity_id)
+            self._pending_transform_entities[entity.entity_id] = entity
+            self._entity_render_changed(entity)
+            children_index = self._ensure_children_index()
+            descendants = children_index.get(entity.entity_id)
+            if not descendants:
+                return
+            queue = list(descendants)
+            seen = {entity.entity_id}
+            cursor = 0
+            while cursor < len(queue):
+                descendant = queue[cursor]
+                cursor += 1
+                if descendant.entity_id in seen:
+                    continue
+                seen.add(descendant.entity_id)
+                descendant._bump_physics_revision()
+                queue.extend(children_index.get(descendant.entity_id, ()))
+
+    def _entity_component_changed(self, entity: Entity, component: Component) -> None:
+        self._entity_render_changed(entity)
+        if isinstance(component, TransformComponent):
+            self._entity_transform_changed(entity)
+
+    def _entity_render_changed(self, entity: Entity) -> None:
+        if id(entity) in self._component_entity_order:
+            self._pending_render_entity_ids.add(entity.entity_id)
+
+    def _take_render_entity_ids(self) -> tuple[str, ...]:
+        changed = tuple(self._pending_render_entity_ids)
+        self._pending_render_entity_ids.clear()
+        return changed
+
+    def _mark_all_transform_entities_dirty(self) -> None:
+        self._pending_transform_entities.update(
+            (entity.entity_id, entity) for entity in self._entities
+        )
+
+    def _entity_removed(self, entity: Entity) -> None:
+        self._pending_transform_entities.pop(entity.entity_id, None)
+        self._pending_removed_transform_entity_ids.add(entity.entity_id)
+        self._pending_render_entity_ids.add(entity.entity_id)
+
+    def _take_transform_changes(self) -> tuple[tuple[Entity, ...], tuple[str, ...]]:
+        changed = tuple(self._pending_transform_entities.values())
+        removed = tuple(self._pending_removed_transform_entity_ids)
+        self._pending_transform_entities.clear()
+        self._pending_removed_transform_entity_ids.clear()
+        return changed, removed
+
+    def _take_removed_transform_entity_ids(self) -> tuple[str, ...]:
+        removed = tuple(self._pending_removed_transform_entity_ids)
+        self._pending_removed_transform_entity_ids.clear()
+        return removed
+
+    def _unindex_entity_components(self, entity: Entity) -> None:
+        component_types = {
+            component_type
+            for component in entity.components
+            for component_type in type(component).__mro__
+            if isinstance(component_type, type) and issubclass(component_type, Component)
+        }
+        for component_type in component_types:
+            self._remove_component_entity(entity, component_type)
 
     def get_entities(
         self, *, tag: str | None = None, component: type | None = None

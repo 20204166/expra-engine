@@ -7,10 +7,13 @@ from typing import get_type_hints
 import pytest
 
 from expra_engine.core.scene.camera import Camera2D
+from expra_engine.runtime.material_lighting import MaterialLightResponse
+from expra_engine.runtime.normal_mapping import NormalMapMode
 from expra_engine.runtime.rendering import (
     Color,
     MaterialDescriptor,
     NineSliceDescriptor,
+    NormalMapDescriptor,
     OrthographicCamera,
     PrimitiveDescriptor,
     RenderContext,
@@ -110,6 +113,34 @@ def test_render_frame_culls_items_outside_viewport_and_keeps_boundary() -> None:
     frame = RenderFrame((outside, boundary, inside))
 
     assert [item.key for item in frame.visible_items(context)] == ["boundary", "inside"]
+
+
+def test_render_frame_caches_static_pixel_and_material_render_flags() -> None:
+    response = MaterialLightResponse(emission=0.25)
+    normal_map = NormalMapDescriptor(NormalMapMode.EXPLICIT, "assets://box_normal.png")
+    frame = RenderFrame(
+        (
+            RenderItem(
+                "normal-mapped",
+                PrimitiveDescriptor("sprite", size=(1.0, 1.0)),
+                Transform(),
+                material=MaterialDescriptor(
+                    texture_id="assets://box.png", normal_map=normal_map
+                ),
+            ),
+            RenderItem(
+                "lit-response",
+                PrimitiveDescriptor("rectangle"),
+                Transform(),
+                material=MaterialDescriptor(light_response=response),
+            ),
+        )
+    )
+
+    assert frame.has_normal_maps is True
+    cached_responses = frame.material_light_responses
+    assert cached_responses == (response,)
+    assert frame.material_light_responses is cached_responses
 
 
 def test_textured_visual_transform_uses_sprite_offset_for_any_primitive() -> None:

@@ -10,15 +10,28 @@ from expra_engine.core.component import (
 from expra_engine.core.component_schema import component_type_spec
 from expra_engine.core.scene import Scene, WorldTransform2D
 from expra_engine.editor.commands import SetComponentPropertyCommand
+from expra_engine.runtime.animated_sprite_2d import (
+    AnimatedSprite2DComponent,
+    AnimatedSpritePlayer2D,
+    SpriteAnimation2D,
+    SpriteFrame2D,
+    SpriteFrames2D,
+)
 from expra_engine.runtime.animation import SpriteRegion
 from expra_engine.runtime.canvas_effects import CanvasModulateComponent
-from expra_engine.runtime.render_extractor import extract_render_frame
+from expra_engine.runtime.render_extractor import (
+    RuntimeRenderFrameCache,
+    extract_render_frame,
+)
 from expra_engine.runtime.rendering import (
     Color,
     MaterialDescriptor,
+    OrthographicCamera,
+    RenderContext,
     RenderFrame,
     RenderPhase,
     Transform,
+    Viewport,
 )
 from expra_engine.runtime.transform_interpolation import TransformInterpolator
 from expra_engine.runtime.visual_components import (
@@ -123,6 +136,103 @@ def test_extractor_keeps_existing_materials_and_resolves_modulation_once() -> No
     assert frame.items[0].material == MaterialDescriptor(
         color=Color(0.8, 0.6, 0.4, 0.5),
     )
+
+
+def test_runtime_visibility_culling_is_conservative_for_renderable_components() -> None:
+    scene = Scene("runtime culling")
+    visible = scene.create_entity("visible", entity_id="visible")
+    visible.add_component(TransformComponent(x=4.5))
+    visible.add_component(
+        PrimitiveComponent("polygon", points=((0.0, 0.0), (1.0, 0.0), (0.0, 1.0)))
+    )
+    outside = scene.create_entity("outside", entity_id="outside")
+    outside.add_component(TransformComponent(x=100.0, y=100.0))
+    outside.add_component(PrimitiveComponent("rectangle", width=1.0, height=1.0))
+    text = scene.create_entity("text", entity_id="text")
+    text.add_component(TransformComponent(x=100.0, y=100.0))
+    text.add_component(TextComponent("unbounded label"))
+    context = RenderContext(
+        Viewport(0, 0, 400, 300),
+        OrthographicCamera(width=10.0, height=7.5),
+    )
+
+    unculled = extract_render_frame(scene)
+    expected_visible = {
+        item.key for item in unculled.items if item.is_visible(context)
+    }
+    culled = extract_render_frame(scene, visibility_context=context)
+
+    actual = {item.key for item in culled.items}
+    assert expected_visible <= actual
+    assert "visible" in actual
+    assert "outside" not in actual
+    assert "text" in actual
+
+
+def test_runtime_render_cache_skips_static_scene_scan_and_refreshes_dirty_entities(
+    monkeypatch,
+) -> None:
+    scene = Scene("cached runtime culling")
+    visible = scene.create_entity("visible", entity_id="visible")
+    visible.add_component(TransformComponent())
+    visible.add_component(PrimitiveComponent("rectangle"))
+    moving_into_view = scene.create_entity("moving", entity_id="moving")
+    moving_transform = TransformComponent(x=100.0, y=100.0)
+    moving_into_view.add_component(moving_transform)
+    moving_into_view.add_component(PrimitiveComponent("circle"))
+    context = RenderContext(
+        Viewport(0, 0, 400, 300),
+        OrthographicCamera(width=10.0, height=7.5),
+    )
+    cache = RuntimeRenderFrameCache()
+
+    initial = cache.extract(scene, context=context)
+    assert {item.key for item in initial.items} == {"visible", "moving"}
+
+    def unexpected_scene_scan():
+        raise AssertionError("cached extraction should query candidates, not scan Scene.entities")
+
+    monkeypatch.setattr(scene, "iter_entities", unexpected_scene_scan)
+    static_frame = cache.extract(scene, context=context)
+    assert {item.key for item in static_frame.items} == {"visible"}
+
+    moving_transform.x = 0.0
+    moving_transform.y = 0.0
+    updated = cache.extract(scene, context=context)
+    assert {item.key for item in updated.items} == {"visible", "moving"}
+
+
+def test_runtime_render_cache_samples_the_current_frame_for_visible_animations() -> None:
+    scene = Scene("animated cache")
+    entity = scene.create_entity("animated", entity_id="animated")
+    frames = SpriteFrames2D(
+        {
+            "walk": SpriteAnimation2D(
+                (
+                    SpriteFrame2D("first.png", region=SpriteRegion(0, 0, 8, 8)),
+                    SpriteFrame2D("second.png", region=SpriteRegion(8, 0, 8, 8)),
+                ),
+                speed_fps=10.0,
+            )
+        }
+    )
+    component = AnimatedSprite2DComponent(frames, animation="walk")
+    entity.add_component(component)
+    player = AnimatedSpritePlayer2D(component)
+    player.play()
+    context = RenderContext(
+        Viewport(0, 0, 400, 300),
+        OrthographicCamera(width=10.0, height=7.5),
+    )
+    cache = RuntimeRenderFrameCache()
+
+    initial = cache.extract(scene, context=context, animated_players={component: player})
+    assert initial.items[0].material.texture_id == "first.png"
+
+    player.advance(0.1)
+    updated = cache.extract(scene, context=context, animated_players={component: player})
+
+    assert updated.items[0].material.texture_id == "second.png"
 
 
 def test_primitive_color_assignments_are_normalized_before_render_extraction() -> None:

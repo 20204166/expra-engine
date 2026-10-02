@@ -149,6 +149,10 @@ def _invoke_native_visible_mask(
 
 
 def _finite_real(value: object, name: str) -> float:
+    if type(value) is float:
+        if not math.isfinite(value):
+            raise ValueError(f"{name} must be finite")
+        return value
     if isinstance(value, bool) or not isinstance(value, Real):
         raise TypeError(f"{name} must be a real number")
     try:
@@ -167,12 +171,15 @@ def _projection_points(points: Iterable[tuple[float, float]]) -> tuple[tuple[flo
         raise TypeError("points must be an iterable of coordinate pairs") from error
     normalized: list[tuple[float, float]] = []
     for index, point in enumerate(iterator):
-        if isinstance(point, (str, bytes)) or not isinstance(point, Sequence):
-            raise TypeError(f"points[{index}] must be a numeric coordinate pair")
-        try:
-            coordinates = tuple(point)
-        except TypeError as error:
-            raise TypeError(f"points[{index}] must be a numeric coordinate pair") from error
+        if type(point) is tuple:
+            coordinates = point
+        else:
+            if isinstance(point, (str, bytes)) or not isinstance(point, Sequence):
+                raise TypeError(f"points[{index}] must be a numeric coordinate pair")
+            try:
+                coordinates = tuple(point)
+            except TypeError as error:
+                raise TypeError(f"points[{index}] must be a numeric coordinate pair") from error
         if len(coordinates) != 2:
             raise ValueError(f"points[{index}] must contain exactly two coordinates")
         normalized.append(

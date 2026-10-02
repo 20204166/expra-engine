@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 
+import expra_engine.runtime.transform_interpolation as interpolation_module
 from expra_engine.core.component import TransformComponent
 from expra_engine.core.engine import Engine, EngineRunState
 from expra_engine.core.scene import Scene
@@ -48,6 +51,23 @@ def test_fixed_update_flows_through_interpolation_into_render_extraction() -> No
     )
 
     assert frame.items[0].transform.position == pytest.approx((5.0, 0.0, 0.0))
+
+
+def test_unchanged_scene_capture_reuses_the_existing_transform_snapshot() -> None:
+    scene = Scene("static")
+    entity = scene.create_entity("static", entity_id="static")
+    entity.add_component(TransformComponent(x=3.0, y=4.0))
+    interpolator = interpolation_module.TransformInterpolator()
+    interpolator.capture_scene(scene)
+
+    with patch.object(
+        interpolation_module,
+        "Transform",
+        side_effect=AssertionError("unchanged transforms must not be reconstructed"),
+    ):
+        interpolator.capture_scene(scene)
+
+    assert interpolator.sample_world("static", 1.0).position == (3.0, 4.0, 0.0)
 
 
 def test_interpolation_state_is_runtime_only_and_stop_start_resets_history() -> None:

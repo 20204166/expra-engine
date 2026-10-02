@@ -137,7 +137,7 @@ def resolve_canvas_modulation(
     selected: tuple[str, CanvasModulateComponent] | None = None
     duplicates = 0
 
-    for entity in scene.entities:
+    for entity in scene.iter_entities_by_component(CanvasModulateComponent):
         if eligible_ids is not None and entity.entity_id not in eligible_ids:
             continue
         if not entity.enabled:

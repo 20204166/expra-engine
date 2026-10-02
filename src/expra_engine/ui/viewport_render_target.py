@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
-from dataclasses import dataclass, replace
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from expra_engine.core.component import TransformComponent
 from expra_engine.core.scene import Scene
-from expra_engine.observability import ObservabilityWatcher
+from expra_engine.core.spatial_index import SpatialIndex2D
+from expra_engine.observability import ObservabilityWatcher, observe_stage
 from expra_engine.runtime.animated_sprite_2d import (
     AnimatedSprite2DComponent,
     AnimatedSpritePlayer2D,
@@ -22,6 +23,7 @@ from expra_engine.runtime.rendering import (
     RenderFrame,
     RenderItem,
     Viewport,
+    _world_query_bounds,
 )
 from expra_engine.runtime.screen_texture import RenderEffect
 
@@ -40,6 +42,25 @@ class ColliderOutline:
     position: tuple[float, float]
     is_area: bool = False
 
+    @property
+    def world_bounds(self) -> tuple[float, float, float, float]:
+        if self.outline["shape"] == "circle":
+            radius = float(self.outline["radius"])
+            return (
+                self.position[0] - radius,
+                self.position[1] - radius,
+                self.position[0] + radius,
+                self.position[1] + radius,
+            )
+        half_width = float(self.outline["width"]) / 2.0
+        half_height = float(self.outline["height"]) / 2.0
+        return (
+            self.position[0] - half_width,
+            self.position[1] - half_height,
+            self.position[0] + half_width,
+            self.position[1] + half_height,
+        )
+
 
 @dataclass(frozen=True)
 class EditorRenderTarget:
@@ -51,6 +72,46 @@ class EditorRenderTarget:
     colliders: tuple[ColliderOutline, ...] = ()
     unsupported_effects: tuple[str, ...] = ()
     render_context: RenderContext | None = None
+    collider_spatial_index: SpatialIndex2D[int] | None = field(
+        default=None, repr=False, compare=False
+    )
+    collider_ordinals_by_id: dict[str, int] = field(
+        default_factory=dict, repr=False, compare=False
+    )
+
+    def visible_colliders(
+        self, position_overrides: Mapping[str, tuple[float, float]] | None = None
+    ) -> tuple[ColliderOutline, ...]:
+        if not self.colliders:
+            return ()
+        if self.render_context is None:
+            return self.colliders
+        index = self.collider_spatial_index
+        if index is None:
+            index = SpatialIndex2D(
+                (ordinal, collider.world_bounds)
+                for ordinal, collider in enumerate(self.colliders)
+            )
+            object.__setattr__(self, "collider_spatial_index", index)
+            object.__setattr__(
+                self,
+                "collider_ordinals_by_id",
+                {collider.entity_id: ordinal for ordinal, collider in enumerate(self.colliders)},
+            )
+        ordinals = set(index.query(_world_query_bounds(self.render_context, 1.0, 0.0)))
+        if position_overrides:
+            ordinals.update(
+                ordinal
+                for entity_id in position_overrides
+                if (ordinal := self.collider_ordinals_by_id.get(entity_id)) is not None
+            )
+        return tuple(
+            replace(collider, position=position_overrides[collider.entity_id])
+            if position_overrides is not None and collider.entity_id in position_overrides
+            else collider
+            for ordinal in sorted(ordinals)
+            for collider in (self.colliders[ordinal],)
+        )
 
 
 def _render_context(
@@ -87,6 +148,7 @@ def reproject_editor_render_target(
     camera: Any | None = None,
     resolved_camera: OrthographicCamera | None = None,
     observer: ObservabilityWatcher | None = None,
+    preview_items: Mapping[str, tuple[RenderItem, ...]] | None = None,
 ) -> EditorRenderTarget:
     """Refresh view-dependent clipping while reusing scene-derived frame data."""
     if scene is None:
@@ -96,12 +158,16 @@ def reproject_editor_render_target(
         return replace(target, items=(), selected_id=None, render_context=None)
     plan_token = observer.begin("render:plan") if observer is not None else None
     try:
-        items = target.frame.visible_items(context)
+        with observe_stage(observer, "editor.viewport.visibility_selection"):
+            items, candidate_count = target.frame._visible_items_with_candidate_count(
+                context, preview_items
+            )
     finally:
         if observer is not None and plan_token is not None:
             observer.finish(plan_token)
     if observer is not None:
         observer.increment("render:plan", "items_visible", len(items))
+        observer.increment("render:plan", "spatial_candidates", candidate_count)
     return replace(target, items=items, render_context=context)
 
 
@@ -151,12 +217,14 @@ def build_editor_render_target(
         return EditorRenderTarget(frame, (), None, unsupported_effects=unsupported_effects)
     plan_token = observer.begin("render:plan") if observer is not None else None
     try:
-        items = frame.visible_items(context)
+        with observe_stage(observer, "editor.viewport.visibility_selection"):
+            items, candidate_count = frame._visible_items_with_candidate_count(context)
     finally:
         if observer is not None and plan_token is not None:
             observer.finish(plan_token)
     if observer is not None:
         observer.increment("render:plan", "items_visible", len(items))
+        observer.increment("render:plan", "spatial_candidates", candidate_count)
     entity_ids = {entity.entity_id for entity in scene.entities}
     colliders: list[ColliderOutline] = []
     for entity in scene.entities:
@@ -171,11 +239,17 @@ def build_editor_render_target(
                     is_area=entity.get_component(AreaComponent) is not None,
                 )
             )
+    collider_tuple = tuple(colliders)
+    collider_index = SpatialIndex2D(
+        (index, collider.world_bounds) for index, collider in enumerate(collider_tuple)
+    )
     return EditorRenderTarget(
         frame,
         items,
         selected_id if selected_id in entity_ids else None,
-        tuple(colliders),
+        collider_tuple,
         unsupported_effects,
         context,
+        collider_index,
+        {collider.entity_id: index for index, collider in enumerate(collider_tuple)},
     )

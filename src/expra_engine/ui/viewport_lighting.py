@@ -41,12 +41,40 @@ def update_light_gizmo(
             for item in current.items:
                 canvas.delete(item)
         ids = [
-            canvas.create_oval(0, 0, 0, 0, fill="", outline=colors["accent"], dash=(4, 3)),
-            canvas.create_oval(0, 0, 0, 0, fill=colors["accent"], outline=colors["accent_ink"]),
+            canvas.create_oval(
+                0,
+                0,
+                0,
+                0,
+                fill="",
+                outline=colors["accent"],
+                dash=(4, 3),
+                tags="light_gizmo",
+                world_layer=True,
+            ),
+            canvas.create_oval(
+                0,
+                0,
+                0,
+                0,
+                fill=colors["accent"],
+                outline=colors["accent_ink"],
+                tags="light_gizmo",
+                world_layer=True,
+            ),
         ]
         if light.kind == "spot":
             ids.extend(
-                canvas.create_line(0, 0, 0, 0, fill=colors["accent"], dash=(4, 3))
+                canvas.create_line(
+                    0,
+                    0,
+                    0,
+                    0,
+                    fill=colors["accent"],
+                    dash=(4, 3),
+                    tags="light_gizmo",
+                    world_layer=True,
+                )
                 for _ in range(2)
             )
         current = LightGizmo(entity.entity_id, light.kind, tuple(ids))

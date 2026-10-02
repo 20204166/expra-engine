@@ -85,6 +85,7 @@ class SpatialEditController:
         get_selected_ids: Callable[[], Sequence[str]],
         push_command: Callable[[Command], None],
         request_redraw: Callable[[], None],
+        on_transform_preview: Callable[[tuple[str, ...]], None] | None = None,
     ) -> None:
         self._camera = camera
         self._canvas = canvas
@@ -92,6 +93,7 @@ class SpatialEditController:
         self._get_selected_ids = get_selected_ids
         self._push_command = push_command
         self._request_redraw = request_redraw
+        self._on_transform_preview = on_transform_preview
 
         self.grid_snap_enabled = False
         self.grid_size = 1.0
@@ -178,6 +180,8 @@ class SpatialEditController:
             self._apply_rotate(scene, screen)
         elif self._mode == "scale":
             self._apply_scale(scene, screen)
+        if self._on_transform_preview is not None:
+            self._on_transform_preview(tuple(self._originals))
         self._request_redraw()
 
     def end_drag(self) -> None:
@@ -201,6 +205,8 @@ class SpatialEditController:
             if commands:
                 command = commands[0] if len(commands) == 1 else CompositeCommand(commands)
                 self._push_command(command)
+        if self._on_transform_preview is not None:
+            self._on_transform_preview(tuple(self._originals))
         self._reset_drag_state()
         self._request_redraw()
 
@@ -215,6 +221,8 @@ class SpatialEditController:
                 entity = scene.find_entity(eid)
                 if entity is not None:
                     _write_transform(entity, old)
+        if self._on_transform_preview is not None:
+            self._on_transform_preview(tuple(self._originals))
         self._reset_drag_state()
         self._request_redraw()
 

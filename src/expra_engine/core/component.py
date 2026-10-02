@@ -6,6 +6,7 @@ through the action boundary; they never mutate themselves.
 
 from __future__ import annotations
 
+import weakref
 from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
@@ -33,6 +34,25 @@ class Component:
 
     def __init__(self, *, enabled: bool = True) -> None:
         self.enabled = enabled
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        object.__setattr__(self, name, value)
+        owners = self.__dict__.get("_entity_owners")
+        if owners and not name.startswith("_"):
+            for entity in owners:
+                entity._component_changed(self)
+
+    def _add_entity_owner(self, entity: Any) -> None:
+        owners = self.__dict__.get("_entity_owners")
+        if owners is None:
+            owners = weakref.WeakSet()
+            object.__setattr__(self, "_entity_owners", owners)
+        owners.add(entity)
+
+    def _remove_entity_owner(self, entity: Any) -> None:
+        owners = self.__dict__.get("_entity_owners")
+        if owners is not None:
+            owners.discard(entity)
 
     def to_dict(self) -> dict[str, Any]:
         return {"type": self.component_type, "enabled": self.enabled}

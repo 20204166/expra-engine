@@ -13,9 +13,12 @@ from expra_engine.runtime.render_pipeline import (
     RenderPlanBuilder,
 )
 from expra_engine.runtime.rendering import (
+    OrthographicCamera,
+    RenderContext,
     RenderFrame,
     RenderPhase,
     Transform,
+    Viewport,
 )
 from expra_engine.runtime.screen_texture import (
     BackBufferCopyMode,
@@ -67,6 +70,58 @@ def test_render_order_key_matches_frame_ordered_items():
     ]
 
     assert plan_order == frame_order
+
+
+def test_plain_frame_plan_uses_indexed_visible_items_without_scanning_submissions(monkeypatch):
+    import expra_engine.runtime.render_pipeline as render_pipeline
+
+    items = tuple(
+        item(f"item-{index}", position=(float(index * 4), 0.0, 0.0))
+        for index in range(1000)
+    )
+    frame = RenderFrame(items)
+    context = RenderContext(Viewport(0, 0, 800, 600), OrthographicCamera(width=20.0, height=15.0))
+    calls = 0
+    original = RenderFrame.visible_items
+
+    def counted(render_frame, render_context):
+        nonlocal calls
+        calls += 1
+        return original(render_frame, render_context)
+
+    def unexpected_scan(*_args, **_kwargs):
+        pytest.fail("plain-frame planning must use the indexed frame visibility query")
+
+    monkeypatch.setattr(RenderFrame, "visible_items", counted)
+    monkeypatch.setattr(render_pipeline, "filter_visible_items", unexpected_scan)
+
+    plan = RenderPlanBuilder.from_frame(frame, context)
+
+    visible_keys = tuple(operation.item.key for operation in plan.operations)
+    assert calls == 1
+    assert visible_keys == tuple(item.key for item in original(frame, context))
+
+
+def test_plain_frame_plan_preserves_canonical_order_for_prefiltered_items(monkeypatch):
+    import expra_engine.runtime.render_pipeline as render_pipeline
+
+    items = tuple(
+        item(f"item-{index}", position=(float(index * 4), 0.0, 0.0))
+        for index in range(1000)
+    )
+    frame = RenderFrame(items)
+    context = RenderContext(Viewport(0, 0, 800, 600), OrthographicCamera(width=20.0, height=15.0))
+    visible = frame.visible_items(context)
+
+    def unexpected_scan(*_args, **_kwargs):
+        pytest.fail("prefiltered plain-frame planning must not scan the full frame")
+
+    monkeypatch.setattr(render_pipeline, "filter_visible_items", unexpected_scan)
+
+    plan = RenderPlanBuilder.from_frame(frame, context, visible_items=tuple(reversed(visible)))
+
+    planned_keys = tuple(operation.item.key for operation in plan.operations)
+    assert planned_keys == tuple(item.key for item in visible)
 
 
 def test_immutable_render_frame_reuses_its_ordered_item_tuple(monkeypatch):

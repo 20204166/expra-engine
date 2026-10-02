@@ -4,7 +4,8 @@ from expra_engine.core.component import TransformComponent
 from expra_engine.core.entity import Entity
 from expra_engine.core.scene import Level
 from expra_engine.runtime.level_anchor import LevelAnchorComponent
-from expra_engine.ui.viewport_markers import draw_entity_markers
+from expra_engine.ui.viewport_camera import ViewportCamera
+from expra_engine.ui.viewport_markers import draw_entity_markers, prepare_entity_markers
 
 
 class RecordingCanvas:
@@ -132,3 +133,79 @@ def test_marker_drawing_projects_all_needed_points_in_one_camera_batch() -> None
     )
 
     assert camera.batches == [((2.0, 3.0), (-4.0, 5.0))]
+
+
+def test_marker_spatial_query_is_bounded_and_keeps_a_long_visible_label() -> None:
+    scene = Level("Large marker field")
+    for index in range(5000):
+        entity = scene.create_entity(f"Marker {index}")
+        entity.add_component(
+            TransformComponent(x=float(index % 100) * 4.0, y=float(index // 100) * 4.0)
+        )
+    long_label = scene.create_entity("L" * 1000)
+    long_label.add_component(TransformComponent(x=100.0, y=0.0))
+    far_away = scene.create_entity("Far away")
+    far_away.add_component(TransformComponent(x=10000.0, y=10000.0))
+    camera = ViewportCamera(viewport=(800, 600))
+
+    marker_frame = prepare_entity_markers(
+        scene,
+        set(),
+        measure_text=lambda text, _font: (max(map(len, text.splitlines())) * 8.0, 20.0),
+        camera=camera,
+        viewport=(800, 600),
+    )
+
+    visible_candidates = marker_frame.visible_candidates(camera, (800, 600))
+    candidate_ids = {marker.entity.entity_id for marker in visible_candidates}
+
+    assert len(visible_candidates) < 500
+    assert long_label.entity_id in candidate_ids
+    assert far_away.entity_id not in candidate_ids
+
+
+def test_marker_frame_queries_only_local_candidates_at_50k_scale() -> None:
+    scene = Level("50k marker field")
+    for index in range(12500):
+        entity = scene.create_entity(f"Marker {index}")
+        entity.add_component(
+            TransformComponent(x=float(index % 200) - 100.0, y=float(index // 200) - 25.0)
+        )
+    camera = ViewportCamera(viewport=(800, 600))
+
+    marker_frame = prepare_entity_markers(
+        scene,
+        set(),
+        measure_text=lambda text, _font: (max(map(len, text.splitlines())) * 8.0, 20.0),
+        camera=camera,
+        viewport=(800, 600),
+    )
+
+    candidates = marker_frame.visible_candidates(camera, (800, 600))
+
+    assert marker_frame.index.entry_count == 12500
+    assert len(candidates) < 1000
+
+
+def test_marker_frame_updates_only_a_changed_entity_spatial_entry() -> None:
+    scene = Level("Dirty marker update")
+    moved = scene.create_entity("Moved", entity_id="moved")
+    transform = TransformComponent(x=100.0, y=0.0)
+    moved.add_component(transform)
+    stable = scene.create_entity("Stable", entity_id="stable")
+    stable.add_component(TransformComponent(x=1000.0, y=0.0))
+    camera = ViewportCamera(viewport=(800, 600))
+    marker_frame = prepare_entity_markers(
+        scene, set(), camera=camera, viewport=(800, 600)
+    )
+    before = {marker.entity.entity_id for marker in marker_frame.visible_candidates(camera, (800, 600))}
+    index = marker_frame.index
+
+    transform.x = 0.0
+    marker_frame.update_entity_positions((moved.entity_id,))
+
+    after = {marker.entity.entity_id for marker in marker_frame.visible_candidates(camera, (800, 600))}
+    assert marker_frame.index is index
+    assert moved.entity_id not in before
+    assert moved.entity_id in after
+    assert stable.entity_id not in after

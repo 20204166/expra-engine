@@ -23,6 +23,8 @@ def draw_camera_overlay(
     frame_color: str,
     limit_color: str,
     target_color: str,
+    *,
+    created_items: list[int] | None = None,
 ) -> None:
     """Draw the scene's configured camera frame/limits/follow-target, if any."""
     if scene is None or not scene.camera:
@@ -32,6 +34,10 @@ def draw_camera_overlay(
         probe.apply_dict(scene.camera)
     except (TypeError, ValueError):
         return
+
+    def record(item_id: int) -> None:
+        if created_items is not None:
+            created_items.append(item_id)
 
     cx, cy = probe.position
     half_w, half_h = probe.width / 2.0, probe.height / 2.0
@@ -43,20 +49,32 @@ def draw_camera_overlay(
         (cx - half_w, cy + half_h),
     ):
         screen_corners.extend(editor_camera.project(point))
-    canvas.create_polygon(
-        *screen_corners,
-        outline=frame_color,
-        fill="",
-        dash=(6, 3),
-        width=2,
-        tags="camera_overlay",
+    record(
+        canvas.create_polygon(
+            *screen_corners,
+            outline=frame_color,
+            fill="",
+            dash=(6, 3),
+            width=2,
+            tags="camera_overlay",
+            world_layer=True,
+        )
     )
 
     if probe.limit_enabled:
         lx0, ly0 = editor_camera.project((probe.limit_left, probe.limit_bottom))
         lx1, ly1 = editor_camera.project((probe.limit_right, probe.limit_top))
-        canvas.create_rectangle(
-            lx0, ly0, lx1, ly1, outline=limit_color, dash=(2, 4), tags="camera_overlay"
+        record(
+            canvas.create_rectangle(
+                lx0,
+                ly0,
+                lx1,
+                ly1,
+                outline=limit_color,
+                dash=(2, 4),
+                tags="camera_overlay",
+                world_layer=True,
+            )
         )
 
     target_entity_id = scene.camera.target_entity_id
@@ -66,6 +84,15 @@ def draw_camera_overlay(
         if transform is not None:
             tx, ty = editor_camera.project((transform.x, transform.y))
             fx, fy = editor_camera.project((cx, cy))
-            canvas.create_line(
-                fx, fy, tx, ty, fill=target_color, dash=(3, 3), tags="camera_overlay"
+            record(
+                canvas.create_line(
+                    fx,
+                    fy,
+                    tx,
+                    ty,
+                    fill=target_color,
+                    dash=(3, 3),
+                    tags="camera_overlay",
+                    world_layer=True,
+                )
             )

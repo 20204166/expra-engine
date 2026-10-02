@@ -383,7 +383,12 @@ def render_editor_frame_to_pixel_image(
                 diagnostics=diagnostics,
                 entity_names=entity_names,
             )
-        return None
+            return None
+
+        def missing_resource_provider(_texture_id: str) -> None:
+            return None
+
+        provider = missing_resource_provider
     if not frame_textures_available(
         frame,
         context,
@@ -549,13 +554,28 @@ class EditorPixelRenderer:
         visible_items: tuple[RenderItem, ...] | None = None,
     ) -> Any | None:
         try:
+            if self._resource_service is None and not (
+                frame.lighting_enabled and frame.lights
+            ):
+                visible = (
+                    frame.visible_items(editor_render_context(editor_camera, width, height))
+                    if visible_items is None
+                    else visible_items
+                )
+                if any(_texture_id_for_item(item) is not None for item in visible):
+                    _log_presentation_failure(
+                        frame,
+                        "renderer has no resource provider",
+                        diagnostics=self._diagnostics,
+                        entity_names=entity_names,
+                    )
+                return self._last_image
+
             import pygame  # type: ignore[reportMissingImports]
 
             if self._lighting_pass is None or self._lighting_pass.pygame is not pygame:
                 self._lighting_pass = PygameLightingPass(pygame)
-            if self._normal_map_cache is None and any(
-                item.material.normal_map is not None for item in frame.items
-            ):
+            if self._normal_map_cache is None and frame.has_normal_maps:
                 self._normal_map_cache = PygameNormalMapCache(pygame)
 
             if (

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable, Mapping
 
 from expra_engine.core.component import TransformComponent
 from expra_engine.core.entity import Entity
 from expra_engine.core.scene import Scene
+from expra_engine.core.spatial_index import SpatialIndex2D
 from expra_engine.runtime.animated_sprite_2d import (
     AnimatedSprite2DComponent,
     AnimatedSpritePlayer2D,
@@ -23,6 +25,7 @@ from expra_engine.runtime.rendering import (
     MaterialDescriptor,
     NormalMapDescriptor,
     PrimitiveDescriptor,
+    RenderContext,
     RenderFrame,
     RenderItem,
     RenderPhase,
@@ -45,8 +48,9 @@ from expra_engine.runtime.visual_components import (
     TextComponent,
 )
 
-__all__ = ("extract_render_frame",)
+__all__ = ("RuntimeRenderFrameCache", "extract_render_frame")
 
+_MISSING_SIGNATURE = object()
 
 def _transform(
     scene: Scene,
@@ -89,6 +93,75 @@ def _local_transform(
     )
 
 
+def _world_view_bounds(context: RenderContext) -> tuple[float, float, float, float]:
+    viewport = context.viewport
+    corners = (
+        context.camera.unproject((viewport.x, viewport.y), viewport),
+        context.camera.unproject((viewport.right, viewport.y), viewport),
+        context.camera.unproject((viewport.right, viewport.bottom), viewport),
+        context.camera.unproject((viewport.x, viewport.bottom), viewport),
+    )
+    return (
+        min(point[0] for point in corners),
+        min(point[1] for point in corners),
+        max(point[0] for point in corners),
+        max(point[1] for point in corners),
+    )
+
+
+def _visual_bound_radius(
+    visual: object,
+    transform: Transform,
+    player: AnimatedSpritePlayer2D | None,
+) -> float | None:
+    """Return a conservative world-space radius, or None when unbounded."""
+    scale_x, scale_y = abs(transform.scale[0]), abs(transform.scale[1])
+    scale_max = max(scale_x, scale_y)
+    if isinstance(visual, PrimitiveComponent):
+        if visual.kind in {"polygon", "line"}:
+            points = visual.points
+            if points is None:
+                return None
+            radius = max(math.hypot(x * scale_x, y * scale_y) for x, y in points)
+            if visual.kind == "line":
+                radius += visual.thickness * scale_max / 2.0
+            else:
+                radius += max(0.5, visual.outline_width / 2.0) * scale_max
+            return radius
+        if visual.kind == "circle":
+            return max(visual.radius or 0.0, visual.width / 2.0, visual.height / 2.0) * scale_max
+        return math.hypot(visual.width * scale_x / 2.0, visual.height * scale_y / 2.0)
+    if isinstance(visual, SpriteComponent):
+        radius = math.hypot(visual.width * scale_x / 2.0, visual.height * scale_y / 2.0)
+        offset_x, offset_y = visual.offset
+        radius += math.hypot(offset_x * scale_x, offset_y * scale_y)
+        return radius * (2.0 if not visual.centered else 1.0)
+    if isinstance(visual, AnimatedSprite2DComponent):
+        if player is None or player.view is None:
+            return None
+        view = player.view
+        radius = math.hypot(scale_x / 2.0, scale_y / 2.0)
+        offset_x, offset_y = view.offset
+        radius += math.hypot(offset_x * scale_x, offset_y * scale_y)
+        return radius * (2.0 if not view.centered else 1.0)
+    # Text glyph bounds depend on the selected backend font and are not known here.
+    return None
+
+
+def _outside_world_view(
+    transform: Transform,
+    radius: float | None,
+    view_bounds: tuple[float, float, float, float] | None,
+) -> bool:
+    if radius is None or view_bounds is None or not math.isfinite(radius):
+        return False
+    left, top, right, bottom = view_bounds
+    center_x, center_y = transform.position[:2]
+    nearest_x = min(max(center_x, left), right)
+    nearest_y = min(max(center_y, top), bottom)
+    return (center_x - nearest_x) ** 2 + (center_y - nearest_y) ** 2 > radius**2
+
+
 def _mount_transforms(
     scene: Scene,
     interpolator: TransformInterpolator | None,
@@ -102,19 +175,32 @@ def _mount_transforms(
     every visual descendant.
     """
     mounts: dict[str, tuple[Entity, CameraMountComponent, Transform]] = {}
-    for entity in scene.walk_hierarchy():
+    for entity in scene.iter_entities_by_component(CameraMountComponent):
         component = entity.get_component(CameraMountComponent)
-        if component is not None and component.enabled:
-            mounts[entity.entity_id] = (entity, component, Transform())
+        if component is None or not component.enabled:
             continue
-        if entity.parent_id is None:
-            continue
-        parent_mount = mounts.get(entity.parent_id)
-        if parent_mount is None:
-            continue
-        root, mount, parent_transform = parent_mount
-        local = _local_transform(entity, interpolator, interpolation_fraction)
-        mounts[entity.entity_id] = (root, mount, parent_transform.compose(local))
+        mounts[entity.entity_id] = (entity, component, Transform())
+        for descendant in scene.walk_hierarchy(entity.entity_id)[1:]:
+            nested_mount = descendant.get_component(CameraMountComponent)
+            if nested_mount is not None and nested_mount.enabled:
+                mounts[descendant.entity_id] = (
+                    descendant,
+                    nested_mount,
+                    Transform(),
+                )
+                continue
+            if descendant.parent_id is None:
+                continue
+            parent_mount = mounts.get(descendant.parent_id)
+            if parent_mount is None:
+                continue
+            root, inherited_mount, parent_transform = parent_mount
+            local = _local_transform(descendant, interpolator, interpolation_fraction)
+            mounts[descendant.entity_id] = (
+                root,
+                inherited_mount,
+                parent_transform.compose(local),
+            )
     return mounts
 
 
@@ -273,6 +359,8 @@ def extract_render_frame(
     animated_players: Mapping[AnimatedSprite2DComponent, AnimatedSpritePlayer2D] | None = None,
     modulation_entity_ids: Iterable[str] | None = None,
     primary_level_entity_ids: Iterable[str] | None = None,
+    visibility_context: RenderContext | None = None,
+    entity_ids: Iterable[str] | None = None,
 ) -> RenderFrame:
     """Convert registered scene visuals into backend-neutral render data."""
     items: list[RenderItem] = []
@@ -287,7 +375,17 @@ def extract_render_frame(
     )
     camera_lighting_enabled = scene.camera.get("lighting_enabled", True)
     lighting_enabled = camera_lighting_enabled if type(camera_lighting_enabled) is bool else True
-    for entity in scene.entities:
+    view_bounds = _world_view_bounds(visibility_context) if visibility_context is not None else None
+    entities = (
+        scene.iter_entities()
+        if entity_ids is None
+        else (
+            entity
+            for entity_id in entity_ids
+            if (entity := scene.find_entity(entity_id)) is not None
+        )
+    )
+    for entity in entities:
         if not entity.enabled:
             continue
         mount = mounted_transforms.get(entity.entity_id)
@@ -354,14 +452,24 @@ def extract_render_frame(
             ):
                 if not visual.enabled or not visual.visible:
                     continue
+                player = (
+                    animated_players.get(visual)
+                    if animated_players and isinstance(visual, AnimatedSprite2DComponent)
+                    else None
+                )
+                if render_space is RenderSpace.WORLD and world_transform is not None:
+                    try:
+                        bound_radius = _visual_bound_radius(visual, world_transform, player)
+                    except (TypeError, ValueError, OverflowError):
+                        bound_radius = None
+                    if _outside_world_view(world_transform, bound_radius, view_bounds):
+                        continue
                 try:
                     item = _item(
                         entity,
                         visual,
                         render_transform,
-                        animated_players.get(visual)
-                        if animated_players and isinstance(visual, AnimatedSprite2DComponent)
-                        else None,
+                        player,
                         (
                             material.response
                             if (material := entity.get_component(MaterialComponent)) is not None
@@ -440,3 +548,120 @@ def extract_render_frame(
         lights=tuple(lights),
         lighting_enabled=lighting_enabled,
     )
+
+
+class RuntimeRenderFrameCache:
+    """Reuse static render descriptors and spatial bounds across runtime frames."""
+
+    def __init__(self) -> None:
+        self._scene: Scene | None = None
+        self._index: SpatialIndex2D[str] | None = None
+        self._always_entity_ids: set[str] = set()
+        self._dynamic_entity_ids: set[str] = set()
+        self._primary_level_ids: frozenset[str] | None = None
+
+    def clear(self) -> None:
+        self._scene = None
+        self._index = None
+        self._always_entity_ids.clear()
+        self._dynamic_entity_ids.clear()
+        self._primary_level_ids = None
+
+    def extract(
+        self,
+        scene: Scene,
+        *,
+        context: RenderContext | None,
+        elapsed: float = 0.0,
+        interpolator: TransformInterpolator | None = None,
+        interpolation_fraction: float = 0.0,
+        animated_players: Mapping[AnimatedSprite2DComponent, AnimatedSpritePlayer2D]
+        | None = None,
+        modulation_entity_ids: Iterable[str] | None = None,
+        primary_level_entity_ids: Iterable[str] | None = None,
+    ) -> RenderFrame:
+        options = {
+            "elapsed": elapsed,
+            "interpolator": interpolator,
+            "interpolation_fraction": interpolation_fraction,
+            "animated_players": animated_players,
+            "modulation_entity_ids": modulation_entity_ids,
+            "primary_level_entity_ids": primary_level_entity_ids,
+        }
+        if context is None:
+            return extract_render_frame(scene, **options)
+        if scene is not self._scene or self._index is None:
+            self.clear()
+            self._scene = scene
+            frame = extract_render_frame(scene, **options)
+            self._build_index(frame)
+            scene._take_render_entity_ids()
+            if interpolator is not None:
+                self._dynamic_entity_ids.update(interpolator.dynamic_entity_ids)
+            self._primary_level_ids = (
+                frozenset(primary_level_entity_ids)
+                if primary_level_entity_ids is not None
+                else None
+            )
+            return frame
+
+        for entity_id in scene._take_render_entity_ids():
+            self._add_dynamic_subtree(scene, entity_id)
+        if interpolator is not None:
+            for entity_id in interpolator.dynamic_entity_ids:
+                self._add_dynamic_subtree(scene, entity_id)
+        current_primary_ids = (
+            frozenset(primary_level_entity_ids)
+            if primary_level_entity_ids is not None
+            else None
+        )
+        if current_primary_ids != self._primary_level_ids:
+            for entity in scene.iter_entities_by_component(CameraMountComponent):
+                self._add_dynamic_subtree(scene, entity.entity_id)
+            self._primary_level_ids = current_primary_ids
+        for entity_id in tuple(self._dynamic_entity_ids):
+            if scene.find_entity(entity_id) is None:
+                self._dynamic_entity_ids.discard(entity_id)
+
+        candidate_ids = set(self._index.query(_world_view_bounds(context)))
+        candidate_ids.update(self._always_entity_ids)
+        candidate_ids.update(self._dynamic_entity_ids)
+        entities = [
+            entity
+            for entity_id in candidate_ids
+            if (entity := scene.find_entity(entity_id)) is not None
+        ]
+        entities.sort(key=scene.entity_order)
+        return extract_render_frame(
+            scene,
+            **options,
+            visibility_context=context,
+            entity_ids=(entity.entity_id for entity in entities),
+        )
+
+    def _build_index(self, frame: RenderFrame) -> None:
+        entries: list[tuple[str, tuple[float, float, float, float]]] = []
+        for item in frame.items:
+            if item.space is RenderSpace.VIEWPORT or item.text is not None:
+                self._always_entity_ids.add(item.key)
+                continue
+            bounds = item.world_bounds()
+            if bounds is None:
+                self._always_entity_ids.add(item.key)
+            else:
+                entries.append((item.key, bounds))
+        for light in frame.lights:
+            self._always_entity_ids.add(light.entity_id)
+        for submission in frame.submissions:
+            if isinstance(submission, RenderEffect):
+                self._always_entity_ids.add(submission.request.entity_id)
+        self._index = SpatialIndex2D(entries)
+
+    def _add_dynamic_subtree(self, scene: Scene, entity_id: str) -> None:
+        entity = scene.find_entity(entity_id)
+        if entity is None:
+            self._dynamic_entity_ids.discard(entity_id)
+            return
+        self._dynamic_entity_ids.add(entity_id)
+        for descendant in scene.walk_hierarchy(entity_id)[1:]:
+            self._dynamic_entity_ids.add(descendant.entity_id)

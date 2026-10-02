@@ -24,6 +24,7 @@ from PySide6.QtGui import (
     QBrush,
     QColor,
     QFont,
+    QFontMetricsF,
     QPainterPath,
     QPen,
     QPixmap,
@@ -34,6 +35,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QGraphicsEllipseItem,
     QGraphicsItem,
+    QGraphicsItemGroup,
     QGraphicsPathItem,
     QGraphicsPixmapItem,
     QGraphicsPolygonItem,
@@ -42,6 +44,8 @@ from PySide6.QtWidgets import (
     QGraphicsSimpleTextItem,
     QGraphicsView,
 )
+
+from expra_engine.observability import ObservabilityWatcher, observe_stage
 
 _SHIFT_BIT = 0x0001
 _CONTROL_BIT = 0x0004
@@ -167,10 +171,22 @@ def _tags(value: Any) -> tuple[str, ...]:
 class QtCanvas(QGraphicsView):
     """Canvas-shaped drawing surface on a QGraphicsScene."""
 
-    def __init__(self, parent: Any = None, *, bg: str = "#000000") -> None:
+    def __init__(
+        self,
+        parent: Any = None,
+        *,
+        bg: str = "#000000",
+        observer: ObservabilityWatcher | None = None,
+    ) -> None:
         super().__init__(parent)
+        self._observer = observer
         self._qscene = QGraphicsScene(self)
         self.setScene(self._qscene)
+        self._world_group = QGraphicsItemGroup()
+        self._world_group.setZValue(0.0)
+        self._qscene.addItem(self._world_group)
+        self._world_group_offset = (0.0, 0.0)
+        self._paint_event_count = 0
         self.setFrameShape(QFrame.Shape.NoFrame)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -181,30 +197,105 @@ class QtCanvas(QGraphicsView):
         self._items: dict[int, QGraphicsItem] = {}
         self._item_tags: dict[int, tuple[str, ...]] = {}
         self._item_meta: dict[int, dict[str, Any]] = {}
+        self._world_layer_ids: set[int] = set()
         self._next_id = 1
         self._z = 0
         self._bindings: list[_Binding] = []
         self._tag_bindings: dict[str, list[_Binding]] = {}
         self._held_buttons: set[int] = set()
         self._last_pos = QPointF(0, 0)
+        self._operation_metrics: dict[str, int] | None = None
         self.on_resize: Callable[[], None] | None = None
         self._resize_pending = False
+
+    def paintEvent(self, event: Any) -> None:
+        self._paint_event_count += 1
+        with observe_stage(self._observer, "editor.viewport.qt_paint"):
+            super().paintEvent(event)
+
+    @property
+    def paint_event_count(self) -> int:
+        return self._paint_event_count
+
+    def start_operation_metrics(self) -> None:
+        """Enable bounded mutation counts for a focused editor benchmark."""
+        self._operation_metrics = {
+            "created": 0,
+            "coordinate_updates": 0,
+            "style_updates": 0,
+            "deleted": 0,
+            "z_updates": 0,
+            "world_group_transforms": 0,
+            "touched": 0,
+        }
+
+    def take_operation_metrics(self) -> dict[str, int]:
+        """Return and reset current Qt-item operation counts."""
+        metrics = self._operation_metrics
+        if metrics is None:
+            return {}
+        snapshot = dict(metrics)
+        for name in metrics:
+            metrics[name] = 0
+        return snapshot
+
+    def _count_item_operation(self, name: str, amount: int = 1) -> None:
+        metrics = self._operation_metrics
+        if metrics is not None:
+            metrics[name] += amount
+            metrics["touched"] += amount
 
     # ------------------------------------------------------------------
     # Item creation
     # ------------------------------------------------------------------
 
-    def _register(self, item: QGraphicsItem, tags: Any, meta: dict[str, Any]) -> int:
+    def _register(
+        self,
+        item: QGraphicsItem,
+        tags: Any,
+        meta: dict[str, Any],
+        *,
+        world_layer: bool = False,
+    ) -> int:
         item_id = self._next_id
         self._next_id += 1
         self._z += 1
         item.setZValue(self._z)
-        self._qscene.addItem(item)
+        item_tags = _tags(tags)
+        if world_layer:
+            self._world_group.addToGroup(item)
+            self._world_layer_ids.add(item_id)
+        else:
+            self._qscene.addItem(item)
         item.setData(0, item_id)
         self._items[item_id] = item
-        self._item_tags[item_id] = _tags(tags)
+        self._item_tags[item_id] = item_tags
         self._item_meta[item_id] = meta
+        self._count_item_operation("created")
         return item_id
+
+    def translate_world_group(self, dx: float, dy: float) -> None:
+        """Move retained world-space editor graphics with one Qt layer transform."""
+        x = self._world_group_offset[0] + dx
+        y = self._world_group_offset[1] + dy
+        self._world_group_offset = (x, y)
+        self._world_group.setPos(x, y)
+        self._count_item_operation("world_group_transforms")
+
+    def reset_world_group(self) -> None:
+        """Reset the retained world layer before a non-translation transform."""
+        self._world_group_offset = (0.0, 0.0)
+        self._world_group.setPos(0.0, 0.0)
+        self._count_item_operation("world_group_transforms")
+
+    @staticmethod
+    def _map_points(item: QGraphicsItem, coordinates: tuple[float, ...], *, to_scene: bool) -> tuple[float, ...]:
+        mapper = item.mapToScene if to_scene else item.mapFromScene
+        values: list[float] = []
+        for index in range(0, len(coordinates) - 1, 2):
+            point = mapper(QPointF(coordinates[index], coordinates[index + 1]))
+            values.extend((point.x(), point.y()))
+        return tuple(values)
 
     def _style_shape(self, item: QAbstractGraphicsShapeItem, options: dict[str, Any]) -> None:
         fill = options.get("fill", "")
@@ -230,24 +321,45 @@ class QtCanvas(QGraphicsView):
             item.setPen(pen)
 
     def create_rectangle(self, x0: float, y0: float, x1: float, y1: float, **options: Any) -> int:
+        world_layer = bool(options.pop("world_layer", False))
         item = QGraphicsRectItem(QRectF(QPointF(x0, y0), QPointF(x1, y1)).normalized())
         self._style_shape(item, options)
-        return self._register(item, options.get("tags"), {"kind": "rectangle", "opts": options})
+        return self._register(
+            item,
+            options.get("tags"),
+            {"kind": "rectangle", "opts": options},
+            world_layer=world_layer,
+        )
 
     def create_oval(self, x0: float, y0: float, x1: float, y1: float, **options: Any) -> int:
+        world_layer = bool(options.pop("world_layer", False))
         item = QGraphicsEllipseItem(QRectF(QPointF(x0, y0), QPointF(x1, y1)).normalized())
         self._style_shape(item, options)
-        return self._register(item, options.get("tags"), {"kind": "oval", "opts": options})
+        return self._register(
+            item,
+            options.get("tags"),
+            {"kind": "oval", "opts": options},
+            world_layer=world_layer,
+        )
 
     def create_polygon(self, *coords: float, **options: Any) -> int:
+        world_layer = bool(options.pop("world_layer", False))
         item = QGraphicsPolygonItem(QPolygonF(self._points(coords)))
         self._style_shape(item, options)
-        return self._register(item, options.get("tags"), {"kind": "polygon", "opts": options})
+        return self._register(
+            item,
+            options.get("tags"),
+            {"kind": "polygon", "opts": options},
+            world_layer=world_layer,
+        )
 
     def create_line(self, *coords: float, **options: Any) -> int:
+        world_layer = bool(options.pop("world_layer", False))
         item = QGraphicsPathItem()
         meta = {"kind": "line", "opts": options, "coords": tuple(coords)}
-        item_id = self._register(item, options.get("tags"), meta)
+        item_id = self._register(item, options.get("tags"), meta, world_layer=world_layer)
+        if item_id in self._world_layer_ids:
+            meta["coords"] = self._map_points(item, tuple(coords), to_scene=False)
         self._style_line(item, options)
         self._set_line_path(item, meta)
         return item_id
@@ -288,6 +400,7 @@ class QtCanvas(QGraphicsView):
             )
 
     def create_text(self, x: float, y: float, **options: Any) -> int:
+        world_layer = bool(options.pop("world_layer", False))
         item = QGraphicsSimpleTextItem(str(options.get("text", "")))
         meta = {
             "kind": "text",
@@ -295,15 +408,18 @@ class QtCanvas(QGraphicsView):
             "anchor_xy": (float(x), float(y)),
             "anchor": options.get("anchor", "center"),
         }
-        item_id = self._register(item, options.get("tags"), meta)
+        item_id = self._register(item, options.get("tags"), meta, world_layer=world_layer)
+        if item_id in self._world_layer_ids:
+            meta["anchor_xy"] = (
+                float(x) - self._world_group_offset[0],
+                float(y) - self._world_group_offset[1],
+            )
         self._style_text(item, options)
         self._place_text(item, meta)
         return item_id
 
-    def _style_text(self, item: QGraphicsSimpleTextItem, options: dict[str, Any]) -> None:
-        color = _color(options.get("fill", "#000000")) or QColor("#000000")
-        item.setBrush(QBrush(color))
-        font = options.get("font")
+    @staticmethod
+    def _text_font(font: Any) -> QFont:
         qfont = QFont()
         if isinstance(font, (tuple, list)) and font:
             family = str(font[0])
@@ -313,6 +429,19 @@ class QtCanvas(QGraphicsView):
                 qfont.setPointSize(abs(int(font[1])))
             if any(str(part) == "bold" for part in font[2:]):
                 qfont.setBold(True)
+        return qfont
+
+    def measure_text(self, text: str, font: tuple[str, int]) -> tuple[float, float]:
+        """Return conservative bounds for the same font used by create_text."""
+        metrics = QFontMetricsF(self._text_font(font))
+        lines = text.splitlines() or [""]
+        width = max(metrics.horizontalAdvance(line) for line in lines)
+        return float(width + 4.0), float(metrics.lineSpacing() * len(lines) + 4.0)
+
+    def _style_text(self, item: QGraphicsSimpleTextItem, options: dict[str, Any]) -> None:
+        color = _color(options.get("fill", "#000000")) or QColor("#000000")
+        item.setBrush(QBrush(color))
+        qfont = self._text_font(options.get("font"))
         item.setFont(qfont)
 
     def _place_text(self, item: QGraphicsSimpleTextItem, meta: dict[str, Any]) -> None:
@@ -386,8 +515,10 @@ class QtCanvas(QGraphicsView):
                 item = self._items.pop(item_id, None)
                 self._item_tags.pop(item_id, None)
                 self._item_meta.pop(item_id, None)
+                self._world_layer_ids.discard(item_id)
                 if item is not None:
                     self._qscene.removeItem(item)
+                    self._count_item_operation("deleted")
 
     def coords(self, spec: Any, *values: float) -> list[float] | None:
         ids = self._resolve(spec)
@@ -398,7 +529,24 @@ class QtCanvas(QGraphicsView):
         meta = self._item_meta[item_id]
         kind = meta["kind"]
         if not values:
-            return self._read_coords(item, meta)
+            coordinates = self._read_coords(item, meta)
+            if item_id in self._world_layer_ids:
+                if kind == "text":
+                    return [
+                        coordinates[0] + self._world_group_offset[0],
+                        coordinates[1] + self._world_group_offset[1],
+                    ]
+                return list(self._map_points(item, tuple(coordinates), to_scene=True))
+            return coordinates
+        self._count_item_operation("coordinate_updates")
+        if item_id in self._world_layer_ids:
+            if kind == "text":
+                values = (
+                    values[0] - self._world_group_offset[0],
+                    values[1] - self._world_group_offset[1],
+                )
+            else:
+                values = self._map_points(item, tuple(values), to_scene=False)
         if kind in {"rectangle", "oval"}:
             item.setRect(QRectF(QPointF(values[0], values[1]), QPointF(values[2], values[3])).normalized())  # type: ignore[attr-defined]
         elif kind == "polygon":
@@ -433,6 +581,7 @@ class QtCanvas(QGraphicsView):
     itemconfig = itemconfigure
 
     def _configure_item(self, item_id: int, options: dict[str, Any]) -> None:
+        self._count_item_operation("style_updates")
         item = self._items[item_id]
         meta = self._item_meta[item_id]
         kind = meta["kind"]
@@ -468,12 +617,15 @@ class QtCanvas(QGraphicsView):
         return self._item_meta[ids[0]]["opts"].get(option, "")
 
     def tag_raise(self, tag: Any) -> None:
-        for item_id in sorted(self._resolve(tag), key=lambda i: self._items[i].zValue()):
+        ids = sorted(self._resolve(tag), key=lambda i: self._items[i].zValue())
+        self._count_item_operation("z_updates", len(ids))
+        for item_id in ids:
             self._z += 1
             self._items[item_id].setZValue(self._z)
 
     def tag_lower(self, tag: Any) -> None:
         ids = sorted(self._resolve(tag), key=lambda i: self._items[i].zValue(), reverse=True)
+        self._count_item_operation("z_updates", len(ids))
         low = min((it.zValue() for it in self._items.values()), default=0.0)
         for offset, item_id in enumerate(ids, start=1):
             self._items[item_id].setZValue(low - offset)

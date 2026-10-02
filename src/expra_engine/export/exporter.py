@@ -269,6 +269,7 @@ _RUNTIME_CORE_MODULES = (
     "entity.py",
     "errors.py",
     "math_utils.py",
+    "spatial_index.py",
     "project.py",
     "persistence.py",
     "safe_expression.py",

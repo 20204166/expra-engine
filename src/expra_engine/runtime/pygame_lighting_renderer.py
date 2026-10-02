@@ -26,11 +26,7 @@ from expra_engine.runtime.rendering import RenderFrame as ContractRenderFrame
 class PygameLightingRenderMixin:
     @staticmethod
     def _material_lighting_active(frame: ContractRenderFrame) -> bool:
-        configured = tuple(
-            item.material.light_response
-            for item in frame.items
-            if item.material.light_response is not None
-        )
+        configured = frame.material_light_responses
         if not configured:
             return False
         default = MaterialLightResponse()

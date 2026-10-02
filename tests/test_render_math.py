@@ -55,9 +55,10 @@ def test_render_frame_visibility_calls_native_once_for_the_whole_batch(monkeypat
 
     def visible_mask(records, points, camera, viewport):
         calls.append((records, points, camera, viewport))
-        return [True, False]
+        return [True] * (len(records) // 21)
 
     monkeypatch.setattr(render_math, "_native_module", SimpleNamespace(visible_mask=visible_mask))
+    monkeypatch.setattr(render_math, "_native_disabled", False)
     frame = _frame()
     context = RenderContext(Viewport(0, 0, 200, 100), OrthographicCamera())
 
@@ -65,7 +66,7 @@ def test_render_frame_visibility_calls_native_once_for_the_whole_batch(monkeypat
 
     assert len(calls) == 1
     assert tuple(item.key for item in visible) == ("visible",)
-    assert len(calls[0][0]) == 21 * len(frame.items)
+    assert len(calls[0][0]) == 21
 
 
 def test_broken_optional_native_bridge_falls_back_to_python(monkeypatch, caplog) -> None:

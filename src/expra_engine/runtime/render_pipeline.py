@@ -18,8 +18,8 @@ compilation, render servers, framebuffers, or a second renderer.
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Iterable, TypeAlias
 
 from expra_engine.runtime.render_math import visible_items as filter_visible_items
 from expra_engine.runtime.rendering import (
@@ -68,7 +68,7 @@ class RenderOrder:
             raise ValueError("insertion_index must be non-negative")
 
     @classmethod
-    def from_item(cls, item: RenderItem, insertion_index: int) -> "RenderOrder":
+    def from_item(cls, item: RenderItem, insertion_index: int) -> RenderOrder:
         if not isinstance(item, RenderItem):
             raise TypeError("item must be RenderItem")
         return cls(*render_item_order_key(item, insertion_index))
@@ -80,7 +80,7 @@ class RenderOrder:
         layer: int,
         transform: Transform,
         insertion_index: int,
-    ) -> "RenderOrder":
+    ) -> RenderOrder:
         if not isinstance(phase, RenderPhase):
             raise TypeError("phase must be RenderPhase")
         if not isinstance(transform, Transform):
@@ -121,7 +121,7 @@ class DrawScreenTextureOp:
     request: ScreenTextureDrawRequest
 
 
-RenderOperation: TypeAlias = (
+type RenderOperation = (
     DrawItemOp | CaptureScreenOp | GenerateScreenMipmapsOp | DrawScreenTextureOp
 )
 
@@ -176,7 +176,7 @@ class RenderPlan:
         return tuple(seen)
 
 
-_PendingOperation: TypeAlias = DrawItemOp | CaptureScreenOp | DrawScreenTextureOp
+type _PendingOperation = DrawItemOp | CaptureScreenOp | DrawScreenTextureOp
 
 
 class RenderPlanBuilder:
@@ -209,6 +209,16 @@ class RenderPlanBuilder:
     ) -> RenderPlan:
         """Convert a frame's ordered neutral submissions into a render plan."""
         builder = cls()
+        if not frame.submissions:
+            if visible_items is None:
+                items = frame.visible_items(context) if context is not None else frame.ordered_items()
+                builder.extend_items(items)
+            else:
+                visible_ids = {id(item) for item in visible_items}
+                for insertion_index, item in frame._items_for_identities(visible_ids):
+                    builder.add_item(item, insertion_index=insertion_index)
+            return builder.build()
+
         submissions = frame.submissions or frame.items
         if visible_items is None and context is not None:
             candidates = list(frame.items)

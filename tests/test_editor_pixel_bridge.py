@@ -84,6 +84,39 @@ def test_pixel_layer_holds_the_rendered_pixels(tmp_path) -> None:
         pygame.quit()
 
 
+def test_pixel_renderer_without_resources_skips_frames_without_textures(monkeypatch) -> None:
+    import expra_engine.ui.editor_pixel_renderer as editor_pixel_renderer
+    from expra_engine.ui.viewport_camera import ViewportCamera
+
+    scene = Scene("Geometry fallback")
+    entity = scene.create_entity("Box")
+    entity.add_component(TransformComponent())
+    entity.add_component(PrimitiveComponent())
+    frame = extract_render_frame(scene)
+    bridge_calls = 0
+
+    def unexpected_bridge(*_args, **_kwargs):
+        nonlocal bridge_calls
+        bridge_calls += 1
+        return None
+
+    monkeypatch.setattr(
+        editor_pixel_renderer, "render_editor_frame_to_pixel_image", unexpected_bridge
+    )
+    renderer = EditorPixelRenderer(image_factory=lambda _image: None)
+
+    result = renderer.render(
+        frame,
+        ViewportCamera(viewport=(WIDTH, HEIGHT)),
+        WIDTH,
+        HEIGHT,
+        visible_items=frame.items,
+    )
+
+    assert result is None
+    assert bridge_calls == 0
+
+
 def test_editor_pixel_bridge_culls_each_item_once(monkeypatch) -> None:
     pygame = pytest.importorskip("pygame")
     from expra_engine.runtime import render_math

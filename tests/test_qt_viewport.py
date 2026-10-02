@@ -8,6 +8,7 @@ canvas item stream, selection callbacks and camera state.
 from __future__ import annotations
 
 import math
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -15,7 +16,8 @@ import pytest
 from expra_engine.core.component import TransformComponent
 from expra_engine.core.scene import Scene
 from expra_engine.core.world import LevelDescriptor, World
-from expra_engine.observability import ObservabilityWatcher
+from expra_engine.observability import ObservabilityWatcher, observe_stage
+from expra_engine.runtime.collider import ColliderComponent
 from expra_engine.runtime.visual_components import PrimitiveComponent, TextComponent
 from tests.support.qt_app import ensure_qt_app, pump_qt
 
@@ -27,6 +29,7 @@ class QtHarness:
         from expra_engine.editor.qt.viewport import ViewportPanel
 
         ensure_qt_app()
+        self._observer = callbacks.get("observer")
         self.panel = ViewportPanel(**callbacks)
         self.panel.resize(WIDTH, HEIGHT)
         self.panel.show()
@@ -36,6 +39,23 @@ class QtHarness:
 
     def pump(self) -> None:
         pump_qt(10)
+
+    def pump_until_painted(self, previous_paint_count: int) -> None:
+        """Drain the real Qt redraw/paint caused by a motion event without a timer floor."""
+        from PySide6.QtWidgets import QApplication
+
+        app = QApplication.instance()
+        assert app is not None
+        with observe_stage(self._observer, "editor.viewport.event_pump"):
+            for _ in range(64):
+                app.processEvents()
+                if (
+                    not self.panel._redraw_pending
+                    and not self.panel._target_dirty
+                    and self.canvas.paint_event_count > previous_paint_count
+                ):
+                    return
+        raise RuntimeError("Qt viewport did not finish and paint the motion before return")
 
     def close(self) -> None:
         self.panel.close()
@@ -51,6 +71,7 @@ class QtHarness:
         if state & 0x4:
             modifiers |= Qt.KeyboardModifier.ControlModifier
         viewport = self.canvas.viewport()
+        previous_paint_count = self.canvas.paint_event_count if action == "move" else 0
         if action == "press":
             QTest.mousePress(viewport, qbutton, modifiers, QPoint(x, y))
         elif action == "release":
@@ -69,7 +90,10 @@ class QtHarness:
                 modifiers,
             )
             QApplication.sendEvent(viewport, event)
-        self.pump()
+        if action == "move":
+            self.pump_until_painted(previous_paint_count)
+        else:
+            self.pump()
 
     def press(self, x: int, y: int, *, button: int = 1, state: int = 0) -> None:
         self._mouse("press", x, y, button, state)
@@ -420,6 +444,130 @@ def test_camera_motion_moves_retained_markers_without_restyling_them(
     assert style_calls == []
 
 
+def test_pure_pan_moves_retained_marker_layer_without_per_item_coordinate_writes(
+    make_harness, monkeypatch
+) -> None:
+    scene = Scene("Batched marker pan")
+    entity = scene.create_entity("Marker", entity_id="marker")
+    entity.add_component(TransformComponent(x=0.0, y=0.0))
+    h = make_harness()
+    h.panel.render(scene)
+    h.pump()
+    entry = h.panel._marker_entries[entity.entity_id]
+    previous = tuple(h.canvas.coords(entry.ids[0]))
+    coordinate_writes = []
+    original_coords = h.canvas.coords
+
+    def counted_coords(spec, *values):
+        if values:
+            coordinate_writes.append(spec)
+        return original_coords(spec, *values)
+
+    monkeypatch.setattr(h.canvas, "coords", counted_coords)
+    h.press(200, 200, button=2)
+    h.motion(203, 200, button=2)
+    h.release(203, 200, button=2)
+
+    assert tuple(h.canvas.coords(entry.ids[0])) != previous
+    assert not set(coordinate_writes).intersection(entry.ids)
+
+
+def test_pure_pan_retains_collider_overlay_geometry(make_harness, monkeypatch) -> None:
+    scene = Scene("Collider pan")
+    entity = scene.create_entity("Collider", entity_id="collider")
+    entity.add_component(TransformComponent())
+    entity.add_component(ColliderComponent(width=4.0, height=2.0))
+    h = make_harness()
+    h.panel.render(scene)
+    h.pump()
+    entry = h.panel._collider_overlay_entries[entity.entity_id]
+    previous = tuple(h.canvas.coords(entry.item_id))
+    coordinate_writes = []
+    original_coords = h.canvas.coords
+
+    def counted_coords(spec, *values):
+        if values:
+            coordinate_writes.append(spec)
+        return original_coords(spec, *values)
+
+    monkeypatch.setattr(h.canvas, "coords", counted_coords)
+    h.press(200, 200, button=2)
+    h.motion(203, 200, button=2)
+    h.release(203, 200, button=2)
+
+    assert tuple(h.canvas.coords(entry.item_id)) != previous
+    assert entry.item_id not in coordinate_writes
+
+
+def test_camera_pan_reuses_grid_items_instead_of_recreating_them(make_harness, monkeypatch) -> None:
+    h = make_harness()
+    h.panel.render(Scene("Grid retention"))
+    h.pump()
+    created = []
+    deleted = []
+    original_create_line = h.canvas.create_line
+    original_delete = h.canvas.delete
+
+    def counted_create_line(*args, **kwargs):
+        created.append(args)
+        return original_create_line(*args, **kwargs)
+
+    def counted_delete(*args, **kwargs):
+        deleted.append(args)
+        return original_delete(*args, **kwargs)
+
+    monkeypatch.setattr(h.canvas, "create_line", counted_create_line)
+    monkeypatch.setattr(h.canvas, "delete", counted_delete)
+
+    h.panel.pan(1.0, 0.0)
+
+    assert created == []
+    assert ("grid",) not in deleted
+
+
+def test_measured_pan_waits_for_paint_without_fixed_duration_pump(make_harness, monkeypatch) -> None:
+    import tests.test_qt_viewport as qt_viewport_tests
+
+    h = make_harness()
+    h.panel.render(Scene("Synchronous pan"))
+    h.pump()
+    h.press(200, 200, button=2)
+    previous_position = h.panel._camera.position
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(
+            qt_viewport_tests,
+            "pump_qt",
+            lambda *_args, **_kwargs: pytest.fail("pan completion must not wait on a fixed timer"),
+        )
+        h.motion(203, 200, button=2)
+
+    assert h.panel._camera.position != previous_position
+    assert h.panel._target_dirty is False
+    assert h.panel._redraw_pending is False
+    h.release(203, 200, button=2)
+
+
+def test_camera_pan_reuses_scene_entity_name_lookup(make_harness) -> None:
+    scene = Scene("Name lookup")
+    entity = scene.create_entity("Stable name")
+    h = make_harness()
+    h.panel.render(scene)
+    h.pump()
+    name_lookup = h.panel._entity_names
+
+    h.panel.pan(1.0, 0.0)
+
+    assert h.panel._entity_names is name_lookup
+    assert h.panel._entity_names[entity.entity_id] == "Stable name"
+
+    entity.name = "Renamed"
+    h.panel.render(scene)
+    h.pump()
+
+    assert h.panel._entity_names[entity.entity_id] == "Renamed"
+
+
 def test_offscreen_marker_skips_moves_until_it_can_enter_the_view(make_harness) -> None:
     scene = Scene("Offscreen marker")
     entity = scene.create_entity("Far Away", entity_id="far-away")
@@ -427,17 +575,30 @@ def test_offscreen_marker_skips_moves_until_it_can_enter_the_view(make_harness) 
     h = make_harness()
     h.panel.render(scene)
     h.pump()
-    entry = h.panel._marker_entries[entity.entity_id]
-    previous_coords = tuple(h.canvas.coords(entry.ids[0]))
+    assert entity.entity_id not in h.panel._marker_entries
 
     h.panel.pan(1.0, 0.0)
-    still_offscreen_coords = tuple(h.canvas.coords(entry.ids[0]))
+    assert entity.entity_id not in h.panel._marker_entries
     h.panel.pan(89.0, 0.0)
+    entry = h.panel._marker_entries[entity.entity_id]
     visible_coords = tuple(h.canvas.coords(entry.ids[0]))
 
-    assert still_offscreen_coords == previous_coords
-    assert visible_coords != previous_coords
     assert (visible_coords[0] + visible_coords[2]) / 2 == pytest.approx(WIDTH)
+
+
+def test_offscreen_visual_entity_is_not_represented_as_an_editor_marker(make_harness) -> None:
+    scene = Scene("Offscreen visual")
+    entity = scene.create_entity("Sprite", entity_id="offscreen-visual")
+    entity.add_component(TransformComponent(x=100.0, y=0.0))
+    entity.add_component(PrimitiveComponent("rectangle"))
+    h = make_harness()
+
+    h.panel.render(scene)
+    h.pump()
+
+    assert entity.entity_id in {item.key for item in h.panel._target.frame.items}
+    assert entity.entity_id not in {item.key for item in h.panel._target.items}
+    assert entity.entity_id not in h.panel._marker_entries
 
 
 def test_offscreen_marker_restyles_when_selection_changes(make_harness) -> None:
@@ -447,13 +608,72 @@ def test_offscreen_marker_restyles_when_selection_changes(make_harness) -> None:
     h = make_harness()
     h.panel.render(scene)
     h.pump()
-    entry = h.panel._marker_entries[entity.entity_id]
-    previous_fill = h.canvas.itemcget(entry.ids[0], "fill")
+    assert entity.entity_id not in h.panel._marker_entries
 
     h.panel.render(scene, entity.entity_id)
     h.pump()
+    assert entity.entity_id not in h.panel._marker_entries
 
-    assert h.canvas.itemcget(entry.ids[0], "fill") != previous_fill
+    h.panel.pan(90.0, 0.0)
+    entry = h.panel._marker_entries[entity.entity_id]
+    assert h.canvas.itemcget(entry.ids[0], "fill") == h.panel._colors["accent"]
+
+
+def test_transform_preview_updates_the_rendered_entity_and_spatial_candidate(make_harness) -> None:
+    scene = Scene("Transform preview")
+    entity = scene.create_entity("Box", entity_id="box")
+    transform = TransformComponent()
+    entity.add_component(transform)
+    entity.add_component(PrimitiveComponent("rectangle"))
+    h = make_harness()
+    h.panel.render(scene, entity.entity_id, selected_ids=frozenset({entity.entity_id}))
+    h.pump()
+    entry = h.panel._canvas_items[entity.entity_id]
+    previous = tuple(h.canvas.coords(entry.body))
+
+    h.panel._spatial_edit.begin_drag_on_entity(
+        entity.entity_id, SimpleNamespace(x=400.0, y=300.0, state=0)
+    )
+    h.panel._spatial_edit.continue_drag(SimpleNamespace(x=440.0, y=300.0, state=0))
+    h.pump()
+
+    assert transform.x == pytest.approx(1.0)
+    assert tuple(h.canvas.coords(entry.body)) != previous
+    assert entity.entity_id in {item.key for item in h.panel._target.items}
+
+
+def test_transform_preview_moves_offscreen_visuals_and_markers_across_spatial_cells(make_harness) -> None:
+    scene = Scene("Transform crosses visibility cells")
+    visual = scene.create_entity("Box", entity_id="box")
+    visual.add_component(TransformComponent(x=100.0, y=0.0))
+    visual.add_component(PrimitiveComponent("rectangle"))
+    marker = scene.create_entity("Marker", entity_id="marker")
+    marker.add_component(TransformComponent(x=100.0, y=0.0))
+    h = make_harness()
+    selected = frozenset({visual.entity_id, marker.entity_id})
+    h.panel.render(scene, visual.entity_id, selected_ids=selected)
+    h.pump()
+    assert visual.entity_id not in h.panel._canvas_items
+    assert marker.entity_id not in h.panel._marker_entries
+
+    h.panel._spatial_edit.begin_drag_on_entity(
+        visual.entity_id, SimpleNamespace(x=4400.0, y=300.0, state=0)
+    )
+    h.panel._spatial_edit.continue_drag(SimpleNamespace(x=400.0, y=300.0, state=0))
+    h.pump()
+
+    visual_transform = visual.get_component(TransformComponent)
+    assert visual_transform is not None
+    assert visual_transform.x == pytest.approx(0.0)
+    assert visual.entity_id in {item.key for item in h.panel._target.items}
+    assert visual.entity_id in h.panel._canvas_items
+    assert marker.entity_id in h.panel._marker_entries
+
+    h.panel._spatial_edit.cancel_drag()
+    h.pump()
+    assert visual.entity_id not in {item.key for item in h.panel._target.items}
+    assert visual.entity_id not in h.panel._canvas_items
+    assert marker.entity_id not in h.panel._marker_entries
 
 
 def test_camera_motion_updates_retained_visual_geometry_without_restyling(make_harness, monkeypatch) -> None:

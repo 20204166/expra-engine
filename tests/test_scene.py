@@ -7,6 +7,13 @@ from expra_engine.core.component import TransformComponent
 from expra_engine.core.entity import Entity
 from expra_engine.core.scene import Scene, SceneCamera
 from expra_engine.core.scene.camera import Camera2D
+from expra_engine.runtime.behaviour import Behaviour
+from expra_engine.runtime.visual_components import PrimitiveComponent
+
+
+class _AppendOnlyProbeList(list):
+    def __contains__(self, _item) -> bool:
+        raise AssertionError("component index append should not scan membership")
 
 
 class TestSceneBasics(unittest.TestCase):
@@ -27,6 +34,91 @@ class TestSceneBasics(unittest.TestCase):
         entity = scene.create_entity("Player")
         self.assertEqual(len(scene.entities), 1)
         self.assertEqual(entity.name, "Player")
+
+    def test_iter_entities_streams_in_scene_order(self) -> None:
+        scene = Scene("Test")
+        entities = [scene.create_entity(f"entity-{index}") for index in range(3)]
+
+        self.assertEqual(tuple(scene.iter_entities()), tuple(entities))
+
+    def test_component_index_tracks_mutations_and_preserves_scene_order(self) -> None:
+        scene = Scene("Test")
+        older = scene.create_entity("older")
+        newer = scene.create_entity("newer")
+        newer.add_component(TransformComponent())
+        older.add_component(TransformComponent())
+
+        self.assertEqual(
+            tuple(scene.iter_entities_by_component(TransformComponent)), (older, newer)
+        )
+        self.assertEqual(scene.get_entities_by_component(TransformComponent), (older, newer))
+
+        older_transform = older.get_component(TransformComponent)
+        assert older_transform is not None
+        older.remove_component(older_transform)
+        self.assertEqual(tuple(scene.iter_entities_by_component(TransformComponent)), (newer,))
+        self.assertTrue(scene.remove_entity(newer.entity_id))
+        self.assertEqual(tuple(scene.iter_entities_by_component(TransformComponent)), ())
+
+        prepopulated = Entity("prepopulated")
+        prepopulated.add_component(TransformComponent())
+        scene.add_entity(prepopulated)
+        self.assertEqual(tuple(scene.iter_entities_by_component(TransformComponent)), (prepopulated,))
+
+    def test_component_index_appends_new_scene_entities_without_list_membership_scans(self) -> None:
+        scene = Scene("Append-only component index")
+        first = scene.create_entity("first")
+        first.add_component(TransformComponent())
+        scene._component_entities[TransformComponent] = _AppendOnlyProbeList(
+            scene._component_entities[TransformComponent]
+        )
+        second = Entity("second")
+        second.add_component(TransformComponent())
+
+        scene.add_entity(second)
+
+        self.assertEqual(
+            tuple(scene.iter_entities_by_component(TransformComponent)), (first, second)
+        )
+
+    def test_runtime_event_targets_follow_behaviour_attachment(self) -> None:
+        scene = Scene("Test")
+        entity = scene.create_entity("listener")
+        self.assertEqual(scene._entities_for_event("on_update"), ())
+
+        class Listener(Behaviour):
+            pass
+
+        behaviour = Listener()
+        entity.add_behaviour(behaviour, runtime_factory=Listener)
+        self.assertEqual(scene._entities_for_event("on_update"), (entity,))
+        self.assertEqual(scene._entities_for_event("on_idle"), (entity,))
+
+        self.assertTrue(entity.remove_behaviour(behaviour))
+        self.assertEqual(scene._entities_for_event("on_update"), ())
+        self.assertEqual(scene._entities_for_event("on_idle"), ())
+
+    def test_runtime_event_targets_include_custom_entity_handlers(self) -> None:
+        class Listener(Entity):
+            def on_update(self, event, signal) -> None:
+                pass
+
+        scene = Scene("Test")
+        listener = Listener("custom")
+        scene.add_entity(listener)
+
+        self.assertEqual(scene._entities_for_event("on_update"), (listener,))
+
+    def test_component_and_entity_render_edits_mark_the_scene_dirty(self) -> None:
+        scene = Scene("Test")
+        entity = scene.create_entity("shape")
+        primitive = PrimitiveComponent("rectangle")
+        entity.add_component(primitive)
+        self.assertEqual(scene._take_render_entity_ids(), (entity.entity_id,))
+
+        primitive.width = 4.0
+        entity.enabled = False
+        self.assertEqual(scene._take_render_entity_ids(), (entity.entity_id,))
 
     def test_find_entity(self) -> None:
         scene = Scene("Test")
